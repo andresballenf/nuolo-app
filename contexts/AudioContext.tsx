@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Audio } from 'expo-audio';
+import { Audio } from 'expo-av';
 import { Alert } from 'react-native';
+import { TranscriptSegment } from '../services/AttractionInfoService';
 
 export interface AudioTrack {
   id: string;
@@ -44,6 +45,9 @@ export interface AudioState {
   // Progress
   position: number;
   duration: number;
+
+  // Transcript (timed segments)
+  transcriptSegments?: TranscriptSegment[];
 }
 
 export interface AudioActions {
@@ -109,6 +113,7 @@ const initialState: AudioState = {
   currentIndex: -1,
   position: 0,
   duration: 0,
+  transcriptSegments: undefined,
 };
 
 export function AudioProvider({ children }: { children: ReactNode }) {
@@ -223,6 +228,21 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       );
 
       soundRef.current = sound;
+
+      // Initialize duration/position immediately after loading
+      try {
+        const initialStatus = await sound.getStatusAsync();
+        if (initialStatus.isLoaded) {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            position: initialStatus.positionMillis || 0,
+            duration: initialStatus.durationMillis || 0,
+          }));
+        }
+      } catch (statusError) {
+        console.warn('Unable to get initial audio status after load:', statusError);
+      }
 
       // Set up audio completion handler
       sound.setOnPlaybackStatusUpdate((status) => {

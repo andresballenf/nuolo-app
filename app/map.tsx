@@ -13,8 +13,8 @@ import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAudio } from '../contexts/AudioContext';
 import { Button } from '../components/ui/Button';
 import { PointOfInterest } from '../services/GooglePlacesService';
-import { AttractionInfoService } from '../services/AttractionInfoService';
-import { useState, useCallback, useRef } from 'react';
+import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Text } from 'react-native';
 
 export default function MapScreen() {
@@ -36,6 +36,42 @@ export default function MapScreen() {
   const [attractionInfo, setAttractionInfo] = useState<string | null>(null);
   const [attractionAudio, setAttractionAudio] = useState<string | null>(null);
   const [isGeneratingInfo, setIsGeneratingInfo] = useState(false);
+  const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[] | undefined>(undefined);
+  
+  // Build proportional sentence/word timings for karaoke highlighting
+  function buildTranscriptSegments(text: string, durationMs: number): TranscriptSegment[] {
+    const sentences = text
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (!sentences.length || durationMs <= 0) return [];
+
+    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0) || 1;
+    let cursor = 0;
+
+    return sentences.map(s => {
+      const portion = s.length / totalChars;
+      const segDuration = portion * durationMs;
+      const startMs = Math.round(cursor);
+      const endMs = Math.round(cursor + segDuration);
+
+      const wordsRaw = s.split(/\s+/).filter(Boolean);
+      const wordsTotalChars = wordsRaw.reduce((sum, w) => sum + w.length, 0) || 1;
+      let wordCursor = startMs;
+      const words = wordsRaw.map((w, i) => {
+        const wordPortion = w.length / wordsTotalChars;
+        const wDur = wordPortion * (endMs - startMs);
+        const wStart = Math.round(wordCursor);
+        const wEnd = i === wordsRaw.length - 1 ? endMs : Math.round(wordCursor + wDur);
+        wordCursor += wDur;
+        return { text: w, startMs: wStart, endMs: wEnd };
+      });
+
+      cursor += segDuration;
+      return { text: s, startMs, endMs, words };
+    });
+  }
   
   // Material Bottom Sheet state
   const [sheetContentType, setSheetContentType] = useState<SheetContentType>('attractions');
@@ -43,7 +79,7 @@ export default function MapScreen() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   // Map controls state
-  const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('satellite');
+  const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
   const [mapTilt, setMapTilt] = useState(45);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -92,6 +128,7 @@ export default function MapScreen() {
     setSelectedAttractionIndex(index >= 0 ? index : 0);
     setAttractionInfo(null);
     setAttractionAudio(null);
+    setTranscriptSegments(undefined);
     
     // Switch to attraction detail view
     setSheetContentType('attraction-detail');
@@ -148,6 +185,7 @@ export default function MapScreen() {
     setSelectedAttractionIndex(index >= 0 ? index : 0);
     setAttractionInfo(null);
     setAttractionAudio(null);
+    setTranscriptSegments(undefined);
     
     // Switch to detail view
     setSheetContentType('attraction-detail');
@@ -270,7 +308,7 @@ export default function MapScreen() {
       console.log(`Generating text and audio for: ${attraction.name}`);
 
       // Single API call for both text and audio
-      const { text, audio } = await AttractionInfoService.generateTextAndAudio(
+      const { text, audio, transcriptSegments: segments } = await AttractionInfoService.generateTextAndAudio(
         attraction.name,
         attraction.description || 'Unknown location',
         currentLocation,
@@ -304,6 +342,7 @@ export default function MapScreen() {
       // Update local state for compatibility
       setAttractionInfo(text);
       setAttractionAudio(audio);
+      setTranscriptSegments(segments);
 
       console.log('Streamlined audio generation completed and started playing');
 
@@ -328,6 +367,16 @@ export default function MapScreen() {
       );
     }
   };
+
+  // If backend didn't return timings, generate client-side timings once duration is known
+  useEffect(() => {
+    if (audioContext.duration > 0 && attractionInfo) {
+      if (!transcriptSegments || transcriptSegments.length === 0) {
+        const built = buildTranscriptSegments(attractionInfo, audioContext.duration);
+        setTranscriptSegments(built);
+      }
+    }
+  }, [audioContext.duration, attractionInfo]);
 
   // Legacy function kept for compatibility (will be removed in Phase 4)
   const handleRequestAudio = async () => {
@@ -626,6 +675,7 @@ export default function MapScreen() {
         onPlaybackRateChange={audioContext.setPlaybackRate}
         position={audioContext.position}
         duration={audioContext.duration}
+        transcriptSegments={transcriptSegments}
       />
     </View>
   );

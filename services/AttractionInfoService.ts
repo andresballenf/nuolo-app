@@ -1,5 +1,19 @@
 import { supabase } from '../lib/supabase';
 
+// Timed transcript segment interface used for karaoke-style highlighting
+export interface TranscriptWordTiming {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface TranscriptSegment {
+  text: string;
+  startMs: number;
+  endMs: number;
+  words?: TranscriptWordTiming[];
+}
+
 interface UserLocation {
   lat: number;
   lng: number;
@@ -21,12 +35,19 @@ interface AttractionInfoRequest {
   testMode?: boolean;
   iosSafari?: boolean;
   existingText?: string;
+  // New optional fields to control backend model behavior
+  model?: string; // e.g. "gpt-5.0-turbo"
+  ttsModel?: string; // e.g. "tts-1-hd"
+  returnWordTimestamps?: boolean; // request sentence/word timings
 }
 
 interface AttractionInfoResponse {
   info?: string;
   audio?: string;
   error?: string;
+  transcriptSegments?: TranscriptSegment[];
+  modelUsed?: string;
+  voiceUsed?: string;
 }
 
 export class AttractionInfoService {
@@ -56,6 +77,9 @@ export class AttractionInfoService {
         testMode: options.testMode || false,
         iosSafari: false, // React Native doesn't need Safari-specific handling
         existingText: options.existingText,
+        model: 'gpt-5.0-turbo',
+        ttsModel: 'tts-1-hd',
+        returnWordTimestamps: true,
       };
 
       console.log('Calling attraction-info edge function with:', {
@@ -90,6 +114,9 @@ export class AttractionInfoService {
       return {
         info: data.info,
         audio: data.audio,
+        transcriptSegments: data.transcriptSegments,
+        modelUsed: data.modelUsed,
+        voiceUsed: data.voiceUsed,
       };
     } catch (error) {
       console.error('Error in generateAttractionInfo:', error);
@@ -181,7 +208,7 @@ export class AttractionInfoService {
     userLocation: UserLocation,
     preferences: UserPreferences,
     testMode: boolean = false
-  ): Promise<{ text: string; audio: string }> {
+  ): Promise<{ text: string; audio: string; transcriptSegments?: TranscriptSegment[] }> {
     const response = await this.generateAttractionInfo(
       attractionName,
       attractionAddress,
@@ -214,6 +241,44 @@ export class AttractionInfoService {
     return {
       text: response.info,
       audio: response.audio,
+      transcriptSegments: response.transcriptSegments,
+    };
+  }
+
+  /**
+   * Preferred helper: Generate narrative text, HD TTS audio, and timed transcript
+   */
+  static async generateNarrativeWithAudio(
+    attractionName: string,
+    attractionAddress: string,
+    userLocation: UserLocation,
+    preferences: UserPreferences,
+    testMode: boolean = false
+  ): Promise<{ text: string; audio: string; transcriptSegments?: TranscriptSegment[] }> {
+    const result = await this.generateAttractionInfo(
+      attractionName,
+      attractionAddress,
+      userLocation,
+      preferences,
+      {
+        generateAudio: true,
+        streamAudio: true,
+        testMode,
+      }
+    );
+
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    if (!result.info || !result.audio) {
+      throw new Error('Incomplete narrative generation response');
+    }
+
+    return {
+      text: result.info,
+      audio: result.audio,
+      transcriptSegments: result.transcriptSegments,
     };
   }
 

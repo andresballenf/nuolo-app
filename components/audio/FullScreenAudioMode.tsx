@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { AudioTrack } from '../../contexts/AudioContext';
+import { TranscriptSegment } from '../../services/AttractionInfoService';
 import * as Haptics from 'expo-haptics';
 
 interface FullScreenAudioModeProps {
@@ -32,6 +33,7 @@ interface FullScreenAudioModeProps {
   duration?: number;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
+  transcriptSegments?: TranscriptSegment[];
 }
 
 const { width, height } = Dimensions.get('window');
@@ -54,11 +56,59 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   duration = 0,
   playbackRate = 1.0,
   onPlaybackRateChange,
+  transcriptSegments = [],
 }) => {
   const [showVolumeControl, setShowVolumeControl] = useState(false);
   const [showSpeedControl, setShowSpeedControl] = useState(false);
   const [isDraggingScrubber, setIsDraggingScrubber] = useState(false);
   const [scrubberPosition, setScrubberPosition] = useState(0);
+  const transcriptScrollRef = useRef<ScrollView | null>(null);
+  const [showTranscript, setShowTranscript] = useState(true);
+
+  // Fallback: derive simple segments from description if backend didn't return timings
+  const derivedSegments: TranscriptSegment[] = useMemo(() => {
+    if (transcriptSegments && transcriptSegments.length > 0) return transcriptSegments;
+    if (!currentTrack?.description || duration <= 0) return [];
+    const sentences = currentTrack.description
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (sentences.length === 0) return [];
+    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0);
+    let cursor = 0;
+    return sentences.map(s => {
+      const portion = s.length / Math.max(1, totalChars);
+      const segDuration = portion * duration;
+      const seg: TranscriptSegment = {
+        text: s,
+        startMs: Math.round(cursor),
+        endMs: Math.round(cursor + segDuration),
+      };
+      cursor += segDuration;
+      return seg;
+    });
+  }, [transcriptSegments, currentTrack?.description, duration]);
+
+  // Compute active transcript segment index based on current playback position
+  const activeSegmentIndex = useMemo(() => {
+    const segments = derivedSegments;
+    if (!segments || segments.length === 0) return -1;
+    const idx = segments.findIndex(seg => position >= seg.startMs && position < seg.endMs);
+    if (idx >= 0) return idx;
+    if (position >= (segments[segments.length - 1]?.endMs || 0)) return segments.length - 1;
+    return 0;
+  }, [position, derivedSegments]);
+
+  // Auto-scroll transcript on active segment change
+  useEffect(() => {
+    if (!transcriptScrollRef.current) return;
+    if (activeSegmentIndex < 0) return;
+    // Estimate row height and scroll accordingly; RN doesn't support measuring offscreen easily
+    // Use a rowHeight guess with padding
+    const rowHeight = 52;
+    const y = Math.max(0, activeSegmentIndex * rowHeight - rowHeight * 2);
+    transcriptScrollRef.current.scrollTo({ y, animated: true });
+  }, [activeSegmentIndex]);
 
   // Playback speed options
   const speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -136,16 +186,29 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.menuButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowVolumeControl(!showVolumeControl);
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <MaterialIcons name="more-vert" size={24} color="#ffffff" />
-          </TouchableOpacity>
+          <View style={styles.headerButtonsRow}>
+            <TouchableOpacity
+              style={styles.headerIconButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowTranscript(prev => !prev);
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialIcons name={showTranscript ? 'subtitles' : 'subtitles-off'} size={22} color="#ffffff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.headerIconButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowVolumeControl(!showVolumeControl);
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialIcons name="more-vert" size={22} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Main content */}
@@ -357,12 +420,47 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
             </View>
           )}
 
-          {/* Description */}
-          {currentTrack.description && (
-            <View style={styles.descriptionSection}>
-              <Text style={styles.descriptionTitle}>About this audio guide</Text>
-              <Text style={styles.descriptionText}>{currentTrack.description}</Text>
+          {/* Transcript with karaoke-style highlighting */}
+          {showTranscript && derivedSegments && derivedSegments.length > 0 ? (
+            <View style={styles.transcriptSection}>
+              <Text style={styles.transcriptTitle}>Guide Transcript</Text>
+              <ScrollView ref={transcriptScrollRef} style={styles.transcriptScroll} showsVerticalScrollIndicator={false}>
+                {derivedSegments.map((seg, index) => {
+                  const isActive = index === activeSegmentIndex;
+                  // If word-level timings exist, render per-word highlighting
+                  if (seg.words && seg.words.length > 0) {
+                    const activeWordIndex = seg.words.findIndex(w => position >= w.startMs && position < w.endMs);
+                    return (
+                      <Text key={`${seg.startMs}-${index}`} style={[styles.transcriptLine, isActive && styles.transcriptLineActive]}>
+                        {seg.words.map((w, wi) => {
+                          const isWordActive = wi === activeWordIndex && isActive;
+                          return (
+                            <Text key={`${seg.startMs}-${wi}`} style={isWordActive ? styles.transcriptWordActive : undefined}>
+                              {w.text}
+                              {/* Add space after each word if not present */}
+                              {w.text.match(/\s$/) ? '' : ' '}
+                            </Text>
+                          );
+                        })}
+                      </Text>
+                    );
+                  }
+                  // Fallback: segment-level highlighting
+                  return (
+                    <Text key={`${seg.startMs}-${index}`} style={[styles.transcriptLine, isActive && styles.transcriptLineActive]}>
+                      {seg.text}
+                    </Text>
+                  );
+                })}
+              </ScrollView>
             </View>
+          ) : (
+            currentTrack.description && (
+              <View style={styles.descriptionSection}>
+                <Text style={styles.descriptionTitle}>About this audio guide</Text>
+                <Text style={styles.descriptionText}>{currentTrack.description}</Text>
+              </View>
+            )
           )}
         </ScrollView>
       </SafeAreaView>
@@ -397,6 +495,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 16,
   },
+  headerButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerSubtitle: {
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.7)',
@@ -412,6 +515,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -655,6 +766,38 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 40,
+  },
+  transcriptSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 40,
+  },
+  transcriptTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 12,
+  },
+  transcriptScroll: {
+    maxHeight: 260,
+  },
+  transcriptLine: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+    lineHeight: 24,
+    paddingVertical: 6,
+  },
+  transcriptLineActive: {
+    color: '#ffffff',
+    backgroundColor: 'rgba(132, 204, 22, 0.15)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+  },
+  transcriptWordActive: {
+    color: '#ffffff',
+    backgroundColor: 'rgba(132, 204, 22, 0.35)',
+    borderRadius: 4,
   },
   descriptionTitle: {
     fontSize: 18,

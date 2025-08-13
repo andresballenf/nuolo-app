@@ -91,9 +91,7 @@ export const CustomMarker: React.FC<CustomMarkerProps> = ({
       </View>
     </Marker>
   );
-};
-
-const styles = StyleSheet.create({
+};const styles = StyleSheet.create({
   markerContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -114,3 +112,4 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
 });
+
