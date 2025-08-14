@@ -3,7 +3,7 @@ import { Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { AccessibilityInfo } from 'react-native';
 
-export type SheetState = 'hidden' | 'peek' | 'half' | 'expanded' | 'full';
+export type SheetState = 'hidden' | 'collapsed' | 'half' | 'expanded';
 export type SheetContentType = 'attractions' | 'settings' | 'profile' | 'attraction-detail';
 
 interface UseBottomSheetOptions {
@@ -42,10 +42,9 @@ const SCREEN_HEIGHT = require('react-native').Dimensions.get('window').height;
 // Sheet height percentages
 const SHEET_HEIGHTS = {
   HIDDEN: 0,
-  PEEK: 0.1,      // 10% - Shows title only
-  HALF: 0.4,      // 40% - List view
-  EXPANDED: 0.7,  // 70% - Preview with content
-  FULL: 0.9,      // 90% - Full content with text guide
+  COLLAPSED: 0.4,  // 40% - Default view
+  HALF: 0.6,       // 60% - Medium expansion
+  EXPANDED: 0.8,   // 80% - Full expansion
 };
 
 export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSheetReturn {
@@ -69,14 +68,12 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
     switch (state) {
       case 'hidden':
         return SCREEN_HEIGHT;
-      case 'peek':
-        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.PEEK);
+      case 'collapsed':
+        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.COLLAPSED);
       case 'half':
         return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.HALF);
       case 'expanded':
         return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.EXPANDED);
-      case 'full':
-        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.FULL);
       default:
         return SCREEN_HEIGHT;
     }
@@ -88,8 +85,6 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
     
     if (newState === 'hidden') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (newState === 'full') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -99,10 +94,9 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
   const announceStateChange = useCallback((state: SheetState) => {
     const announcements: Record<SheetState, string> = {
       hidden: 'Bottom sheet closed',
-      peek: 'Bottom sheet minimized',
-      half: 'Bottom sheet opened to half screen',
-      expanded: 'Bottom sheet expanded',
-      full: 'Bottom sheet opened to full screen',
+      collapsed: 'Bottom sheet opened',
+      half: 'Bottom sheet expanded to half screen',
+      expanded: 'Bottom sheet fully expanded',
     };
     
     AccessibilityInfo.announceForAccessibility(announcements[state]);
@@ -146,19 +140,19 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
     onContentTypeChange?.(type);
     
     // Auto-adjust state based on content type
-    if (type === 'attraction-detail' && state === 'peek') {
-      animateToState('expanded');
-    } else if (type === 'attractions' && state === 'expanded') {
-      animateToState('half');
-    } else if ((type === 'settings' || type === 'profile') && state !== 'half') {
-      animateToState('half');
+    if (type === 'attraction-detail' && state !== 'collapsed') {
+      animateToState('collapsed');
+    } else if (type === 'attractions' && state === 'hidden') {
+      animateToState('collapsed');
+    } else if ((type === 'settings' || type === 'profile') && state === 'hidden') {
+      animateToState('collapsed');
     }
   }, [state, animateToState, onContentTypeChange]);
 
   // Show/hide helpers
   const show = useCallback(() => {
     if (state === 'hidden') {
-      animateToState('peek');
+      animateToState('collapsed');
     }
   }, [state, animateToState]);
 
@@ -169,13 +163,11 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
   // Toggle state helper
   const toggleState = useCallback(() => {
     if (state === 'hidden') {
-      animateToState('peek');
-    } else if (state === 'peek') {
+      animateToState('collapsed');
+    } else if (state === 'collapsed') {
       animateToState('half');
     } else if (state === 'half') {
       animateToState('expanded');
-    } else if (state === 'expanded') {
-      animateToState('full');
     } else {
       animateToState('hidden');
     }
@@ -184,22 +176,22 @@ export function useBottomSheet(options: UseBottomSheetOptions = {}): UseBottomSh
   // Navigation helpers
   const goToAttractionsList = useCallback(() => {
     setContentType('attractions');
-    animateToState('half');
+    animateToState('collapsed');
   }, [setContentType, animateToState]);
 
   const goToAttractionDetail = useCallback(() => {
     setContentType('attraction-detail');
-    animateToState('expanded');
+    animateToState('collapsed');
   }, [setContentType, animateToState]);
 
   const goToSettings = useCallback(() => {
     setContentType('settings');
-    animateToState('half');
+    animateToState('collapsed');
   }, [setContentType, animateToState]);
 
   const goToProfile = useCallback(() => {
     setContentType('profile');
-    animateToState('half');
+    animateToState('collapsed');
   }, [setContentType, animateToState]);
 
   return {

@@ -9,9 +9,9 @@ import {
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 interface SettingsContentProps {
-  mapType: 'standard' | 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid';
   mapTilt: number;
-  onMapTypeChange: (type: 'standard' | 'satellite' | 'hybrid') => void;
+  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
   onMapTiltChange: (tilt: number) => void;
   onClose?: () => void;
 }
@@ -23,8 +23,7 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
   onMapTiltChange,
   onClose,
 }) => {
-  const mapTypes: Array<{ type: 'standard' | 'satellite' | 'hybrid'; label: string; icon: string }> = [
-    { type: 'standard', label: 'Standard', icon: 'map' },
+  const mapTypes: Array<{ type: 'satellite' | 'hybrid'; label: string; icon: string }> = [
     { type: 'satellite', label: 'Satellite', icon: 'satellite' },
     { type: 'hybrid', label: 'Hybrid', icon: 'layers' },
   ];

@@ -18,9 +18,9 @@ interface TopNavigationBarProps {
   onSearchThisArea: () => void;
   
   // Map preferences
-  mapType: 'standard' | 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid';
   mapTilt: number;
-  onMapTypeChange: (type: 'standard' | 'satellite' | 'hybrid') => void;
+  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
   onMapTiltChange: (tilt: number) => void;
   
   // Profile & Settings

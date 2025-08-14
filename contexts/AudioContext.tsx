@@ -13,6 +13,7 @@ export interface AudioTrack {
   location?: string;
   category?: string;
   audioData?: string; // Base64 encoded audio
+  imageUrl?: string; // URL to attraction image
 }
 
 export interface AudioState {
@@ -104,7 +105,7 @@ const initialState: AudioState = {
   currentTrackId: null,
   isMinimized: false,
   isFullScreen: false,
-  showFloatingPlayer: false,
+  showFloatingPlayer: true, // Always show mini player for consistent layout
   isGeneratingAudio: false,
   generatingForId: null,
   generationMessage: '',
@@ -205,6 +206,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // Load audio from Base64
   const loadAudio = useCallback(async (audioData: string): Promise<void> => {
     try {
+      console.log('Loading audio with data length:', audioData.length);
       setState(prev => ({ ...prev, isLoading: true }));
 
       // Unload previous audio
@@ -215,6 +217,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
       // Create audio URI from Base64
       const audioUri = `data:audio/mp3;base64,${audioData}`;
+      console.log('Created audio URI, length:', audioUri.length);
       
       const { sound } = await Audio.Sound.createAsync(
         { uri: audioUri },
@@ -228,17 +231,32 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       );
 
       soundRef.current = sound;
+      console.log('Audio.Sound created successfully');
 
       // Initialize duration/position immediately after loading
       try {
         const initialStatus = await sound.getStatusAsync();
+        console.log('Initial audio status:', initialStatus);
         if (initialStatus.isLoaded) {
+          const durationMs = initialStatus.durationMillis || 0;
+          const durationSec = durationMs / 1000;
+          console.log(`Audio loaded with duration: ${durationSec} seconds (${durationMs} ms)`);
+          
+          // Check if duration is suspiciously short (like exactly 12 seconds)
+          if (durationSec > 0 && durationSec <= 15) {
+            console.warn(`WARNING: Audio duration is very short: ${durationSec} seconds`);
+            console.warn('This might indicate a backend limitation or audio generation issue');
+            console.warn('Check if audioLength preference is set to "short" or if there\'s a backend bug');
+          }
+          
           setState(prev => ({
             ...prev,
             isLoading: false,
             position: initialStatus.positionMillis || 0,
-            duration: initialStatus.durationMillis || 0,
+            duration: durationMs,
           }));
+        } else {
+          console.warn('Audio not loaded in initial status');
         }
       } catch (statusError) {
         console.warn('Unable to get initial audio status after load:', statusError);
@@ -247,15 +265,24 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       // Set up audio completion handler
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded) {
+          const currentDuration = status.durationMillis || 0;
+          const currentPosition = status.positionMillis || 0;
+          
+          // Log duration changes to debug the 12-second issue
+          if (currentDuration > 0 && currentDuration !== state.duration) {
+            console.log(`Duration updated: ${currentDuration / 1000} seconds (was: ${state.duration / 1000})`);
+          }
+          
           setState(prev => ({
             ...prev,
-            position: status.positionMillis || 0,
-            duration: status.durationMillis || 0,
+            position: currentPosition,
+            duration: currentDuration,
             isLoading: false,
           }));
 
           // Handle audio completion
           if (status.didJustFinish) {
+            console.log('Audio playback finished');
             setState(prev => ({ ...prev, isPlaying: false }));
             stopPositionTracking();
             
@@ -278,14 +305,22 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         'Failed to load audio. Please try again.'
       );
     }
-  }, [state.volume, state.isMuted]);
+  }, [state.volume, state.isMuted, state.duration]);
 
   // Playback controls
   const play = useCallback(async () => {
     try {
       if (soundRef.current) {
         await soundRef.current.playAsync();
-        setState(prev => ({ ...prev, isPlaying: true }));
+        setState(prev => ({ 
+          ...prev, 
+          isPlaying: true,
+          // Clear generation state when audio starts playing
+          isGeneratingAudio: false,
+          generatingForId: null,
+          generationMessage: '',
+          generationError: null
+        }));
         startPositionTracking();
         console.log('Audio playback started');
       }
@@ -396,6 +431,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         currentIndex: trackIndex >= 0 ? trackIndex : prev.currentIndex,
         showFloatingPlayer: true,
         isMinimized: true, // Start in minimized state for bottom sheet integration
+        // Clear generation state when setting current track
+        isGeneratingAudio: false,
+        generatingForId: null,
+        generationMessage: '',
+        generationError: null
       };
     });
 

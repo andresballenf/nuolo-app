@@ -12,6 +12,12 @@ interface PlaceResult {
   rating?: number;
   user_ratings_total?: number;
   types: string[];
+  photos?: Array<{
+    photo_reference: string;
+    height: number;
+    width: number;
+    html_attributions?: string[];
+  }>;
 }
 
 interface PlacesSearchResponse {
@@ -138,7 +144,12 @@ class GooglePlacesService {
   /**
    * Transform Google Places API result to our PointOfInterest format
    */
-  private transformPlaceToPointOfInterest(place: PlaceResult): PointOfInterest {
+  private transformPlaceToPointOfInterest = (place: PlaceResult): PointOfInterest => {
+    // Construct photo URLs from photo references
+    const photos = place.photos?.map(photo => {
+      return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photo.photo_reference}&key=${this.apiKey}`;
+    }) || [];
+
     return {
       id: place.place_id,
       name: place.name,
@@ -149,6 +160,7 @@ class GooglePlacesService {
       description: place.vicinity || place.formatted_address || '',
       rating: place.rating,
       types: place.types,
+      photos: photos.slice(0, 5), // Limit to 5 photos max
     };
   }
 

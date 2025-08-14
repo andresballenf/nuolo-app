@@ -7,6 +7,7 @@ import {
   Animated,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -38,6 +39,9 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
 }) => {
   const translateY = useRef(new Animated.Value(100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
+
+  // Only show loading when actually generating audio, not when audio is playing
+  const shouldShowLoading = isLoading && !track;
 
   useEffect(() => {
     if (isVisible) {
@@ -146,19 +150,31 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
         >
           {/* Track info or loading state */}
           <View style={styles.trackInfo}>
-            {isLoading ? (
+            {shouldShowLoading ? (
               <>
                 <Text style={styles.loadingTitle}>Generating Audio</Text>
                 <Text style={styles.loadingSubtitle}>{loadingMessage}</Text>
               </>
             ) : track ? (
               <>
-                <Text style={styles.trackTitle} numberOfLines={1}>
-                  {track.title}
-                </Text>
-                <Text style={styles.trackSubtitle} numberOfLines={1}>
-                  {track.subtitle || 'Audio Guide'}
-                </Text>
+                {/* Show attraction image if available */}
+                <View style={styles.trackImageContainer}>
+                  {track.imageUrl ? (
+                    <Image source={{ uri: track.imageUrl }} style={styles.trackImage} />
+                  ) : (
+                    <View style={styles.trackImagePlaceholder}>
+                      <MaterialIcons name="place" size={20} color="#FFFFFF" />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.trackTextInfo}>
+                  <Text style={styles.trackTitle} numberOfLines={1}>
+                    {track.title}
+                  </Text>
+                  <Text style={styles.trackSubtitle} numberOfLines={1}>
+                    {track.subtitle || 'Audio Guide'}
+                  </Text>
+                </View>
               </>
             ) : null}
           </View>
@@ -168,9 +184,9 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
         <View style={styles.controls}>
           {/* Skip back 30 seconds button */}
           <TouchableOpacity
-            style={[styles.controlButton, isLoading && styles.controlButtonDisabled]}
+            style={[styles.controlButton, shouldShowLoading && styles.controlButtonDisabled]}
             onPress={handleSkipBack}
-            disabled={isLoading}
+            disabled={shouldShowLoading}
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel="Skip back 30 seconds"
@@ -182,14 +198,14 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
 
           {/* Play/Pause button */}
           <TouchableOpacity
-            style={[styles.playButton, isLoading && styles.playButtonLoading]}
+            style={[styles.playButton, shouldShowLoading && styles.playButtonLoading]}
             onPress={handlePlayPause}
-            disabled={isLoading}
+            disabled={shouldShowLoading}
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? "Pause" : "Play"}
           >
-            {isLoading ? (
+            {shouldShowLoading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <MaterialIcons 
@@ -273,6 +289,31 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   trackInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  trackImageContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  trackImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 20,
+  },
+  trackImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 20,
+  },
+  trackTextInfo: {
     flex: 1,
     justifyContent: 'center',
   },

@@ -11,7 +11,7 @@ interface CustomMarkerProps {
   poi: PointOfInterest;
   isSelected: boolean;
   onPress: (poi: PointOfInterest) => void;
-  mapType: 'standard' | 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid';
   showLabel: boolean;
   labelVisible: boolean;
   labelSide?: 'left' | 'right';

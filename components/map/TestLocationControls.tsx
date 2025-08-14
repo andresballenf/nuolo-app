@@ -26,8 +26,8 @@ interface TestLocationControlsProps {
   onTestLongitudeChange: (value: string) => void;
   onApplyTestLocation: () => void;
   onApplyPopularLocation: (location: PopularLocation) => void;
-  mapType?: 'standard' | 'satellite' | 'hybrid';
-  onMapTypeChange?: (type: 'standard' | 'satellite' | 'hybrid') => void;
+  mapType?: 'satellite' | 'hybrid';
+  onMapTypeChange?: (type: 'satellite' | 'hybrid') => void;
   mapTilt?: number;
   onMapTiltChange?: (tilt: number) => void;
   popularLocations?: PopularLocation[];
@@ -172,6 +172,9 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
               {/* Popular Locations */}
               <View style={styles.popularContainer}>
                 <Text style={styles.sectionTitle}>Popular Locations</Text>
+                <Text style={styles.locationHint}>
+                  🏗️ NYC, Paris, Tokyo have excellent 3D building coverage
+                </Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -205,7 +208,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
               <View style={styles.controlGroup}>
                 <Text style={styles.controlLabel}>Map Type</Text>
                 <View style={styles.mapTypeContainer}>
-                  {(['standard', 'satellite', 'hybrid'] as const).map((type) => (
+                  {(['satellite', 'hybrid'] as const).map((type) => (
                     <TouchableOpacity
                       key={type}
                       style={[
@@ -218,7 +221,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                         styles.mapTypeButtonText,
                         mapType === type && styles.mapTypeButtonTextActive
                       ]}>
-                        {type === 'standard' ? '🗺️' : type === 'satellite' ? '🛰️' : '🔀'}
+                        {type === 'satellite' ? '🛰️' : '🔀'}
                       </Text>
                       <Text style={[
                         styles.mapTypeButtonLabel,
@@ -235,7 +238,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
             {/* Tilt Control */}
             {onMapTiltChange && (
               <View style={styles.controlGroup}>
-                <Text style={styles.controlLabel}>Tilt: {mapTilt}°</Text>
+                <Text style={styles.controlLabel}>3D Tilt: {mapTilt}°</Text>
                 <View style={styles.tiltContainer}>
                   {[0, 30, 45, 60].map((tilt) => (
                     <TouchableOpacity
@@ -255,6 +258,12 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                     </TouchableOpacity>
                   ))}
                 </View>
+                <Text style={styles.tiltHint}>
+                  {mapTilt === 0 && '2D view - no 3D buildings'}
+                  {mapTilt === 30 && 'Slight 3D - minimal buildings'}
+                  {mapTilt === 45 && '3D view - buildings visible'}
+                  {mapTilt === 60 && 'Full 3D - best for buildings'}
+                </Text>
               </View>
             )}
           </View>
@@ -383,6 +392,12 @@ const styles = StyleSheet.create({
   popularContainer: {
     marginBottom: 16,
   },
+  locationHint: {
+    fontSize: 11,
+    color: '#65a30d',
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
   popularScroll: {
     marginHorizontal: -4,
   },
@@ -477,5 +492,11 @@ const styles = StyleSheet.create({
   },
   tiltButtonTextActive: {
     color: '#ffffff',
+  },
+  tiltHint: {
+    fontSize: 11,
+    color: '#9ca3af',
+    fontStyle: 'italic',
+    marginTop: 6,
   },
 });

@@ -19,6 +19,7 @@
     "expo-constants": "~17.1.7",
     "expo-file-system": "~18.1.11",
     "expo-haptics": "~14.1.4",
+    "expo-linear-gradient": "~14.1.5",
     "expo-linking": "~7.1.7",
     "expo-location": "~18.1.6",
     "expo-router": "~5.1.4",
@@ -28,11 +29,12 @@
     "react-native-maps": "1.20.1",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
-    "react-native-svg": "^15.12.1",
+    "react-native-svg": "15.11.2",
     "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@supabase/mcp-server-supabase": "^0.4.5",
     "@types/react": "~19.0.10",
     "typescript": "~5.8.3"
   },

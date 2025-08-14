@@ -4,7 +4,7 @@ import GooglePlacesService, { PointOfInterest } from '../services/GooglePlacesSe
 import Constants from 'expo-constants';
 
 interface UsePlacesSearchOptions {
-  onPointsOfInterestUpdate?: (pois: PointOfInterest[]) => void;
+  onPointsOfInterestUpdate?: (pois: PointOfInterest[], isManualSearch?: boolean) => void;
   autoSearch?: boolean;
   searchRadius?: number;
 }
@@ -14,7 +14,7 @@ interface UsePlacesSearchReturn {
   isSearching: boolean;
   showSearchButton: boolean;
   lastSearchCenter: { lat: number; lng: number } | null;
-  searchNearbyPlaces: (location: { lat: number; lng: number }, radius?: number) => Promise<void>;
+  searchNearbyPlaces: (location: { lat: number; lng: number }, radius?: number, isManualSearch?: boolean) => Promise<void>;
   searchPlaces: (query: string, location: { lat: number; lng: number }, radius?: number) => Promise<void>;
   checkIfSearchNeeded: (currentLocation: { lat: number; lng: number }) => boolean;
   handleSearchThisArea: (location: { lat: number; lng: number }) => Promise<void>;
@@ -58,7 +58,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
    */
   const searchNearbyPlaces = useCallback(async (
     location: { lat: number; lng: number },
-    radius: number = searchRadius
+    radius: number = searchRadius,
+    isManualSearch: boolean = false
   ): Promise<void> => {
     if (!googlePlacesService.current) {
       console.warn('Google Places service not initialized');
@@ -81,6 +82,9 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
 
       setPointsOfInterest(filteredResults);
       setLastSearchCenter(location);
+      
+      // Notify parent with isManualSearch flag
+      onPointsOfInterestUpdate?.(filteredResults, isManualSearch);
 
       console.log(`Found ${filteredResults.length} attractions near ${location.lat}, ${location.lng}`);
     } catch (error) {
@@ -145,8 +149,9 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     // Show search button if moved more than 1km from last search
     const needsSearch = distance > 1000;
     
-    if (needsSearch && !showSearchButton) {
-      setShowSearchButton(true);
+    // Only update state if it actually changes to prevent cascading re-renders
+    if (needsSearch !== showSearchButton) {
+      setShowSearchButton(needsSearch);
     }
 
     return needsSearch;
@@ -156,8 +161,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
    * Handle manual "Search this area" action
    */
   const handleSearchThisArea = useCallback(async (location: { lat: number; lng: number }): Promise<void> => {
-    await searchNearbyPlaces(location);
-  }, [searchNearbyPlaces]);
+    await searchNearbyPlaces(location, searchRadius, true); // true = manual search
+  }, [searchNearbyPlaces, searchRadius]);
 
   /**
    * Clear search results
@@ -176,10 +181,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     // This will be triggered by parent component when location changes
   }, [autoSearch]);
 
-  // Notify parent component when points of interest change
-  useEffect(() => {
-    onPointsOfInterestUpdate?.(pointsOfInterest);
-  }, [pointsOfInterest, onPointsOfInterestUpdate]);
+  // Remove the automatic notification effect
+  // Notifications are now handled directly in searchNearbyPlaces with the isManualSearch flag
 
   return {
     pointsOfInterest,

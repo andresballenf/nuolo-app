@@ -14,7 +14,7 @@ import { useAudio } from '../contexts/AudioContext';
 import { Button } from '../components/ui/Button';
 import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Text } from 'react-native';
 
 export default function MapScreen() {
@@ -79,8 +79,8 @@ export default function MapScreen() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   // Map controls state
-  const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
-  const [mapTilt, setMapTilt] = useState(45);
+  const [mapType, setMapType] = useState<'satellite' | 'hybrid'>('hybrid');
+  const [mapTilt, setMapTilt] = useState(60);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [triggerGPS, setTriggerGPS] = useState(0);
@@ -90,6 +90,10 @@ export default function MapScreen() {
   const [showSearchButton, setShowSearchButton] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const mapSearchRef = useRef<any>(null);
+  const mapRef = useRef<any>(null);
+  
+  // Track if initial load has occurred
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
 
   // Popular locations for quick testing
   const popularLocations = [
@@ -101,26 +105,42 @@ export default function MapScreen() {
     { name: "Cincinnati", lat: 39.1088, lng: -84.5175 }
   ];
 
-  const handlePointsOfInterestUpdate = useCallback((pois: PointOfInterest[]) => {
+  const handlePointsOfInterestUpdate = useCallback((pois: PointOfInterest[], isManualSearch: boolean = false) => {
+    // Always update the attractions data silently
     setAttractions(pois);
     console.log(`Found ${pois.length} attractions nearby`);
-    // Show bottom sheet in peek mode when attractions are found
-    if (pois.length > 0) {
+    
+    // Only update bottom sheet visibility on explicit user actions
+    if (isManualSearch) {
+      // Manual search via "Search this area" button
+      if (pois.length > 0) {
+        setSheetContentType('attractions');
+        setIsBottomSheetVisible(true);
+        setSheetState('collapsed');
+      } else {
+        // No results from manual search
+        setIsBottomSheetVisible(false);
+        setSheetState('hidden');
+      }
+    } else if (!hasInitiallyLoaded && pois.length > 0) {
+      // First load of the app - show bottom sheet with attractions
       setSheetContentType('attractions');
       setIsBottomSheetVisible(true);
-      setSheetState('peek');
-    } else {
-      setIsBottomSheetVisible(false);
-      setSheetState('hidden');
+      setSheetState('collapsed');
+      setHasInitiallyLoaded(true);
     }
-    
-    // Update user location for distance calculation
+    // Otherwise, keep current visibility state (don't auto-show/hide)
+  }, [hasInitiallyLoaded]);
+
+  // Update user location only when GPS or test location actually changes
+  // This prevents unnecessary re-renders from frequent attraction updates
+  useEffect(() => {
     if (gpsStatus.latitude && gpsStatus.longitude) {
       setUserLocation({ lat: gpsStatus.latitude, lng: gpsStatus.longitude });
     } else if (testLocation) {
       setUserLocation({ lat: testLocation.latitude, lng: testLocation.longitude });
     }
-  }, [gpsStatus, testLocation]);
+  }, [gpsStatus.latitude, gpsStatus.longitude, testLocation]);
 
   const handleMarkerPress = (poi: PointOfInterest) => {
     const index = attractions.findIndex(a => a.id === poi.id);
@@ -133,7 +153,21 @@ export default function MapScreen() {
     // Switch to attraction detail view
     setSheetContentType('attraction-detail');
     setIsBottomSheetVisible(true);
-    setSheetState('expanded');
+    setSheetState('detail');
+    
+    // Recenter map on selected attraction with 3D view
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: poi.coordinate.latitude,
+          longitude: poi.coordinate.longitude,
+        },
+        pitch: mapTilt, // Maintain current tilt for 3D
+        heading: 0,
+        altitude: 600, // Closer view for selected attraction
+        zoom: 17,  // Optimal for 3D buildings
+      }, { duration: 500 });
+    }
     
     // Also update the global context for compatibility
     setSelectedAttraction({
@@ -187,9 +221,23 @@ export default function MapScreen() {
     setAttractionAudio(null);
     setTranscriptSegments(undefined);
     
+    // Recenter map on selected attraction with 3D view
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: attraction.coordinate.latitude,
+          longitude: attraction.coordinate.longitude,
+        },
+        pitch: mapTilt, // Maintain current tilt for 3D
+        heading: 0,
+        altitude: 600, // Closer view for selected attraction
+        zoom: 17,  // Optimal for 3D buildings
+      }, { duration: 500 });
+    }
+    
     // Switch to detail view
     setSheetContentType('attraction-detail');
-    setSheetState('expanded');
+    setSheetState('detail');
     
     // Update global context
     setSelectedAttraction({
@@ -306,6 +354,13 @@ export default function MapScreen() {
       }
 
       console.log(`Generating text and audio for: ${attraction.name}`);
+      console.log('User preferences:', userPreferences);
+      
+      // Check if audioLength is set to 'short' which might cause the 12-second issue
+      if (userPreferences.audioLength === 'short') {
+        console.warn('WARNING: audioLength is set to "short" - this might be causing the 12-second limitation');
+        console.log('Consider changing audioLength to "medium" or "deep-dive" for longer audio');
+      }
 
       // Single API call for both text and audio
       const { text, audio, transcriptSegments: segments } = await AttractionInfoService.generateTextAndAudio(
@@ -320,6 +375,23 @@ export default function MapScreen() {
         isTestModeEnabled
       );
 
+      console.log(`Audio generation completed. Text length: ${text.length}, Audio data length: ${audio.length}`);
+      console.log('Transcript segments:', segments);
+      
+      // Check if the audio data seems truncated
+      if (audio.length < 1000) {
+        console.warn('WARNING: Audio data seems very short, length:', audio.length);
+      }
+      
+      // Log the first and last 100 characters of the audio data to check for truncation
+      console.log('Audio data preview (first 100 chars):', audio.substring(0, 100));
+      console.log('Audio data preview (last 100 chars):', audio.substring(audio.length - 100));
+      
+      // Check if the text seems truncated
+      if (text.length < 100) {
+        console.warn('WARNING: Text seems very short, length:', text.length);
+      }
+
       // Create audio track with both text and audio data
       const audioTrack = {
         id: attraction.id,
@@ -330,7 +402,15 @@ export default function MapScreen() {
         category: userPreferences.theme,
         audioData: audio,
         duration: 0,
+        imageUrl: attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined,
       };
+
+      console.log('Created audio track:', {
+        id: audioTrack.id,
+        title: audioTrack.title,
+        audioDataLength: audioTrack.audioData.length,
+        textLength: audioTrack.description.length
+      });
 
       // Add track and set current track (this will clear generation states automatically)
       audioContext.addTrack(audioTrack);
@@ -377,6 +457,10 @@ export default function MapScreen() {
       }
     }
   }, [audioContext.duration, attractionInfo]);
+
+  // Update map camera when tilt changes - REMOVED to prevent drift
+  // The tilt being related to drift speed indicates the camera animation is the issue
+  // Let the user control tilt manually through map gestures instead
 
   // Legacy function kept for compatibility (will be removed in Phase 4)
   const handleRequestAudio = async () => {
@@ -518,6 +602,51 @@ export default function MapScreen() {
     setTimeout(() => setIsRefreshing(false), 1000);
   };
 
+  // Memoized callbacks to prevent re-renders - MUST be called before JSX
+  const handleSearchStateChange = useCallback((showButton: boolean, searching: boolean) => {
+    // Only update if values actually changed to prevent unnecessary re-renders
+    setShowSearchButton(prev => prev !== showButton ? showButton : prev);
+    setIsSearching(prev => prev !== searching ? searching : prev);
+  }, []);
+
+  const handleBottomSheetClose = useCallback(() => {
+    setIsBottomSheetVisible(false);
+  }, []);
+
+  const handleMapRecenter = useCallback((lat: number, lng: number) => {
+    // Recenter map on attraction with 3D view
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: lat,
+          longitude: lng,
+        },
+        pitch: mapTilt, // Maintain current tilt for 3D
+        heading: 0,
+        altitude: 600,
+        zoom: 17,  // Optimal for 3D buildings
+      }, { duration: 500 });
+    }
+  }, [mapTilt]);
+
+  // Memoized content components to prevent re-renders
+  const settingsContentMemo = useMemo(() => (
+    <SettingsContent
+      mapType={mapType}
+      mapTilt={mapTilt}
+      onMapTypeChange={setMapType}
+      onMapTiltChange={setMapTilt}
+      onClose={() => setIsBottomSheetVisible(false)}
+    />
+  ), [mapType, mapTilt]);
+
+  const profileContentMemo = useMemo(() => (
+    <ProfileContent
+      onResetOnboarding={resetOnboarding}
+      onClose={() => setIsBottomSheetVisible(false)}
+    />
+  ), [resetOnboarding]);
+
   if (!gpsStatus.active && !testLocation && !isTestModeEnabled) {
     return (
       <View style={styles.container}>
@@ -565,13 +694,11 @@ export default function MapScreen() {
           testLocation={testLocation}
           mapType={mapType}
           initialTilt={mapTilt}
-          initialZoom={20}
+          initialZoom={17}
           triggerGPS={triggerGPS}
-          onSearchStateChange={(showButton, searching) => {
-            setShowSearchButton(showButton);
-            setIsSearching(searching);
-          }}
+          onSearchStateChange={handleSearchStateChange}
           onSearchAreaRequest={mapSearchRef}
+          mapRef={mapRef}
         />
       </View>
       
@@ -617,27 +744,16 @@ export default function MapScreen() {
         onStateChange={setSheetState}
         onAttractionSelect={handleAttractionSelect}
         onBackPress={handleBackToList}
-        onGenerateAudioGuide={selectedAttraction ? () => handlePlayAudio(selectedAttraction) : undefined}
+        onClose={handleBottomSheetClose}
+        onGenerateAudioGuide={handlePlayAudio}
         onPlayAudioGuide={selectedAttraction ? () => handlePlayAudio(selectedAttraction) : undefined}
+        onMapRecenter={handleMapRecenter}
         attractionInfo={attractionInfo}
         attractionAudio={attractionAudio}
         isLoading={audioContext.isGeneratingAudio || isGeneratingInfo}
         userLocation={userLocation}
-        settingsContent={
-          <SettingsContent
-            mapType={mapType}
-            mapTilt={mapTilt}
-            onMapTypeChange={setMapType}
-            onMapTiltChange={setMapTilt}
-            onClose={() => setIsBottomSheetVisible(false)}
-          />
-        }
-        profileContent={
-          <ProfileContent
-            onResetOnboarding={resetOnboarding}
-            onClose={() => setIsBottomSheetVisible(false)}
-          />
-        }
+        settingsContent={settingsContentMemo}
+        profileContent={profileContentMemo}
       />
 
       {/* Mini Audio Player - Overlay at bottom of screen */}
@@ -646,7 +762,7 @@ export default function MapScreen() {
           audioContext.showFloatingPlayer && 
           (audioContext.currentTrack !== null || audioContext.isGeneratingAudio)
         }
-        isLoading={audioContext.isGeneratingAudio || audioContext.isLoading}
+        isLoading={audioContext.isGeneratingAudio}
         loadingMessage={audioContext.generationMessage || "Loading audio guide..."}
         track={audioContext.currentTrack}
         isPlaying={audioContext.isPlaying}
