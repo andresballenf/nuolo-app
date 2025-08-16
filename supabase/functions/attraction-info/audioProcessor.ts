@@ -7,18 +7,35 @@ export async function processAudioGeneration(generatedInfo, preferences, testMod
     textLength: generatedInfo.length,
     iosSafari,
     testMode,
-    preferences: preferences
+    preferences: preferences,
+    language: preferences.language
   });
   // Determine if we need Safari optimizations
   const isSafariOptimized = iosSafari || preferences.safariOptimizedAudio;
-  // Select voice based on user preferences or use a default
-  let voice = mapVoiceStyle(preferences.voiceStyle || 'casual');
+  
+  // Language-specific voice mapping
+  const languageVoiceMap = {
+    'en': mapVoiceStyle(preferences.voiceStyle || 'casual'), // English voices
+    'es': 'nova', // Spanish - nova has good Spanish pronunciation
+    'fr': 'shimmer', // French - shimmer works well for French
+    'de': 'echo', // German - echo has clear German pronunciation
+    'it': 'nova', // Italian - nova works for Italian too
+    'pt': 'nova', // Portuguese - nova supports Portuguese
+    'ru': 'onyx', // Russian - onyx has deeper tone for Russian
+    'ja': 'shimmer', // Japanese - shimmer can handle Japanese
+    'ko': 'shimmer', // Korean - shimmer for Korean
+    'zh': 'alloy', // Chinese - alloy has cleaner pronunciation for Chinese
+  };
+  
+  // Select voice based on language and user preferences
+  let voice = languageVoiceMap[preferences.language] || mapVoiceStyle(preferences.voiceStyle || 'casual');
+  
   // For Safari, prioritize more compatible voices
   if (isSafariOptimized) {
     voice = 'alloy'; // Most reliable voice for Safari
     console.log("Using Safari-optimized voice:", voice);
   } else {
-    console.log("Generating audio with voice:", voice);
+    console.log(`Generating audio with voice: ${voice} for language: ${preferences.language || 'en'}`);
   }
   // Prepare text for audio with proper length handling
   const textForAudio = prepareTextForAudio(generatedInfo, testMode, isSafariOptimized);

@@ -11,6 +11,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { MapPreferencesMenu } from '../map/MapPreferencesMenu';
 import { ProfileMenu } from './ProfileMenu';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface TopNavigationBarProps {
   // Search functionality
@@ -38,6 +39,9 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   onProfilePress,
   onSettingsPress,
 }) => {
+  // Get auth context
+  const { user, isAuthenticated } = useAuth();
+  
   // State for menus
   const [showMapPreferences, setShowMapPreferences] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -46,6 +50,18 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   const searchButtonScale = useRef(new Animated.Value(1)).current;
   const mapButtonScale = useRef(new Animated.Value(1)).current;
   const profileButtonScale = useRef(new Animated.Value(1)).current;
+  
+  // Get user initial for profile button
+  const getUserInitial = () => {
+    if (!user) return null;
+    if (user.profile?.fullName) {
+      return user.profile.fullName.charAt(0).toUpperCase();
+    }
+    if (user.email) {
+      return user.email.charAt(0).toUpperCase();
+    }
+    return null;
+  };
 
   // Animation helper function
   const animateButtonPress = (animValue: Animated.Value, callback?: () => void) => {
@@ -149,7 +165,13 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
             })}
             activeOpacity={1}
           >
-            <MaterialIcons name="account-circle" size={24} color="#374151" />
+            {isAuthenticated && getUserInitial() ? (
+              <View style={styles.userInitialContainer}>
+                <Text style={styles.userInitial}>{getUserInitial()}</Text>
+              </View>
+            ) : (
+              <MaterialIcons name="account-circle" size={24} color="#374151" />
+            )}
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -254,5 +276,18 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  userInitialContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#84cc16',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userInitial: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

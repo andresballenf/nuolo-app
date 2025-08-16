@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { Audio } from 'expo-av';
 import { Alert } from 'react-native';
 import { TranscriptSegment } from '../services/AttractionInfoService';
+import { AudioService } from '../services/AudioService';
 
 export interface AudioTrack {
   id: string;
@@ -193,7 +194,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           console.error('Error getting audio status:', error);
         }
       }
-    }, 1000);
+    }, 100); // Update every 100ms for smooth karaoke-style highlighting
   }, [state.isPlaying]);
 
   const stopPositionTracking = useCallback(() => {
@@ -215,12 +216,14 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         soundRef.current = null;
       }
 
-      // Create audio URI from Base64
-      const audioUri = `data:audio/mp3;base64,${audioData}`;
-      console.log('Created audio URI, length:', audioUri.length);
+      // IMPORTANT: Save base64 to file instead of using data URI
+      // Data URIs have size limitations on mobile platforms which can truncate audio
+      const audioService = AudioService.getInstance();
+      const fileUri = await audioService.saveBase64ToFile(audioData, 'audio/mp3');
+      console.log('Saved audio to file:', fileUri);
       
       const { sound } = await Audio.Sound.createAsync(
-        { uri: audioUri },
+        { uri: fileUri },
         {
           shouldPlay: false,
           volume: state.volume / 100,

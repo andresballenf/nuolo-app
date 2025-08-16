@@ -1,19 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { Modal, View, StyleSheet, StatusBar, Animated, Dimensions, PanResponder, Platform } from 'react-native';
+import { Modal, View, StyleSheet, StatusBar, Animated, Dimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { WelcomeStep } from './WelcomeStep';
-import { LanguageStep } from './LanguageStep';
-import { InterestsStep } from './InterestsStep';
-import { AudioPrefsStep } from './AudioPrefsStep';
-import { LocationStep } from './LocationStep';
-import { PrivacyStep } from './PrivacyStep';
-import { TutorialStep } from './TutorialStep';
-import { CompletionStep } from './CompletionStep';
-import { ProgressIndicator } from './ProgressIndicator';
-import { ErrorBoundary } from '../ui/ErrorBoundary';
+import { PersonalizationStep } from './PersonalizationStep';
+import { PermissionsStep } from './PermissionsStep';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -23,116 +15,90 @@ export const OnboardingFlow: React.FC = () => {
     currentStepIndex,
     totalSteps,
     hasCompletedOnboarding,
-    nextStep,
-    previousStep,
-    goToStepIndex,
-    getStepLabels
   } = useOnboarding();
   const { user } = useAuth();
   
   // Animation references
-  const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const gestureX = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
   // Only show onboarding if user is authenticated and hasn't completed onboarding
   const shouldShow = user && !hasCompletedOnboarding;
   
-  // Animate step transitions
+  // Initial animation on mount
   useEffect(() => {
     if (shouldShow) {
-      // Fade out
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => {
-        // Reset position and fade in
-        slideAnim.setValue(SCREEN_WIDTH);
+      fadeAnim.setValue(0);
+      slideAnim.setValue(30);
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [shouldShow]);
+  
+  // Animate step transitions
+  useEffect(() => {
+    if (shouldShow && currentStepIndex > 0) {
+      // Only animate on step changes, not initial mount
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
         Animated.parallel([
-          Animated.spring(slideAnim, {
+          Animated.timing(slideAnim, {
             toValue: 0,
+            duration: 300,
             useNativeDriver: true,
-            tension: 65,
-            friction: 10,
           }),
           Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 200,
+            duration: 300,
             useNativeDriver: true,
           }),
-        ]).start();
-      });
+        ]),
+      ]).start();
     }
   }, [currentStep]);
-  
-  // Swipe gesture handler
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to horizontal swipes
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && 
-               Math.abs(gestureState.dx) > 10;
-      },
-      onPanResponderGrant: () => {
-        if (Platform.OS === 'ios') {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Allow swiping but with resistance
-        gestureX.setValue(gestureState.dx * 0.5);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const swipeThreshold = SCREEN_WIDTH * 0.25;
-        
-        if (gestureState.dx > swipeThreshold && currentStepIndex > 0) {
-          // Swipe right - go to previous step
-          if (Platform.OS === 'ios') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }
-          previousStep();
-        } else if (gestureState.dx < -swipeThreshold && currentStepIndex < totalSteps - 1) {
-          // Swipe left - go to next step
-          if (Platform.OS === 'ios') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }
-          nextStep();
-        }
-        
-        // Spring back to center
-        Animated.spring(gestureX, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 10,
-        }).start();
-      },
-    })
-  ).current;
 
   const renderCurrentStep = () => {
     switch (currentStep) {
       case 'welcome':
         return <WelcomeStep />;
-      case 'language':
-        return <LanguageStep />;
-      case 'interests':
-        return <InterestsStep />;
-      case 'audioPrefs':
-        return <AudioPrefsStep />;
-      case 'location':
-        return <LocationStep />;
-      case 'privacy':
-        return <PrivacyStep />;
-      case 'tutorial':
-        return <TutorialStep />;
-      case 'completion':
-        return <CompletionStep />;
+      case 'personalization':
+        return <PersonalizationStep />;
+      case 'permissions':
+        return <PermissionsStep />;
       default:
         return <WelcomeStep />;
     }
+  };
+
+  const renderProgressDots = () => {
+    return (
+      <View style={styles.progressContainer}>
+        {Array.from({ length: totalSteps }).map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.progressDot,
+              index === currentStepIndex && styles.progressDotActive,
+              index < currentStepIndex && styles.progressDotCompleted,
+            ]}
+          />
+        ))}
+      </View>
+    );
   };
 
   if (!shouldShow) {
@@ -142,27 +108,14 @@ export const OnboardingFlow: React.FC = () => {
   return (
     <Modal
       visible={shouldShow}
-      animationType="slide"
+      animationType="fade"
       presentationStyle="fullScreen"
     >
-      <StatusBar barStyle="light-content" backgroundColor="#84cc16" translucent={false} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <SafeAreaProvider>
-        <ErrorBoundary
-          onError={(error, errorInfo) => {
-            console.error('Onboarding error:', error, errorInfo);
-            // Could send to analytics service here
-          }}
-        >
-          <View style={styles.container}>
-          {/* Progress Indicator */}
-          <View style={styles.progressContainer}>
-            <ProgressIndicator
-              currentStep={currentStepIndex}
-              totalSteps={totalSteps}
-              onStepPress={goToStepIndex}
-              labels={getStepLabels()}
-            />
-          </View>
+        <View style={styles.container}>
+          {/* Progress Dots */}
+          {renderProgressDots()}
           
           {/* Animated Step Content */}
           <Animated.View 
@@ -170,17 +123,13 @@ export const OnboardingFlow: React.FC = () => {
               styles.stepContainer,
               {
                 opacity: fadeAnim,
-                transform: [
-                  { translateX: Animated.add(slideAnim, gestureX) }
-                ],
+                transform: [{ translateY: slideAnim }],
               },
             ]}
-            {...panResponder.panHandlers}
           >
             {renderCurrentStep()}
           </Animated.View>
         </View>
-        </ErrorBoundary>
       </SafeAreaProvider>
     </Modal>
   );
@@ -189,15 +138,29 @@ export const OnboardingFlow: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#84cc16',
+    backgroundColor: '#FFFFFF',
   },
   progressContainer: {
-    position: 'absolute',
-    top: Platform.select({ ios: 50, android: 30 }),
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    paddingHorizontal: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 20,
+    gap: 8,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E5E7EB',
+  },
+  progressDotActive: {
+    width: 24,
+    backgroundColor: '#84cc16',
+  },
+  progressDotCompleted: {
+    backgroundColor: '#84cc16',
+    opacity: 0.5,
   },
   stepContainer: {
     flex: 1,

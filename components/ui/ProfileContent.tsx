@@ -1,15 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Switch,
+  Modal,
+  Alert,
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
 import { useOnboarding } from '../../contexts/OnboardingContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { Button } from './Button';
+import { router } from 'expo-router';
 
 interface ProfileContentProps {
   onResetOnboarding?: () => void;
@@ -35,9 +40,88 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
 }) => {
   const { userPreferences, setUserPreferences } = useApp();
   const { resetOnboarding } = useOnboarding();
+  const { user, signOut, isAuthenticated } = useAuth();
+  
+  // Modal states for editing preferences
+  const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showAudioLengthModal, setShowAudioLengthModal] = useState(false);
+  const [showVoiceStyleModal, setShowVoiceStyleModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const themes = [
+    { value: 'history', label: 'History', icon: '🏛️' },
+    { value: 'nature', label: 'Nature', icon: '🌿' },
+    { value: 'architecture', label: 'Architecture', icon: '🏗️' },
+    { value: 'culture', label: 'Culture', icon: '🎭' },
+    { value: 'general', label: 'General', icon: '🌍' },
+  ];
+  
+  const audioLengths = [
+    { value: 'short', label: 'Short', description: '30-60 seconds' },
+    { value: 'medium', label: 'Medium', description: '1-3 minutes' },
+    { value: 'deep-dive', label: 'Deep Dive', description: '3-5 minutes' },
+  ];
+  
+  const voiceStyles = [
+    { value: 'casual', label: 'Casual', description: 'Friendly and conversational' },
+    { value: 'formal', label: 'Formal', description: 'Professional and informative' },
+    { value: 'energetic', label: 'Energetic', description: 'Enthusiastic and dynamic' },
+    { value: 'calm', label: 'Calm', description: 'Soothing and peaceful' },
+  ];
   
   const handleLanguageChange = (code: string) => {
     setUserPreferences({ language: code as any });
+  };
+  
+  const handleThemeChange = async (theme: string) => {
+    setIsSaving(true);
+    try {
+      await setUserPreferences({ theme: theme as any });
+      setShowThemeModal(false);
+      Alert.alert('Success', 'Theme preference updated');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update theme preference');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  const handleAudioLengthChange = async (length: string) => {
+    setIsSaving(true);
+    try {
+      await setUserPreferences({ audioLength: length as any });
+      setShowAudioLengthModal(false);
+      Alert.alert('Success', 'Audio length preference updated');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update audio length preference');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  const handleVoiceStyleChange = async (style: string) => {
+    setIsSaving(true);
+    try {
+      await setUserPreferences({ voiceStyle: style as any });
+      setShowVoiceStyleModal(false);
+      Alert.alert('Success', 'Voice style preference updated');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update voice style preference');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  const handleBatteryOptimizationToggle = async (value: boolean) => {
+    setIsSaving(true);
+    try {
+      await setUserPreferences({ batteryOptimization: value });
+      Alert.alert('Success', `Battery saver ${value ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update battery optimization');
+    } finally {
+      setIsSaving(false);
+    }
   };
   
   const handleResetOnboarding = () => {
@@ -46,16 +130,41 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     onClose?.();
   };
   
+  const handleSignOut = async () => {
+    await signOut();
+    onClose?.();
+    router.replace('/auth');
+  };
+  
+  const handleSignIn = () => {
+    onClose?.();
+    router.push('/auth/login');
+  };
+  
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* User Info Section */}
       <View style={styles.section}>
         <View style={styles.userInfo}>
           <View style={styles.avatar}>
-            <MaterialIcons name="account-circle" size={64} color="#9CA3AF" />
+            <MaterialIcons 
+              name="account-circle" 
+              size={64} 
+              color={isAuthenticated ? "#84cc16" : "#9CA3AF"} 
+            />
           </View>
-          <Text style={styles.userName}>Guest User</Text>
-          <Text style={styles.userEmail}>Not signed in</Text>
+          <Text style={styles.userName}>
+            {user?.profile?.fullName || user?.email?.split('@')[0] || 'Guest User'}
+          </Text>
+          <Text style={styles.userEmail}>
+            {user?.email || 'Not signed in'}
+          </Text>
+          {user?.emailVerified === false && (
+            <View style={styles.verificationBadge}>
+              <MaterialIcons name="info" size={14} color="#F59E0B" />
+              <Text style={styles.verificationText}>Email not verified</Text>
+            </View>
+          )}
         </View>
       </View>
       
@@ -86,34 +195,44 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Your Preferences</Text>
         <View style={styles.preferencesList}>
-          <View style={styles.preferenceItem}>
+          <TouchableOpacity style={styles.preferenceItem} onPress={() => setShowThemeModal(true)}>
             <MaterialIcons name="palette" size={20} color="#6B7280" />
             <Text style={styles.preferenceLabel}>Theme:</Text>
             <Text style={styles.preferenceValue}>
               {userPreferences.theme.charAt(0).toUpperCase() + userPreferences.theme.slice(1)}
             </Text>
-          </View>
-          <View style={styles.preferenceItem}>
+            <MaterialIcons name="chevron-right" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.preferenceItem} onPress={() => setShowAudioLengthModal(true)}>
             <MaterialIcons name="timer" size={20} color="#6B7280" />
             <Text style={styles.preferenceLabel}>Audio Length:</Text>
             <Text style={styles.preferenceValue}>
               {userPreferences.audioLength === 'deep-dive' ? 'Deep Dive' : 
                userPreferences.audioLength.charAt(0).toUpperCase() + userPreferences.audioLength.slice(1)}
             </Text>
-          </View>
-          <View style={styles.preferenceItem}>
+            <MaterialIcons name="chevron-right" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.preferenceItem} onPress={() => setShowVoiceStyleModal(true)}>
             <MaterialIcons name="record-voice-over" size={20} color="#6B7280" />
             <Text style={styles.preferenceLabel}>Voice Style:</Text>
             <Text style={styles.preferenceValue}>
               {userPreferences.voiceStyle.charAt(0).toUpperCase() + userPreferences.voiceStyle.slice(1)}
             </Text>
-          </View>
+            <MaterialIcons name="chevron-right" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
+          
           <View style={styles.preferenceItem}>
             <MaterialIcons name="battery-charging-full" size={20} color="#6B7280" />
             <Text style={styles.preferenceLabel}>Battery Saver:</Text>
-            <Text style={styles.preferenceValue}>
-              {userPreferences.batteryOptimization ? 'On' : 'Off'}
-            </Text>
+            <Switch
+              value={userPreferences.batteryOptimization}
+              onValueChange={handleBatteryOptimizationToggle}
+              trackColor={{ false: '#E5E7EB', true: '#84cc16' }}
+              thumbColor={userPreferences.batteryOptimization ? '#FFFFFF' : '#F3F4F6'}
+              disabled={isSaving}
+            />
           </View>
         </View>
       </View>
@@ -127,13 +246,23 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
           size="md"
           style={styles.actionButton}
         />
-        <Button
-          title="Sign In"
-          onPress={() => {}}
-          variant="primary"
-          size="md"
-          style={styles.actionButton}
-        />
+        {isAuthenticated ? (
+          <Button
+            title="Sign Out"
+            onPress={handleSignOut}
+            variant="secondary"
+            size="md"
+            style={styles.actionButton}
+          />
+        ) : (
+          <Button
+            title="Sign In"
+            onPress={handleSignIn}
+            variant="primary"
+            size="md"
+            style={styles.actionButton}
+          />
+        )}
       </View>
       
       {/* App Info */}
@@ -141,6 +270,139 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
         <Text style={styles.appVersion}>Nuolo v1.0.0</Text>
         <Text style={styles.appCopyright}>© 2024 Nuolo. All rights reserved.</Text>
       </View>
+      
+      {/* Bottom spacing to ensure last content is accessible in all sheet states */}
+      <View style={{ height: 150 }} />
+      
+      {/* Theme Selection Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showThemeModal}
+        onRequestClose={() => setShowThemeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Theme</Text>
+            {themes.map((theme) => (
+              <TouchableOpacity
+                key={theme.value}
+                style={[
+                  styles.modalOption,
+                  userPreferences.theme === theme.value && styles.modalOptionActive,
+                ]}
+                onPress={() => handleThemeChange(theme.value)}
+                disabled={isSaving}
+              >
+                <Text style={styles.modalOptionIcon}>{theme.icon}</Text>
+                <Text style={[
+                  styles.modalOptionText,
+                  userPreferences.theme === theme.value && styles.modalOptionTextActive,
+                ]}>
+                  {theme.label}
+                </Text>
+                {userPreferences.theme === theme.value && (
+                  <MaterialIcons name="check" size={20} color="#84cc16" />
+                )}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => setShowThemeModal(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Audio Length Selection Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showAudioLengthModal}
+        onRequestClose={() => setShowAudioLengthModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Audio Length</Text>
+            {audioLengths.map((length) => (
+              <TouchableOpacity
+                key={length.value}
+                style={[
+                  styles.modalOption,
+                  userPreferences.audioLength === length.value && styles.modalOptionActive,
+                ]}
+                onPress={() => handleAudioLengthChange(length.value)}
+                disabled={isSaving}
+              >
+                <View style={styles.modalOptionContent}>
+                  <Text style={[
+                    styles.modalOptionText,
+                    userPreferences.audioLength === length.value && styles.modalOptionTextActive,
+                  ]}>
+                    {length.label}
+                  </Text>
+                  <Text style={styles.modalOptionDescription}>{length.description}</Text>
+                </View>
+                {userPreferences.audioLength === length.value && (
+                  <MaterialIcons name="check" size={20} color="#84cc16" />
+                )}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => setShowAudioLengthModal(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Voice Style Selection Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showVoiceStyleModal}
+        onRequestClose={() => setShowVoiceStyleModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Voice Style</Text>
+            {voiceStyles.map((style) => (
+              <TouchableOpacity
+                key={style.value}
+                style={[
+                  styles.modalOption,
+                  userPreferences.voiceStyle === style.value && styles.modalOptionActive,
+                ]}
+                onPress={() => handleVoiceStyleChange(style.value)}
+                disabled={isSaving}
+              >
+                <View style={styles.modalOptionContent}>
+                  <Text style={[
+                    styles.modalOptionText,
+                    userPreferences.voiceStyle === style.value && styles.modalOptionTextActive,
+                  ]}>
+                    {style.label}
+                  </Text>
+                  <Text style={styles.modalOptionDescription}>{style.description}</Text>
+                </View>
+                {userPreferences.voiceStyle === style.value && (
+                  <MaterialIcons name="check" size={20} color="#84cc16" />
+                )}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => setShowVoiceStyleModal(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -169,6 +431,21 @@ const styles = StyleSheet.create({
   userEmail: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  verificationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+    gap: 4,
+  },
+  verificationText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 16,
@@ -211,6 +488,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingVertical: 8,
   },
   preferenceLabel: {
     fontSize: 14,
@@ -240,5 +518,70 @@ const styles = StyleSheet.create({
   appCopyright: {
     fontSize: 12,
     color: '#9CA3AF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 40,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: '#F9FAFB',
+  },
+  modalOptionActive: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#84cc16',
+  },
+  modalOptionIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  modalOptionContent: {
+    flex: 1,
+  },
+  modalOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: 2,
+  },
+  modalOptionTextActive: {
+    color: '#059669',
+  },
+  modalOptionDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  modalCancelButton: {
+    marginTop: 12,
+    padding: 14,
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6B7280',
   },
 });

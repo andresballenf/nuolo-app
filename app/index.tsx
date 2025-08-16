@@ -8,6 +8,9 @@ export default function IndexScreen() {
   const { user, loading: authLoading } = useAuth();
   const { hasCompletedOnboarding, loading: onboardingLoading } = useOnboarding();
 
+  console.log('Index screen - Auth loading:', authLoading, 'User:', !!user);
+  console.log('Index screen - Onboarding loading:', onboardingLoading, 'Completed:', hasCompletedOnboarding);
+
   // Show loading while checking auth and onboarding status
   if (authLoading || onboardingLoading) {
     return (
@@ -18,16 +21,13 @@ export default function IndexScreen() {
     );
   }
 
-  // Redirect based on auth and onboarding status
-  if (!user) {
-    return <Redirect href="/auth" />;
+  // In dev mode with auth bypassed, go directly to map
+  if (user) {
+    return <Redirect href="/map" />;
   }
 
-  if (!hasCompletedOnboarding) {
-    return <Redirect href="/onboarding" />;
-  }
-
-  return <Redirect href="/map" />;
+  // Otherwise go to auth
+  return <Redirect href="/auth" />;
 }
 
 const styles = StyleSheet.create({

@@ -8,7 +8,7 @@ import {
   Animated,
   Platform,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+// import * as Haptics from 'expo-haptics';
 
 interface RadioOption {
   value: string;
@@ -29,39 +29,27 @@ interface RadioItemProps {
 }
 
 const RadioItem: React.FC<RadioItemProps> = ({ option, selected, onPress }) => {
-  const scaleAnim = useRef(new Animated.Value(selected ? 1 : 0.95)).current;
-  const borderColorAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
-  const backgroundColorAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const colorAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
   
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: selected ? 1 : 0.95,
-        tension: 150,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      Animated.timing(borderColorAnim, {
-        toValue: selected ? 1 : 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
-      Animated.timing(backgroundColorAnim, {
-        toValue: selected ? 1 : 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
-    ]).start();
+    // Animate selection state - use non-native for colors
+    Animated.timing(colorAnim, {
+      toValue: selected ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false, // Colors require non-native
+    }).start();
   }, [selected]);
   
   const handlePress = () => {
-    if (Platform.OS === 'ios') {
-      Haptics.selectionAsync();
-    }
-    // Scale animation on press
+    // if (Platform.OS === 'ios') {
+    //   Haptics.selectionAsync();
+    // }
+    
+    // Scale animation on press - use native driver
     Animated.sequence([
       Animated.timing(scaleAnim, {
-        toValue: 0.92,
+        toValue: 0.95,
         duration: 50,
         useNativeDriver: true,
       }),
@@ -76,14 +64,14 @@ const RadioItem: React.FC<RadioItemProps> = ({ option, selected, onPress }) => {
     onPress();
   };
   
-  const animatedBorderColor = borderColorAnim.interpolate({
+  const animatedBorderColor = colorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255, 255, 255, 0.5)', '#84cc16'],
+    outputRange: ['#E5E7EB', '#84cc16'],
   });
   
-  const animatedBackgroundColor = backgroundColorAnim.interpolate({
+  const animatedBackgroundColor = colorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#ffffff', '#1f2937'],
+    outputRange: ['#FFFFFF', '#F0FDF4'],
   });
   
   return (
@@ -101,17 +89,28 @@ const RadioItem: React.FC<RadioItemProps> = ({ option, selected, onPress }) => {
         styles.radioItem,
         {
           transform: [{ scale: scaleAnim }],
-          borderColor: animatedBorderColor,
-          backgroundColor: animatedBackgroundColor,
         },
       ]}
     >
-    <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
-      {selected && <View style={styles.radioInner} />}
-    </View>
-    <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
-      {option.label}
-    </Text>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            borderRadius: 12,
+            borderWidth: 2,
+            borderColor: animatedBorderColor,
+            backgroundColor: animatedBackgroundColor,
+          },
+        ]}
+      />
+      <View style={styles.radioContent}>
+        <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
+          {selected && <View style={styles.radioInner} />}
+        </View>
+        <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
+          {option.label}
+        </Text>
+      </View>
     </Animated.View>
   </TouchableOpacity>
   );
@@ -147,53 +146,54 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   radioItem: {
+    height: 56,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  radioContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
   },
   radioItemSelected: {
-    backgroundColor: '#1f2937',
+    backgroundColor: '#F0FDF4',
     borderColor: '#84cc16',
-    shadowOpacity: 0.2,
-    elevation: 4,
+    shadowOpacity: 0.1,
+    elevation: 2,
   },
   radioCircle: {
     width: 20,
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#6b7280',
+    borderColor: '#D1D5DB',
     marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   radioCircleSelected: {
     borderColor: '#84cc16',
   },
   radioInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: '#84cc16',
   },
   radioLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
     color: '#374151',
     flex: 1,
   },
   radioLabelSelected: {
-    color: '#ffffff',
+    color: '#1F2937',
     fontWeight: '600',
   },
 });

@@ -3,13 +3,8 @@ import { storage } from '../lib/utils';
 
 type OnboardingStep = 
   | 'welcome'
-  | 'language'
-  | 'interests'
-  | 'audioPrefs'
-  | 'location'
-  | 'privacy'
-  | 'tutorial'
-  | 'completion';
+  | 'personalization'
+  | 'permissions';
 
 interface OnboardingContextType {
   currentStep: OnboardingStep;
@@ -30,24 +25,14 @@ const OnboardingContext = createContext<OnboardingContextType | undefined>(undef
 
 const steps: OnboardingStep[] = [
   'welcome',
-  'language',
-  'interests',
-  'audioPrefs',
-  'location',
-  'privacy',
-  'tutorial',
-  'completion'
+  'personalization',
+  'permissions'
 ];
 
 const stepLabels: Record<OnboardingStep, string> = {
   'welcome': 'Welcome',
-  'language': 'Language',
-  'interests': 'Interests',
-  'audioPrefs': 'Audio',
-  'location': 'Location',
-  'privacy': 'Privacy',
-  'tutorial': 'Tutorial',
-  'completion': 'Complete'
+  'personalization': 'Personalize',
+  'permissions': 'Get Started'
 };
 
 const ONBOARDING_KEY = 'hasCompletedOnboarding';
@@ -90,6 +75,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     try {
       await storage.setItem(ONBOARDING_KEY, 'true');
       setHasCompletedOnboarding(true);
+      // Reset to welcome for next time (though it won't show)
+      setCurrentStep('welcome');
     } catch (error) {
       console.error('Error saving onboarding completion:', error);
     }

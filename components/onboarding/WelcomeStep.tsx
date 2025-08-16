@@ -1,109 +1,147 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Platform, AccessibilityInfo } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
-import { Icon } from '../ui/Icon';
 import { useOnboarding } from '../../contexts/OnboardingContext';
+import { Ionicons } from '@expo/vector-icons';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const WelcomeStep: React.FC = () => {
   const { nextStep } = useOnboarding();
   
-  // Animation values
-  const iconScale = useRef(new Animated.Value(0)).current;
-  const titleOpacity = useRef(new Animated.Value(0)).current;
-  const subtitleOpacity = useRef(new Animated.Value(0)).current;
-  const buttonScale = useRef(new Animated.Value(0)).current;
+  // Animations - start with visible values
+  const logoAnim = useRef(new Animated.Value(1)).current;
+  const titleAnim = useRef(new Animated.Value(1)).current;
+  const subtitleAnim = useRef(new Animated.Value(1)).current;
+  const buttonAnim = useRef(new Animated.Value(1)).current;
   
   useEffect(() => {
-    // Entrance animation sequence
+    // Reset and animate
+    logoAnim.setValue(0);
+    titleAnim.setValue(0);
+    subtitleAnim.setValue(0);
+    buttonAnim.setValue(0);
+    
+    // Staggered entrance animation
     Animated.sequence([
-      Animated.spring(iconScale, {
+      Animated.timing(logoAnim, {
         toValue: 1,
-        tension: 50,
-        friction: 5,
+        duration: 500,
         useNativeDriver: true,
       }),
-      Animated.parallel([
-        Animated.timing(titleOpacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(subtitleOpacity, {
-          toValue: 1,
-          duration: 400,
-          delay: 100,
-          useNativeDriver: true,
-        }),
-        Animated.spring(buttonScale, {
-          toValue: 1,
-          tension: 65,
-          friction: 8,
-          delay: 200,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start(() => {
-      // Announce screen content for screen readers
-      AccessibilityInfo.announceForAccessibility(
-        "Welcome to Nuolo setup. Step 1 of 8. Get started with your personalized audio guide experience."
-      );
-    });
+      Animated.timing(titleAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(subtitleAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.spring(buttonAnim, {
+        toValue: 1,
+        tension: 50,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, []);
-  
-  const handleGetStarted = () => {
-    if (Platform.OS === 'ios') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    nextStep();
-  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Card variant="gradient" style={styles.card}>
-        <View style={styles.content}>
-          <Animated.View style={[
-            styles.iconContainer,
-            {
-              transform: [{ scale: iconScale }]
-            }
-          ]}>
-            <Icon name="headset" size={48} color="#ffffff" />
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <View style={styles.content}>
+        <View style={styles.centerContent}>
+          {/* Logo/Icon */}
+          <Animated.View 
+            style={[
+              styles.logoContainer,
+              {
+                opacity: logoAnim,
+                transform: [
+                  {
+                    scale: logoAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.5, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <View style={styles.logoCircle}>
+              <Ionicons name="location" size={48} color="#84cc16" />
+            </View>
           </Animated.View>
           
-          <Animated.Text style={[
-            styles.title,
-            { opacity: titleOpacity }
-          ]}>
-            Welcome to Nuolo
-          </Animated.Text>
+          {/* Title */}
+          <Animated.View 
+            style={[
+              styles.textContainer,
+              {
+                opacity: titleAnim,
+                transform: [
+                  {
+                    translateY: titleAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Text style={styles.title}>Welcome to Nuolo</Text>
+          </Animated.View>
           
-          <Animated.Text style={[
-            styles.subtitle,
-            { opacity: subtitleOpacity }
-          ]}>
-            Your personalized audio guide for exploring the world around you.
-            Let's set up your experience in a few quick steps.
-          </Animated.Text>
-          
-          <Animated.View style={[
-            styles.buttonContainer,
-            {
-              transform: [{ scale: buttonScale }]
-            }
-          ]}>
-            <Button
-              title="Get Started"
-              onPress={handleGetStarted}
-              variant="primary"
-              size="lg"
-              style={styles.button}
-            />
+          {/* Subtitle */}
+          <Animated.View 
+            style={[
+              styles.textContainer,
+              {
+                opacity: subtitleAnim,
+                transform: [
+                  {
+                    translateY: subtitleAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Text style={styles.subtitle}>
+              Your personal audio tour guide.{'\n'}
+              Discover stories behind every location.
+            </Text>
           </Animated.View>
         </View>
-      </Card>
+        
+        {/* CTA Button */}
+        <Animated.View 
+          style={[
+            styles.buttonContainer,
+            {
+              opacity: buttonAnim,
+              transform: [
+                {
+                  scale: buttonAnim,
+                },
+              ],
+            },
+          ]}
+        >
+          <Button
+            title="Get Started"
+            onPress={nextStep}
+            variant="primary"
+            size="lg"
+            style={styles.button}
+          />
+        </Animated.View>
+      </View>
     </SafeAreaView>
   );
 };
@@ -111,52 +149,60 @@ export const WelcomeStep: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(132, 204, 22, 0.1)',
-    padding: 20,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
   },
   content: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
+    paddingHorizontal: 24,
+    justifyContent: 'space-between',
   },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoContainer: {
+    marginBottom: 48,
+  },
+  logoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F0FDF4',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    shadowColor: '#84cc16',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  textContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: '#1F2937',
     textAlign: 'center',
-    marginBottom: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.95)',
+    color: '#6B7280',
     textAlign: 'center',
     lineHeight: 24,
-    marginBottom: 32,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
+    paddingHorizontal: 32,
   },
   buttonContainer: {
-    width: '100%',
+    paddingBottom: 32,
   },
   button: {
-    width: '100%',
+    shadowColor: '#84cc16',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
 });

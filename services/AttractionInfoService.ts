@@ -23,6 +23,7 @@ interface UserPreferences {
   theme: string;
   audioLength: string;
   voiceStyle: string;
+  language?: string;
 }
 
 interface AttractionInfoRequest {
@@ -71,13 +72,16 @@ export class AttractionInfoService {
         attractionName,
         attractionAddress,
         userLocation,
-        preferences,
+        preferences: {
+          ...preferences,
+          language: preferences.language || 'en', // Default to English if not specified
+        },
         generateAudio: options.generateAudio || false,
         streamAudio: options.streamAudio || false,
         testMode: options.testMode || false,
         iosSafari: false, // React Native doesn't need Safari-specific handling
         existingText: options.existingText,
-        model: 'gpt-5.0-turbo',
+        model: 'gpt-4o',
         ttsModel: 'tts-1-hd',
         returnWordTimestamps: true,
       };
@@ -90,39 +94,68 @@ export class AttractionInfoService {
         options,
       });
 
-      const { data, error } = await supabase.functions.invoke('attraction-info', {
-        body: requestData,
-      });
+      // Add timeout and better error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      if (error) {
-        console.error('Supabase edge function error:', error);
-        throw new Error(error.message || 'Failed to generate attraction information');
+      try {
+        const { data, error } = await supabase.functions.invoke('attraction-info', {
+          body: JSON.stringify(requestData),
+        });
+
+        clearTimeout(timeoutId);
+
+        if (error) {
+          console.error('Supabase edge function error:', error);
+          // Check for specific error types
+          if (error.message?.includes('Failed to send')) {
+            throw new Error('Connection error: Please check your internet connection and try again');
+          }
+          throw new Error(error.message || 'Failed to generate attraction information');
+        }
+
+        if (!data) {
+          throw new Error('No data received from server');
+        }
+
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        if (!data.info && !options.generateAudio) {
+          throw new Error('No information received from server');
+        }
+
+        return {
+          info: data.info,
+          audio: data.audio,
+          transcriptSegments: data.transcriptSegments,
+          modelUsed: data.modelUsed,
+          voiceUsed: data.voiceUsed,
+        };
+      } catch (timeoutError) {
+        if (controller.signal.aborted) {
+          throw new Error('Request timeout: The server took too long to respond. Please try again.');
+        }
+        throw timeoutError;
       }
-
-      if (!data) {
-        throw new Error('No data received from server');
-      }
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      if (!data.info && !options.generateAudio) {
-        throw new Error('No information received from server');
-      }
-
-      return {
-        info: data.info,
-        audio: data.audio,
-        transcriptSegments: data.transcriptSegments,
-        modelUsed: data.modelUsed,
-        voiceUsed: data.voiceUsed,
-      };
     } catch (error) {
       console.error('Error in generateAttractionInfo:', error);
       
       // Return a more user-friendly error message
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Connection error')) {
+          errorMessage = 'Connection error: Please check your internet connection';
+        } else if (error.message.includes('timeout')) {
+          errorMessage = 'Request timed out. Please try again';
+        } else if (error.message.includes('Failed to send')) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection';
+        } else {
+          errorMessage = error.message;
+        }
+      }
       
       return {
         error: `Failed to generate attraction information: ${errorMessage}`,

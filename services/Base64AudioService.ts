@@ -86,13 +86,14 @@ export class Base64AudioService {
         return this.audioCache.get(cacheKey)!;
       }
 
-      // Create data URI for immediate playback
-      const audioUri = `data:audio/mp3;base64,${base64Data}`;
+      // IMPORTANT: Use file system instead of data URI to avoid platform limitations
+      // Data URIs have size limits that can truncate audio on mobile platforms
+      const fileUri = await this.createTempFile(base64Data);
       
-      // Cache the URI
-      this.audioCache.set(cacheKey, audioUri);
+      // Cache the file URI
+      this.audioCache.set(cacheKey, fileUri);
       
-      return audioUri;
+      return fileUri;
     } catch (error) {
       console.error('Error creating audio URI:', error);
       throw error;

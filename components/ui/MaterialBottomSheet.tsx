@@ -715,6 +715,7 @@ const styles = StyleSheet.create({
   // List styles
   listContainer: {
     paddingVertical: 0,
+    paddingBottom: 150, // Increased bottom spacing to ensure last item is accessible in all sheet states
   },
   listSeparator: {
     height: 1,

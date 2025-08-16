@@ -7,6 +7,7 @@ import {
   ScrollView,
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { useApp } from '../../contexts/AppContext';
 
 interface SettingsContentProps {
   mapType: 'satellite' | 'hybrid';
@@ -23,6 +24,7 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
   onMapTiltChange,
   onClose,
 }) => {
+  const { userPreferences, setUserPreferences } = useApp();
   const mapTypes: Array<{ type: 'satellite' | 'hybrid'; label: string; icon: string }> = [
     { type: 'satellite', label: 'Satellite', icon: 'satellite' },
     { type: 'hybrid', label: 'Hybrid', icon: 'layers' },
@@ -98,6 +100,93 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
         </View>
       </View>
       
+      {/* Audio Length Preference */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Audio Guide Length</Text>
+        <Text style={styles.sectionDescription}>
+          Choose how detailed you want your audio guides to be
+        </Text>
+        <View style={styles.audioLengthOptions}>
+          <TouchableOpacity
+            style={[
+              styles.audioOption,
+              userPreferences.audioLength === 'short' && styles.audioOptionActive,
+            ]}
+            onPress={() => setUserPreferences({ ...userPreferences, audioLength: 'short' })}
+          >
+            <MaterialIcons 
+              name="timer" 
+              size={20} 
+              color={userPreferences.audioLength === 'short' ? '#84cc16' : '#6B7280'} 
+            />
+            <View style={styles.audioOptionContent}>
+              <Text style={[
+                styles.audioOptionTitle,
+                userPreferences.audioLength === 'short' && styles.audioOptionTitleActive,
+              ]}>
+                Quick (~1 min)
+              </Text>
+              <Text style={styles.audioOptionDesc}>Brief highlights only</Text>
+            </View>
+            {userPreferences.audioLength === 'short' && (
+              <MaterialIcons name="check-circle" size={20} color="#84cc16" />
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.audioOption,
+              userPreferences.audioLength === 'medium' && styles.audioOptionActive,
+            ]}
+            onPress={() => setUserPreferences({ ...userPreferences, audioLength: 'medium' })}
+          >
+            <MaterialIcons 
+              name="access-time" 
+              size={20} 
+              color={userPreferences.audioLength === 'medium' ? '#84cc16' : '#6B7280'} 
+            />
+            <View style={styles.audioOptionContent}>
+              <Text style={[
+                styles.audioOptionTitle,
+                userPreferences.audioLength === 'medium' && styles.audioOptionTitleActive,
+              ]}>
+                Standard (~3 min)
+              </Text>
+              <Text style={styles.audioOptionDesc}>Key facts and stories</Text>
+            </View>
+            {userPreferences.audioLength === 'medium' && (
+              <MaterialIcons name="check-circle" size={20} color="#84cc16" />
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.audioOption,
+              userPreferences.audioLength === 'deep-dive' && styles.audioOptionActive,
+            ]}
+            onPress={() => setUserPreferences({ ...userPreferences, audioLength: 'deep-dive' })}
+          >
+            <MaterialIcons 
+              name="explore" 
+              size={20} 
+              color={userPreferences.audioLength === 'deep-dive' ? '#84cc16' : '#6B7280'} 
+            />
+            <View style={styles.audioOptionContent}>
+              <Text style={[
+                styles.audioOptionTitle,
+                userPreferences.audioLength === 'deep-dive' && styles.audioOptionTitleActive,
+              ]}>
+                Deep Dive (~5 min)
+              </Text>
+              <Text style={styles.audioOptionDesc}>Comprehensive exploration</Text>
+            </View>
+            {userPreferences.audioLength === 'deep-dive' && (
+              <MaterialIcons name="check-circle" size={20} color="#84cc16" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+      
       {/* Additional Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Map Features</Text>
@@ -134,6 +223,9 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
         <Text style={styles.mapInfoText}>© 2024 Google Maps</Text>
         <Text style={styles.mapInfoText}>Map data updated regularly</Text>
       </View>
+      
+      {/* Bottom spacing to ensure last content is accessible in all sheet states */}
+      <View style={{ height: 150 }} />
     </ScrollView>
   );
 };
@@ -218,6 +310,39 @@ const styles = StyleSheet.create({
   },
   tiltLabelActive: {
     fontWeight: '500',
+  },
+  audioLengthOptions: {
+    gap: 12,
+  },
+  audioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  audioOptionActive: {
+    borderColor: '#84cc16',
+    backgroundColor: '#F0FDF4',
+  },
+  audioOptionContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  audioOptionTitle: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  audioOptionTitleActive: {
+    color: '#84cc16',
+  },
+  audioOptionDesc: {
+    fontSize: 12,
+    color: '#6B7280',
   },
   featuresList: {
     gap: 12,

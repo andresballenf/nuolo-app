@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,14 +7,14 @@ import {
   Modal,
   SafeAreaView,
   Dimensions,
-  Animated,
-  Image,
   ScrollView,
+  Image,
 } from 'react-native';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { AudioTrack } from '../../contexts/AudioContext';
-import { TranscriptSegment } from '../../services/AttractionInfoService';
+import { useApp } from '../../contexts/AppContext';
 import * as Haptics from 'expo-haptics';
 
 interface FullScreenAudioModeProps {
@@ -35,10 +35,23 @@ interface FullScreenAudioModeProps {
   duration?: number;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
-  transcriptSegments?: TranscriptSegment[];
+  transcriptSegments?: any[]; // Not used anymore but kept for compatibility
 }
 
 const { width, height } = Dimensions.get('window');
+const VIEWPORT_CENTER = height * 0.4; // Golden ratio position for active text
+
+// Adaptive TTS timing - will be calculated based on actual audio duration
+const DEFAULT_WORDS_PER_MINUTE = 150; // OpenAI TTS default speed
+const WORDS_PER_PHRASE = 4; // Group words into phrases of 3-5 words
+const INITIAL_SILENCE_MS = 500; // OpenAI TTS typically has ~500ms silence at start
+const END_SILENCE_MS = 500; // Fixed end silence instead of percentage
+
+// Punctuation pause durations (in milliseconds)
+const PAUSE_PERIOD = 500; // Pause after sentence
+const PAUSE_COMMA = 250; // Pause after comma
+const PAUSE_SEMICOLON = 350; // Pause after semicolon
+const PAUSE_QUESTION = 450; // Pause after question
 
 export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   isVisible,
@@ -58,166 +71,252 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   duration = 0,
   playbackRate = 1.0,
   onPlaybackRateChange,
-  transcriptSegments = [],
+  transcriptSegments,
 }) => {
-  const [showVolumeControl, setShowVolumeControl] = useState(false);
+  const { userPreferences } = useApp();
   const scrollViewRef = useRef<ScrollView>(null);
+  const phraseRefs = useRef<{ [key: number]: View | null }>({});
+  const isUserScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const lastScrolledPhraseRef = useRef(-1);
 
-  // Create properly timed segments from the text for better synchronization
-  const derivedSegments: TranscriptSegment[] = useMemo(() => {
-    if (transcriptSegments && transcriptSegments.length > 0) return transcriptSegments;
-    if (!currentTrack?.description || duration <= 0) return [];
+  // Split text into phrases with realistic TTS timing
+  const phrases = useMemo(() => {
+    if (!currentTrack?.description) return [];
     
-    // Split text into sentences for better timing control
-    const sentences = currentTrack.description
-      .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
-      .filter(Boolean);
+    // Split text into words
+    const allWords = currentTrack.description
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(word => word.trim())
+      .filter(word => word.length > 0);
     
-    if (sentences.length === 0) return [];
+    if (allWords.length === 0) return [];
     
-    // Calculate timing for each sentence based on character count
-    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0);
-    let cursor = 0;
+    // Group words into phrases
+    const phraseList: { 
+      text: string; 
+      startMs: number; 
+      endMs: number; 
+      wordCount: number;
+      hasPunctuation: string | null;
+    }[] = [];
+    let i = 0;
     
-    return sentences.map(s => {
-      const portion = s.length / Math.max(1, totalChars);
-      const segDuration = portion * duration;
+    while (i < allWords.length) {
+      // Determine phrase length (3-5 words, but can be shorter at end of sentences)
+      let phraseLength = WORDS_PER_PHRASE;
+      let punctuation: string | null = null;
       
-      // Split sentence into words with CORRECT sequential timing
-      const words = s.split(/\s+/).filter(Boolean);
-      const wordTotalChars = words.reduce((sum, w) => sum + w.length, 0) || 1;
-      let wordCursor = cursor;
+      // Look for natural break points (punctuation)
+      for (let j = 1; j <= Math.min(WORDS_PER_PHRASE + 1, allWords.length - i); j++) {
+        const word = allWords[i + j - 1];
+        const punctMatch = word.match(/([.!?,;:])$/);
+        if (punctMatch) {
+          phraseLength = j;
+          punctuation = punctMatch[1];
+          break;
+        }
+      }
       
-      const wordTimings = words.map((word, index) => {
-        // Each word gets time proportional to its length
-        const wordPortion = word.length / wordTotalChars;
-        const wordDuration = wordPortion * segDuration;
-        const wordStart = wordCursor;
-        const wordEnd = index === words.length - 1 
-          ? cursor + segDuration // Last word ends at segment end
-          : wordCursor + wordDuration;
-        
-        const timing = {
-          text: word,
-          startMs: Math.round(wordStart),
-          endMs: Math.round(wordEnd),
-        };
-        
-        wordCursor = wordEnd; // Move cursor for next word
-        return timing;
+      // Don't exceed remaining words
+      phraseLength = Math.min(phraseLength, allWords.length - i);
+      
+      // Extract phrase
+      const phraseWords = allWords.slice(i, i + phraseLength);
+      const phraseText = phraseWords.join(' ');
+      
+      phraseList.push({
+        text: phraseText,
+        startMs: 0, // Will be calculated below
+        endMs: 0, // Will be calculated below
+        wordCount: phraseWords.length,
+        hasPunctuation: punctuation,
       });
       
-      const seg: TranscriptSegment = {
-        text: s,
-        startMs: Math.round(cursor),
-        endMs: Math.round(cursor + segDuration),
-        words: wordTimings,
-      };
-      
-      cursor += segDuration;
-      return seg;
-    });
-  }, [transcriptSegments, currentTrack?.description, duration]);
-
-  // Compute active transcript segment index based on current playback position
-  const activeSegmentIndex = useMemo(() => {
-    const segments = derivedSegments;
-    if (!segments || segments.length === 0) return -1;
+      i += phraseLength;
+    }
     
-    // Binary search for better performance with many segments
+    // Calculate adaptive timing based on actual audio duration
+    if (duration > 0) {
+      // Calculate actual speech rate from audio duration
+      const totalWords = allWords.length;
+      const effectiveStartTime = INITIAL_SILENCE_MS;
+      const effectiveDuration = Math.max(100, duration - INITIAL_SILENCE_MS - END_SILENCE_MS);
+      
+      // Calculate actual words per minute from the audio
+      const actualWPM = (totalWords / (effectiveDuration / 60000));
+      console.log(`Adaptive timing: ${totalWords} words in ${effectiveDuration}ms = ${actualWPM.toFixed(1)} WPM`);
+      console.log(`Audio duration: ${duration}ms, Effective speech time: ${effectiveDuration}ms`);
+      
+      // Simple proportional distribution - no complex pause calculations
+      // Just distribute time evenly based on word count per phrase
+      const msPerWord = effectiveDuration / totalWords;
+      
+      // Assign timing to each phrase based on word count
+      let currentTime = effectiveStartTime;
+      
+      phraseList.forEach((phrase, index) => {
+        phrase.startMs = currentTime;
+        
+        // Simple proportional duration based on word count
+        const phraseDuration = phrase.wordCount * msPerWord;
+        
+        // Add small pause for punctuation (but keep it minimal)
+        let pauseDuration = 0;
+        if (phrase.hasPunctuation === '.' || phrase.hasPunctuation === '!' || phrase.hasPunctuation === '?') {
+          pauseDuration = 200; // Small pause for sentence endings
+        } else if (phrase.hasPunctuation === ',' || phrase.hasPunctuation === ';' || phrase.hasPunctuation === ':') {
+          pauseDuration = 100; // Tiny pause for other punctuation
+        }
+        
+        phrase.endMs = currentTime + phraseDuration + pauseDuration;
+        currentTime = phrase.endMs;
+      });
+      
+      // Adjust last phrase to align with actual audio duration
+      if (phraseList.length > 0) {
+        const lastPhrase = phraseList[phraseList.length - 1];
+        const maxEndTime = duration - END_SILENCE_MS;
+        if (lastPhrase.endMs > maxEndTime) {
+          // Scale all timings proportionally to fit
+          const scaleFactor = (maxEndTime - effectiveStartTime) / (lastPhrase.endMs - effectiveStartTime);
+          phraseList.forEach(phrase => {
+            phrase.startMs = effectiveStartTime + (phrase.startMs - effectiveStartTime) * scaleFactor;
+            phrase.endMs = effectiveStartTime + (phrase.endMs - effectiveStartTime) * scaleFactor;
+          });
+        }
+      }
+    } else {
+      // Fallback: estimate based on default speech rate when no duration available
+      const msPerWord = 60000 / DEFAULT_WORDS_PER_MINUTE;
+      
+      let currentTime = INITIAL_SILENCE_MS;
+      phraseList.forEach(phrase => {
+        phrase.startMs = currentTime;
+        
+        // Simple duration from word count
+        const phraseDuration = phrase.wordCount * msPerWord;
+        
+        // Add minimal pauses for punctuation
+        let pauseDuration = 0;
+        if (phrase.hasPunctuation === '.' || phrase.hasPunctuation === '!' || phrase.hasPunctuation === '?') {
+          pauseDuration = 200;
+        } else if (phrase.hasPunctuation === ',' || phrase.hasPunctuation === ';' || phrase.hasPunctuation === ':') {
+          pauseDuration = 100;
+        }
+        
+        phrase.endMs = currentTime + phraseDuration + pauseDuration;
+        currentTime = phrase.endMs;
+      });
+    }
+    
+    return phraseList;
+  }, [currentTrack?.description, duration]);
+
+  // Find the active phrase based on current position (with initial delay consideration)
+  const activePhraseIndex = useMemo(() => {
+    if (phrases.length === 0) return -1;
+    
+    // Don't highlight anything during initial silence
+    if (position < INITIAL_SILENCE_MS) {
+      console.log(`Position ${position}ms is still in initial silence (${INITIAL_SILENCE_MS}ms)`);
+      return -1;
+    }
+    
+    // Binary search for efficiency
     let left = 0;
-    let right = segments.length - 1;
+    let right = phrases.length - 1;
     
     while (left <= right) {
       const mid = Math.floor((left + right) / 2);
-      const seg = segments[mid];
+      const phrase = phrases[mid];
       
-      if (position >= seg.startMs && position < seg.endMs) {
+      if (position >= phrase.startMs && position < phrase.endMs) {
         return mid;
-      } else if (position < seg.startMs) {
+      } else if (position < phrase.startMs) {
         right = mid - 1;
       } else {
         left = mid + 1;
       }
     }
     
-    // Handle edge cases
-    if (position >= (segments[segments.length - 1]?.endMs || 0)) return segments.length - 1;
-    if (position <= 0) return 0;
-    
-    // Find nearest segment
-    return Math.max(0, Math.min(segments.length - 1, left));
-  }, [position, derivedSegments]);
-
-  // Find the active word within the current segment
-  const activeWordIndex = useMemo(() => {
-    const segments = derivedSegments;
-    if (activeSegmentIndex < 0 || !segments[activeSegmentIndex]?.words) return -1;
-    
-    const currentSegment = segments[activeSegmentIndex];
-    const words = currentSegment.words || [];
-    
-    // Binary search for better performance
-    let left = 0;
-    let right = words.length - 1;
-    
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const word = words[mid];
-      
-      if (position >= word.startMs && position < word.endMs) {
-        return mid;
-      } else if (position < word.startMs) {
-        right = mid - 1;
-      } else {
-        left = mid + 1;
-      }
+    // If we're past all phrases but still in audio, highlight the last phrase
+    if (position >= (phrases[phrases.length - 1]?.endMs || 0)) {
+      return phrases.length - 1;
     }
     
-    // Return nearest word
-    return Math.max(0, Math.min(words.length - 1, left));
-  }, [position, activeSegmentIndex, derivedSegments]);
+    return -1;
+  }, [position, phrases]);
 
-  // Refs for precise positioning and measurements
-  const textContainerRefs = useRef<{ [key: number]: View | null }>({});
-  const containerHeight = useRef<number>(0);
-  const lastActiveIndex = useRef<number>(-1);
-  
-  // Perfect center-lock auto-scroll with precise positioning
+  // Calculate progress within current phrase (for visual feedback)
+  const phraseProgress = useMemo(() => {
+    if (activePhraseIndex < 0 || !phrases[activePhraseIndex]) return 0;
+    
+    const phrase = phrases[activePhraseIndex];
+    const phrasePosition = position - phrase.startMs;
+    const phraseDuration = phrase.endMs - phrase.startMs;
+    
+    return Math.min(1, Math.max(0, phrasePosition / phraseDuration));
+  }, [position, phrases, activePhraseIndex]);
+
+  // Auto-scroll to keep active phrase in view
   useEffect(() => {
-    if (scrollViewRef.current && activeSegmentIndex >= 0 && activeSegmentIndex !== lastActiveIndex.current) {
-      lastActiveIndex.current = activeSegmentIndex;
+    if (!isUserScrollingRef.current && activePhraseIndex >= 0 && activePhraseIndex !== lastScrolledPhraseRef.current) {
+      lastScrolledPhraseRef.current = activePhraseIndex;
       
-      // Use requestAnimationFrame for smooth, frame-synced scrolling
-      requestAnimationFrame(() => {
-        const activeTextRef = textContainerRefs.current[activeSegmentIndex];
-        if (activeTextRef && containerHeight.current > 0) {
-          // Measure the exact position of the active text element
-          activeTextRef.measureInWindow((x, y, width, elementHeight) => {
+      const phraseRef = phraseRefs.current[activePhraseIndex];
+      if (phraseRef && scrollViewRef.current) {
+        phraseRef.measureLayout(
+          scrollViewRef.current as any,
+          (x, y, width, height) => {
             if (scrollViewRef.current) {
-              // Calculate the exact center position
-              const viewportCenter = containerHeight.current / 2;
-              const elementCenter = elementHeight / 2;
+              // Calculate position to center the phrase
+              const scrollToY = Math.max(0, y - VIEWPORT_CENTER + height / 2);
               
-              // Calculate scroll position to put element center at viewport center
-              const targetScrollY = Math.max(0, y + elementCenter - viewportCenter);
-              
-              // Smooth scroll to exact center position
               scrollViewRef.current.scrollTo({
-                y: targetScrollY,
+                y: scrollToY,
                 animated: true,
               });
             }
-          });
-        }
-      });
+          },
+          () => {
+            // Error callback - fail silently
+          }
+        );
+      }
     }
-  }, [activeSegmentIndex]);
+  }, [activePhraseIndex]);
+
+  // Handle user scroll interactions
+  const handleScrollBeginDrag = useCallback(() => {
+    isUserScrollingRef.current = true;
+    
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+  }, []);
+
+  const handleScrollEndDrag = useCallback(() => {
+    // Resume auto-scroll after 3 seconds
+    scrollTimeoutRef.current = setTimeout(() => {
+      isUserScrollingRef.current = false;
+      lastScrolledPhraseRef.current = -1; // Reset to allow scrolling to current phrase
+    }, 3000);
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSkipBack = () => {
     if (onSeek) {
-      const newPosition = Math.max(0, position - 30000); // Skip back 30 seconds
+      const newPosition = Math.max(0, position - 30000);
       onSeek(newPosition);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -230,14 +329,15 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const handleSeek = (value: number) => {
-    if (onSeek && duration > 0) {
-      const seekTime = (value / 100) * duration;
-      onSeek(seekTime);
-    }
-  };
-
   const progressPercentage = duration > 0 ? (position / duration) * 100 : 0;
+
+  // Handle seeking when tapping on a phrase
+  const handlePhrasePress = useCallback((phraseIndex: number) => {
+    if (onSeek && phrases[phraseIndex]) {
+      onSeek(phrases[phraseIndex].startMs);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, [phrases, onSeek]);
 
   if (!currentTrack) {
     return null;
@@ -254,9 +354,8 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
       }}
     >
       <SafeAreaView style={styles.container}>
-        {/* Header with attraction image, title, and back button */}
+        {/* Header */}
         <View style={styles.header}>
-          {/* Left: Attraction image */}
           <View style={styles.attractionImageContainer}>
             {currentTrack.imageUrl ? (
               <Image source={{ uri: currentTrack.imageUrl }} style={styles.attractionImage} />
@@ -267,135 +366,110 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
             )}
           </View>
 
-          {/* Center: Attraction name */}
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={2}>
               {currentTrack.title}
             </Text>
+            <View style={styles.metadataRow}>
+              <Text style={styles.audioLengthIndicator}>
+                {userPreferences.audioLength === 'short' && '⚡ Quick'}
+                {userPreferences.audioLength === 'medium' && '🎯 Standard'}
+                {userPreferences.audioLength === 'deep-dive' && '🔍 Deep Dive'}
+              </Text>
+              <Text style={styles.languageIndicator}>
+                {userPreferences.language === 'en' && '🇺🇸 EN'}
+                {userPreferences.language === 'es' && '🇪🇸 ES'}
+                {userPreferences.language === 'fr' && '🇫🇷 FR'}
+                {userPreferences.language === 'de' && '🇩🇪 DE'}
+                {userPreferences.language === 'it' && '🇮🇹 IT'}
+                {userPreferences.language === 'pt' && '🇵🇹 PT'}
+                {userPreferences.language === 'ru' && '🇷🇺 RU'}
+                {userPreferences.language === 'ja' && '🇯🇵 JA'}
+                {userPreferences.language === 'ko' && '🇰🇷 KO'}
+                {userPreferences.language === 'zh' && '🇨🇳 ZH'}
+              </Text>
+            </View>
           </View>
 
-          {/* Right: Back button */}
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               onClose();
             }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="close" size={24} color="#1f2937" />
           </TouchableOpacity>
         </View>
 
-        {/* Main content area - scrollable text with perfect center-lock */}
-        <View 
-          style={styles.contentContainer}
-          onLayout={(event) => {
-            containerHeight.current = event.nativeEvent.layout.height;
-          }}
-        >
-          {derivedSegments && derivedSegments.length > 0 ? (
-            <View style={styles.textWrapper}>
-              {/* Enhanced top gradient with stronger fade for better focus */}
-              <LinearGradient
-                colors={[
-                  'rgba(255, 255, 255, 1)',
-                  'rgba(255, 255, 255, 0.95)',
-                  'rgba(255, 255, 255, 0.7)',
-                  'rgba(255, 255, 255, 0.3)',
-                  'transparent'
-                ]}
-                locations={[0, 0.2, 0.5, 0.8, 1]}
-                style={styles.topGradient}
-                pointerEvents="none"
-              />
-              
+        {/* Content with smooth gradient mask */}
+        <View style={styles.contentContainer}>
+          {phrases.length > 0 ? (
+            <MaskedView
+              style={styles.maskedContainer}
+              maskElement={
+                <LinearGradient
+                  colors={['transparent', 'black', 'black', 'black', 'transparent']}
+                  locations={[0, 0.08, 0.5, 0.92, 1]}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              }
+            >
               <ScrollView
                 ref={scrollViewRef}
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
-                scrollEnabled={true}
-                decelerationRate="fast"
-                bounces={false} // Disable bouncing for precise positioning
+                onScrollBeginDrag={handleScrollBeginDrag}
+                onScrollEndDrag={handleScrollEndDrag}
                 scrollEventThrottle={16}
-                onScrollBeginDrag={() => {
-                  // User manual scroll - temporarily disable auto-scroll
-                  lastActiveIndex.current = -2; // Set to impossible value to prevent auto-scroll
-                }}
-                onScrollEndDrag={() => {
-                  // Re-enable auto-scroll after manual scroll ends
-                  setTimeout(() => {
-                    lastActiveIndex.current = -1;
-                  }, 1000);
-                }}
               >
-                {derivedSegments.map((seg, index) => {
-                  const isActive = index === activeSegmentIndex;
-                  const isPast = index < activeSegmentIndex;
-                  const isFuture = index > activeSegmentIndex;
-                  
-                  return (
-                    <View 
-                      key={`${seg.startMs}-${index}`} 
-                      style={styles.textLineContainer}
-                      ref={(ref) => {
-                        textContainerRefs.current[index] = ref;
-                      }}
-                    >
-                      {seg.words && seg.words.length > 0 ? (
-                        // Render with word-level highlighting
-                        <Text style={[styles.textLine, isActive && styles.textLineActive]}>
-                          {seg.words.map((word, wordIndex) => {
-                            const isWordActive = isActive && wordIndex === activeWordIndex;
-                            return (
-                              <Text 
-                                key={`${seg.startMs}-${wordIndex}`} 
-                                style={[
-                                  styles.wordText,
-                                  isWordActive && styles.wordTextActive,
-                                  isPast && styles.wordTextPast,
-                                  isFuture && styles.wordTextFuture
-                                ]}
-                              >
-                                {word.text}
-                                {wordIndex < (seg.words?.length || 0) - 1 ? ' ' : ''}
-                              </Text>
-                            );
-                          })}
-                        </Text>
-                      ) : (
-                        // Fallback to segment-level highlighting
-                        <Text 
-                          style={[
-                            styles.textLine,
-                            isActive && styles.textLineActive,
-                            isPast && styles.textLinePast,
-                            isFuture && styles.textLineFuture
-                          ]}
-                        >
-                          {seg.text}
-                        </Text>
-                      )}
-                    </View>
-                  );
-                })}
+                <View style={styles.textContainer}>
+                  {phrases.map((phrase, index) => {
+                    const isActive = index === activePhraseIndex;
+                    const isPast = index < activePhraseIndex;
+                    const isFuture = index > activePhraseIndex;
+                    
+                    // Calculate proximity for smooth transitions
+                    const isNearActive = Math.abs(index - activePhraseIndex) === 1;
+                    
+                    return (
+                      <TouchableOpacity
+                        key={index}
+                        ref={(ref) => {
+                          phraseRefs.current[index] = ref as any;
+                        }}
+                        onPress={() => handlePhrasePress(index)}
+                        activeOpacity={0.7}
+                        style={styles.phraseWrapper}
+                      >
+                        <View style={isActive && styles.phraseActiveContainer}>
+                          {isActive && (
+                            <View 
+                              style={[
+                                styles.phraseProgressBar,
+                                { width: `${phraseProgress * 100}%` }
+                              ]} 
+                            />
+                          )}
+                          <Text
+                            style={[
+                              styles.phrase,
+                              isActive && styles.phraseActive,
+                              isPast && styles.phrasePast,
+                              isFuture && styles.phraseFuture,
+                              isNearActive && styles.phraseNear,
+                            ]}
+                          >
+                            {phrase.text}{' '}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </ScrollView>
-              
-              {/* Enhanced bottom gradient with stronger fade for better focus */}
-              <LinearGradient
-                colors={[
-                  'transparent',
-                  'rgba(255, 255, 255, 0.3)',
-                  'rgba(255, 255, 255, 0.7)',
-                  'rgba(255, 255, 255, 0.95)',
-                  'rgba(255, 255, 255, 1)'
-                ]}
-                locations={[0, 0.2, 0.5, 0.8, 1]}
-                style={styles.bottomGradient}
-                pointerEvents="none"
-              />
-            </View>
+            </MaskedView>
           ) : (
             <View style={styles.noTextContainer}>
               <MaterialIcons name="text-fields" size={48} color="rgba(0, 0, 0, 0.3)" />
@@ -404,9 +478,8 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
           )}
         </View>
 
-        {/* Bottom controls section */}
+        {/* Controls */}
         <View style={styles.bottomControls}>
-          {/* Progress bar with time display */}
           <View style={styles.progressSection}>
             <View style={styles.timeDisplay}>
               <Text style={styles.timeText}>{formatTime(position)}</Text>
@@ -447,22 +520,17 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Control buttons */}
           <View style={styles.controlButtons}>
-            {/* Skip back 30 seconds */}
             <TouchableOpacity
               style={styles.controlButton}
               onPress={handleSkipBack}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <MaterialIcons name="replay-30" size={28} color="#1f2937" />
             </TouchableOpacity>
 
-            {/* Play/Pause button */}
             <TouchableOpacity
               style={styles.playButton}
               onPress={isPlaying ? onPause : onPlay}
-              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
               <MaterialIcons 
                 name={isPlaying ? "pause" : "play-arrow"} 
@@ -471,68 +539,25 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
               />
             </TouchableOpacity>
 
-            {/* Skip forward 15 seconds */}
             <TouchableOpacity
               style={styles.controlButton}
               onPress={() => {
                 if (onSeek) {
-                  const newPosition = Math.min(duration, position + 15000); // Skip forward 15 seconds
+                  const newPosition = Math.min(duration, position + 15000);
                   onSeek(newPosition);
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
               }}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <MaterialIcons name="fast-forward" size={28} color="#1f2937" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Volume control overlay (when visible) */}
-        {showVolumeControl && (
-          <View style={styles.volumeOverlay}>
-            <View style={styles.volumeContainer}>
-              <View style={styles.volumeHeader}>
-                <MaterialIcons name={isMuted ? "volume-off" : "volume-up"} size={20} color="#ffffff" />
-                <Text style={styles.volumeLabel}>
-                  {isMuted ? 'Muted' : `${volume}%`}
-                </Text>
-              </View>
-              
-              <View style={styles.volumeBar}>
-                <View style={styles.volumeBarBackground}>
-                  <View 
-                    style={[
-                      styles.volumeBarFill,
-                      { width: `${volume}%` }
-                    ]} 
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.muteButton,
-                  isMuted && styles.muteButtonActive
-                ]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onMuteToggle();
-                }}
-              >
-                <MaterialIcons 
-                  name={isMuted ? "volume-off" : "volume-up"} 
-                  size={16} 
-                  color={isMuted ? "#ffffff" : "#1f2937"} 
-                />
-                <Text style={[
-                  styles.muteButtonText,
-                  isMuted && styles.muteButtonTextActive
-                ]}>
-                  {isMuted ? 'Unmute' : 'Mute'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+        {/* Auto-scroll indicator */}
+        {isUserScrollingRef.current && (
+          <View style={styles.scrollIndicator}>
+            <Text style={styles.scrollIndicatorText}>Auto-scroll paused</Text>
           </View>
         )}
       </SafeAreaView>
@@ -543,7 +568,7 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff', // White background like in the image
+    backgroundColor: '#ffffff',
   },
   header: {
     flexDirection: 'row',
@@ -583,6 +608,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
+  metadataRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 4,
+  },
+  audioLengthIndicator: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  languageIndicator: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
   backButton: {
     width: 40,
     height: 40,
@@ -593,115 +634,69 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
     backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    position: 'relative',
-    overflow: 'hidden', // Ensure gradients work properly
   },
-  textWrapper: {
+  maskedContainer: {
     flex: 1,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   scrollView: {
     flex: 1,
-    width: '100%',
   },
   scrollContent: {
+    paddingTop: VIEWPORT_CENTER,
+    paddingBottom: height - VIEWPORT_CENTER - 100,
+    paddingHorizontal: 24,
+  },
+  textContainer: {
     alignItems: 'center',
-    paddingVertical: height * 0.5, // Half screen padding for perfect vertical centering
-    minHeight: height, // Ensure content is at least screen height
   },
-  textLineContainer: {
-    marginBottom: 24,
-    paddingHorizontal: 12,
-    maxWidth: '92%',
-    alignItems: 'center',
-    minHeight: 32, // Ensure consistent spacing for measurements
+  phraseWrapper: {
+    marginVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  textLine: {
-    fontSize: 18,
-    color: 'rgba(0, 0, 0, 0.4)',
-    lineHeight: 28,
-    textAlign: 'center',
-    fontWeight: '400',
-    letterSpacing: 0.2,
-  },
-  textLineActive: {
-    color: '#000000',
+  phraseActiveContainer: {
+    position: 'relative',
     backgroundColor: 'rgba(132, 204, 22, 0.08)',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontWeight: '600',
-    fontSize: 24,
-    lineHeight: 36,
-    shadowColor: 'rgba(132, 204, 22, 0.2)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.6,
-    shadowRadius: 6,
-    elevation: 4,
-    transform: [{ scale: 1.02 }], // Subtle scale for emphasis
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  textLinePast: {
-    opacity: 0.35,
-    fontSize: 16,
-  },
-  textLineFuture: {
-    opacity: 0.25,
-    fontSize: 16,
-  },
-  wordText: {
-    fontSize: 18,
-    color: 'rgba(0, 0, 0, 0.4)',
-    lineHeight: 28,
-    textAlign: 'center',
-    fontWeight: '400',
-    letterSpacing: 0.2,
-  },
-  wordTextActive: {
-    color: '#000000',
-    backgroundColor: 'rgba(132, 204, 22, 0.35)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontWeight: '700',
-    fontSize: 24,
-    textShadowColor: 'rgba(132, 204, 22, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-    transform: [{ scale: 1.05 }], // Moderate scale for word highlighting
-  },
-  wordTextPast: {
-    opacity: 0.35,
-    color: 'rgba(0, 0, 0, 0.3)',
-    fontSize: 16,
-  },
-  wordTextFuture: {
-    opacity: 0.25,
-    color: 'rgba(0, 0, 0, 0.25)',
-    fontSize: 16,
-  },
-  topGradient: {
+  phraseProgressBar: {
     position: 'absolute',
     top: 0,
     left: 0,
-    right: 0,
-    height: height * 0.35, // Larger gradient area (35% of screen) for smoother transition
-    zIndex: 10,
-    pointerEvents: 'none',
-  },
-  bottomGradient: {
-    position: 'absolute',
     bottom: 0,
-    left: 0,
-    right: 0,
-    height: height * 0.35, // Larger gradient area (35% of screen) for smoother transition
-    zIndex: 10,
-    pointerEvents: 'none',
+    backgroundColor: 'rgba(132, 204, 22, 0.15)',
+    borderRadius: 12,
+  },
+  phrase: {
+    fontSize: 19,
+    color: 'rgba(0, 0, 0, 0.35)',
+    lineHeight: 30,
+    fontWeight: '400',
+    textAlign: 'center',
+  },
+  phraseActive: {
+    color: '#000000',
+    fontWeight: '700',
+    fontSize: 24,
+    lineHeight: 36,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    textShadowColor: 'rgba(132, 204, 22, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  phraseNear: {
+    color: 'rgba(0, 0, 0, 0.5)',
+    fontSize: 20,
+  },
+  phrasePast: {
+    color: 'rgba(0, 0, 0, 0.5)',
+    fontWeight: '500',
+  },
+  phraseFuture: {
+    color: 'rgba(0, 0, 0, 0.25)',
   },
   noTextContainer: {
     flex: 1,
@@ -718,6 +713,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 20,
     backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.05)',
   },
   progressSection: {
     alignItems: 'center',
@@ -796,67 +793,18 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  volumeOverlay: {
+  scrollIndicator: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    top: 120,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
-  volumeContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 20,
-  },
-  volumeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    gap: 8,
-  },
-  volumeLabel: {
-    fontSize: 16,
-    color: '#1f2937',
-    fontWeight: '600',
-  },
-  volumeBar: {
-    width: '100%',
-    height: 4,
-    marginBottom: 16,
-  },
-  volumeBarBackground: {
-    width: '100%',
-    height: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    borderRadius: 2,
-  },
-  volumeBarFill: {
-    height: '100%',
-    backgroundColor: '#84cc16',
-    borderRadius: 2,
-  },
-  muteButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
-    gap: 8,
-  },
-  muteButtonActive: {
-    backgroundColor: '#ef4444',
-  },
-  muteButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  muteButtonTextActive: {
+  scrollIndicatorText: {
     color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

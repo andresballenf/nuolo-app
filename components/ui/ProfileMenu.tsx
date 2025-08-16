@@ -13,6 +13,8 @@ import {
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
 import { useOnboarding } from '../../contexts/OnboardingContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { router } from 'expo-router';
 
 interface ProfileMenuProps {
   isVisible: boolean;
@@ -42,9 +44,21 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
 }) => {
   const { userPreferences, setUserPreferences } = useApp();
   const { preferences: onboardingPreferences } = useOnboarding();
+  const { user, isAuthenticated, signOut } = useAuth();
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  
+  const handleSignOut = async () => {
+    await signOut();
+    onClose();
+    router.replace('/auth');
+  };
+  
+  const handleSignIn = () => {
+    onClose();
+    router.push('/auth/login');
+  };
 
   useEffect(() => {
     if (isVisible) {
@@ -132,14 +146,47 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
             {/* User Info Section */}
             <View style={styles.section}>
               <View style={styles.userInfo}>
-                <View style={styles.avatar}>
-                  <MaterialIcons name="account-circle" size={60} color="#84cc16" />
+                <View style={[styles.avatar, isAuthenticated && styles.avatarAuthenticated]}>
+                  {isAuthenticated && user ? (
+                    <Text style={styles.avatarInitial}>
+                      {user.profile?.fullName?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase() || 'U'}
+                    </Text>
+                  ) : (
+                    <MaterialIcons name="account-circle" size={60} color="#9CA3AF" />
+                  )}
                 </View>
                 <View style={styles.userDetails}>
-                  <Text style={styles.userName}>Guest User</Text>
-                  <Text style={styles.userEmail}>Sign in for full features</Text>
+                  <Text style={styles.userName}>
+                    {user?.profile?.fullName || user?.email?.split('@')[0] || 'Guest User'}
+                  </Text>
+                  <Text style={styles.userEmail}>
+                    {user?.email || 'Sign in for full features'}
+                  </Text>
+                  {user?.emailVerified === false && (
+                    <View style={styles.verificationBadge}>
+                      <MaterialIcons name="info" size={12} color="#F59E0B" />
+                      <Text style={styles.verificationText}>Email not verified</Text>
+                    </View>
+                  )}
                 </View>
               </View>
+              {isAuthenticated ? (
+                <TouchableOpacity 
+                  style={styles.authButton}
+                  onPress={handleSignOut}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.authButtonText}>Sign Out</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  style={[styles.authButton, styles.signInButton]}
+                  onPress={handleSignIn}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.authButtonText, styles.signInButtonText]}>Sign In</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Language Selection */}
@@ -373,5 +420,43 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#374151',
     fontWeight: '500',
+  },
+  avatarAuthenticated: {
+    backgroundColor: '#84cc16',
+  },
+  avatarInitial: {
+    fontSize: 28,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  verificationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
+  verificationText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    fontWeight: '500',
+  },
+  authButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    alignSelf: 'flex-start',
+  },
+  signInButton: {
+    backgroundColor: '#84cc16',
+  },
+  authButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  signInButtonText: {
+    color: '#FFFFFF',
   },
 });

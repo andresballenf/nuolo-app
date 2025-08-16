@@ -81,14 +81,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f3f4f6',
   },
   outline: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: '#84cc16',
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   
   // Sizes
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   outlineText: {
-    color: '#84cc16',
+    color: '#374151',
     fontSize: 16,
   },
   smText: {

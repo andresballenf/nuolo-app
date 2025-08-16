@@ -46,9 +46,23 @@ export class LocationService {
         throw new Error('Location permission not granted');
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: this.config.accuracy,
-      });
+      // Try to get location with fallback strategies
+      let location;
+      try {
+        location = await Location.getCurrentPositionAsync({
+          accuracy: this.config.accuracy,
+          timeout: 10000,
+          mayShowUserSettingsDialog: true,
+        });
+      } catch (error) {
+        console.log('Primary accuracy failed, trying fallback...', error);
+        // Fallback to balanced accuracy
+        location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          timeout: 15000,
+          mayShowUserSettingsDialog: true,
+        });
+      }
 
       return {
         latitude: location.coords.latitude,

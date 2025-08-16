@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { storage } from '../lib/utils';
+import { PreferencesService } from '../services/PreferencesService';
+import { supabase } from '../lib/supabase';
 
 type Theme = 'history' | 'nature' | 'architecture' | 'culture';
 type AudioLength = 'short' | 'medium' | 'deep-dive';
@@ -66,14 +68,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     audioLength: 'medium',
     language: 'en',
     voiceStyle: 'casual',
-    batteryOptimization: true,
+    batteryOptimization: false,
   });
 
   const [selectedAttraction, setSelectedAttraction] = useState<SelectedAttraction | null>(null);
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+  // Load preferences on mount and auth state change
   useEffect(() => {
     loadUserPreferences();
+    
+    // Subscribe to auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setCurrentUserId(session.user.id);
+        loadSupabasePreferences(session.user.id);
+      } else {
+        setCurrentUserId(null);
+        // Fall back to local storage preferences
+        loadUserPreferences();
+      }
+    });
+
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUserId(session.user.id);
+        loadSupabasePreferences(session.user.id);
+      }
+    });
+
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
   }, []);
 
   const loadUserPreferences = async () => {
@@ -83,7 +111,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserPreferencesState(savedPreferences);
       }
     } catch (error) {
-      console.error('Error loading user preferences:', error);
+      console.error('Error loading user preferences from local storage:', error);
+    }
+  };
+
+  const loadSupabasePreferences = async (userId: string) => {
+    try {
+      const supabasePrefs = await PreferencesService.getUserPreferences(userId);
+      if (supabasePrefs) {
+        const preferences: UserPreferences = {
+          theme: supabasePrefs.theme as Theme,
+          audioLength: supabasePrefs.audioLength as AudioLength,
+          language: supabasePrefs.language as Language,
+          voiceStyle: supabasePrefs.voiceStyle as VoiceStyle,
+          batteryOptimization: supabasePrefs.batteryOptimization,
+        };
+        setUserPreferencesState(preferences);
+        // Also save to local storage for offline access
+        await storage.setObject(USER_PREFERENCES_KEY, preferences);
+      } else {
+        // No preferences in Supabase yet, use local or defaults
+        loadUserPreferences();
+      }
+    } catch (error) {
+      console.error('Error loading preferences from Supabase:', error);
+      // Fall back to local storage
+      loadUserPreferences();
     }
   };
 
@@ -96,7 +149,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUserPreferencesState(newPreferences);
     
     try {
+      // Save to local storage first
       await storage.setObject(USER_PREFERENCES_KEY, newPreferences);
+      
+      // If user is logged in, also save to Supabase
+      if (currentUserId) {
+        const supabasePrefs = {
+          theme: newPreferences.theme,
+          audioLength: newPreferences.audioLength,
+          voiceStyle: newPreferences.voiceStyle,
+          language: newPreferences.language,
+          batteryOptimization: newPreferences.batteryOptimization,
+        };
+        await PreferencesService.saveUserPreferences(currentUserId, supabasePrefs);
+      }
     } catch (error) {
       console.error('Error saving user preferences:', error);
     }

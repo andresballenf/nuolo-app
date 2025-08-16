@@ -298,6 +298,7 @@ export default function MapScreen() {
           theme: userPreferences.theme,
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
+          language: userPreferences.language,
         },
         isTestModeEnabled
       );
@@ -371,6 +372,7 @@ export default function MapScreen() {
           theme: userPreferences.theme,
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
+          language: userPreferences.language,
         },
         isTestModeEnabled
       );
@@ -491,6 +493,7 @@ export default function MapScreen() {
           theme: userPreferences.theme,
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
+          language: userPreferences.language,
         },
         attractionInfo,
         isTestModeEnabled
@@ -562,10 +565,33 @@ export default function MapScreen() {
 
       console.log('Permission granted, getting current location...');
       
-      // Get current location
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      // Get current location with timeout and fallback
+      let location;
+      try {
+        location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+          timeout: 10000, // 10 second timeout
+          mayShowUserSettingsDialog: true,
+        });
+      } catch (highAccuracyError) {
+        console.log('High accuracy failed, trying balanced accuracy...', highAccuracyError);
+        // Fallback to balanced accuracy if high accuracy fails
+        try {
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+            timeout: 15000, // 15 second timeout for fallback
+            mayShowUserSettingsDialog: true,
+          });
+        } catch (balancedError) {
+          console.log('Balanced accuracy also failed, trying lowest accuracy...', balancedError);
+          // Last resort: try lowest accuracy
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Lowest,
+            timeout: 20000,
+            mayShowUserSettingsDialog: true,
+          });
+        }
+      }
       
       console.log('Got location:', location.coords);
 

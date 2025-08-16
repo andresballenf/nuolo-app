@@ -1,7 +1,26 @@
 // @ts-nocheck
 import { generatePrompt } from './promptGenerator.ts';
 
-async function callChatModel(model, prompt, apiKey) {
+async function callChatModel(model, prompt, apiKey, language = 'en') {
+  // Map language codes to full language names for the system prompt
+  const languageNames = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'zh': 'Chinese (Simplified)',
+  };
+  
+  const targetLanguage = languageNames[language] || 'English';
+  const languageInstruction = language && language !== 'en' 
+    ? `IMPORTANT: You MUST respond ENTIRELY in ${targetLanguage}. Every word of your response must be in ${targetLanguage}, not English.` 
+    : '';
+  
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -13,7 +32,7 @@ async function callChatModel(model, prompt, apiKey) {
       messages: [
         {
           role: 'system',
-          content: 'You are an experienced, friendly local tour guide. Speak naturally, as if you are walking with the visitor. Use vivid, sensory details and clear, concise sentences. Avoid robotic phrasing, lists, or disclaimers. Be helpful, accurate, and engaging.'
+          content: `You are an experienced, friendly local tour guide. ${languageInstruction} Speak naturally, as if you are walking with the visitor. Use vivid, sensory details and clear, concise sentences. Avoid robotic phrasing, lists, or disclaimers. Be helpful, accurate, and engaging.`
         },
         { role: 'user', content: prompt }
       ],
@@ -31,6 +50,9 @@ async function callChatModel(model, prompt, apiKey) {
 
 export async function generateAttractionInfo(attractionName, attractionAddress, userLocation, preferences, openAiApiKey) {
   const prompt = generatePrompt(attractionName, attractionAddress, userLocation, preferences);
+  const language = preferences?.language || 'en';
+  console.log(`Generating content in language: ${language}`);
+  
   const fallbackModels = [
     'gpt-4o',
     'gpt-4o-mini',
@@ -41,8 +63,8 @@ export async function generateAttractionInfo(attractionName, attractionAddress, 
   let lastError = null;
   for (const model of fallbackModels) {
     try {
-      console.log(`Attempting text generation with model: ${model}`);
-      const content = await callChatModel(model, prompt, openAiApiKey);
+      console.log(`Attempting text generation with model: ${model} in language: ${language}`);
+      const content = await callChatModel(model, prompt, openAiApiKey, language);
       return content;
     } catch (err) {
       lastError = err;
