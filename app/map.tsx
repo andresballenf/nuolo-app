@@ -327,7 +327,7 @@ export default function MapScreen() {
     }
   };
 
-  // Streamlined single-process audio generation (replaces two-step process)
+  // NEW: Chunked audio generation with streaming support
   const handlePlayAudio = async (attraction: PointOfInterest) => {
     try {
       // Clear any existing generation state first (allows switching attractions)
@@ -354,17 +354,11 @@ export default function MapScreen() {
         return;
       }
 
-      console.log(`Generating text and audio for: ${attraction.name}`);
+      console.log(`Starting chunked audio generation for: ${attraction.name}`);
       console.log('User preferences:', userPreferences);
       
-      // Check if audioLength is set to 'short' which might cause the 12-second issue
-      if (userPreferences.audioLength === 'short') {
-        console.warn('WARNING: audioLength is set to "short" - this might be causing the 12-second limitation');
-        console.log('Consider changing audioLength to "medium" or "deep-dive" for longer audio');
-      }
-
-      // Single API call for both text and audio
-      const { text, audio, transcriptSegments: segments } = await AttractionInfoService.generateTextAndAudio(
+      // First generate the text content
+      const text = await AttractionInfoService.generateTextInfo(
         attraction.name,
         attraction.description || 'Unknown location',
         currentLocation,
@@ -377,59 +371,181 @@ export default function MapScreen() {
         isTestModeEnabled
       );
 
-      console.log(`Audio generation completed. Text length: ${text.length}, Audio data length: ${audio.length}`);
-      console.log('Transcript segments:', segments);
+      console.log(`Text generated: ${text.length} characters`);
       
-      // Check if the audio data seems truncated
-      if (audio.length < 1000) {
-        console.warn('WARNING: Audio data seems very short, length:', audio.length);
-      }
-      
-      // Log the first and last 100 characters of the audio data to check for truncation
-      console.log('Audio data preview (first 100 chars):', audio.substring(0, 100));
-      console.log('Audio data preview (last 100 chars):', audio.substring(audio.length - 100));
-      
-      // Check if the text seems truncated
-      if (text.length < 100) {
-        console.warn('WARNING: Text seems very short, length:', text.length);
-      }
-
-      // Create audio track with both text and audio data
-      const audioTrack = {
-        id: attraction.id,
-        title: attraction.name,
-        subtitle: attraction.description || 'Audio Guide',
-        description: text,
-        location: attraction.description,
-        category: userPreferences.theme,
-        audioData: audio,
-        duration: 0,
-        imageUrl: attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined,
-      };
-
-      console.log('Created audio track:', {
-        id: audioTrack.id,
-        title: audioTrack.title,
-        audioDataLength: audioTrack.audioData.length,
-        textLength: audioTrack.description.length
-      });
-
-      // Add track and set current track (this will clear generation states automatically)
-      audioContext.addTrack(audioTrack);
-      await audioContext.setCurrentTrack(audioTrack);
-      
-      // Auto-play when generation completes
-      await audioContext.play();
-      
-      // Update local state for compatibility
+      // Update UI with text immediately
       setAttractionInfo(text);
-      setAttractionAudio(audio);
-      setTranscriptSegments(segments);
-
-      console.log('Streamlined audio generation completed and started playing');
+      
+      // Feature flag to enable new app-orchestrated chunked audio
+      // Set to true to use the new chunking system that bypasses the 4096 char limit
+      const USE_APP_CHUNKED_AUDIO = true; // Toggle this to switch between old and new methods
+      
+      let audioGenerated = false;
+      const useChunkedStreaming = false; // Old streaming method - disabled
+      
+      if (useChunkedStreaming) {
+        try {
+          // Try the new chunked streaming method
+          await AttractionInfoService.streamGenerateTextAndAudio(
+        attraction.name,
+        attraction.description || 'Unknown location',
+        currentLocation,
+        {
+          theme: userPreferences.theme,
+          audioLength: userPreferences.audioLength,
+          voiceStyle: userPreferences.voiceStyle,
+          language: userPreferences.language,
+        },
+        {
+          onText: (receivedText) => {
+            // Text already generated above, but update if needed
+            if (receivedText && receivedText.length > 0) {
+              setAttractionInfo(receivedText);
+            }
+          },
+          onMetadata: (metadata) => {
+            console.log('Audio metadata:', metadata);
+            // Metadata is logged but state update happens in AudioContext
+          },
+          onChunk: async (chunk) => {
+            console.log(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
+            
+            // The AudioContext's streamGenerateAndPlay will handle chunk playback
+            // Just log for debugging
+            if (chunk.chunkIndex === 0) {
+              console.log('First chunk received, playback should start soon');
+              audioContext.clearGenerationState();
+            }
+          },
+          onComplete: () => {
+            console.log('All chunks received successfully');
+            audioContext.clearGenerationState();
+          },
+          onError: (error) => {
+            console.error('Streaming error:', error);
+            audioContext.setGenerationError(error);
+            Alert.alert('Audio Error', error);
+          }
+        },
+        isTestModeEnabled
+      );
+      
+          audioGenerated = true;
+          console.log('Chunked audio streaming initiated');
+        } catch (streamError) {
+          console.warn('Chunked streaming failed, trying fallback method:', streamError);
+        }
+      }
+      
+      // Use app-orchestrated chunked audio generation (NEW - unlimited text length!)
+      if (!audioGenerated && USE_APP_CHUNKED_AUDIO) {
+        try {
+          console.log('Using new app-orchestrated chunked audio generation');
+          
+          // Use the new chunked generation method from AudioContext
+          await audioContext.generateChunkedAudio(
+            {
+              id: attraction.id,
+              name: attraction.name,
+              address: attraction.description || 'Unknown location',
+              userLocation: currentLocation,
+            },
+            text,
+            {
+              theme: userPreferences.theme,
+              audioLength: userPreferences.audioLength,
+              voiceStyle: userPreferences.voiceStyle,
+              language: userPreferences.language,
+            }
+          );
+          
+          audioGenerated = true;
+          console.log('App-orchestrated chunked audio generation initiated');
+          
+        } catch (chunkError) {
+          console.error('App-orchestrated chunked audio failed:', chunkError);
+          
+          // Show helpful error messages
+          if (chunkError.message?.includes('not deployed')) {
+            Alert.alert(
+              'Setup Required',
+              'The chunked audio feature requires deploying a Supabase function. Using standard audio generation instead.',
+              [{ text: 'OK' }]
+            );
+          } else if (chunkError.message?.includes('quota exceeded')) {
+            Alert.alert(
+              'OpenAI Quota Exceeded',
+              'The OpenAI API has reached its usage limit. Please add credits to your OpenAI account at platform.openai.com',
+              [
+                { text: 'OK' },
+                { text: 'Open OpenAI', onPress: () => {
+                  // Could open URL if needed
+                  console.log('User should visit: https://platform.openai.com/account/billing');
+                }}
+              ]
+            );
+            // Don't fall through - quota issue affects all methods
+            audioContext.setGenerationError('OpenAI quota exceeded');
+            return;
+          } else if (chunkError.message?.includes('API key')) {
+            Alert.alert(
+              'API Key Issue',
+              chunkError.message,
+              [{ text: 'OK' }]
+            );
+            // Don't fall through - API key issue affects all methods
+            audioContext.setGenerationError(chunkError.message);
+            return;
+          }
+          // Will fall through to old method as backup for other errors
+        }
+      }
+      
+      // Fallback to old single-chunk method (limited to 4096 chars)
+      if (!audioGenerated) {
+        try {
+          console.log('Using fallback single-chunk audio generation');
+          const audioData = await AttractionInfoService.generateAudio(
+            attraction.name,
+            attraction.description || 'Unknown location',
+            currentLocation,
+            {
+              theme: userPreferences.theme,
+              audioLength: userPreferences.audioLength,
+              voiceStyle: userPreferences.voiceStyle,
+              language: userPreferences.language,
+            },
+            text,
+            isTestModeEnabled
+          );
+          
+          // Create audio track with the old method
+          const audioTrack = {
+            id: attraction.id,
+            title: attraction.name,
+            subtitle: attraction.description || 'Audio Guide',
+            description: text,
+            location: attraction.description,
+            category: userPreferences.theme,
+            audioData: audioData,
+            duration: 0,
+            imageUrl: attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined,
+          };
+          
+          audioContext.addTrack(audioTrack);
+          await audioContext.setCurrentTrack(audioTrack);
+          await audioContext.play();
+          
+          audioGenerated = true;
+          console.log('Audio generation completed using standard method');
+        } catch (audioError) {
+          console.error('Audio generation failed:', audioError);
+          throw audioError;
+        }
+      }
 
     } catch (error) {
-      console.error('Error in streamlined audio generation:', error);
+      console.error('Error in chunked audio generation:', error);
       
       const errorMessage = AttractionInfoService.getErrorMessage(error);
       
@@ -508,6 +624,7 @@ export default function MapScreen() {
         category: userPreferences.theme,
         audioData: audioData,
         duration: 0,
+        imageUrl: selectedAttraction.photos && selectedAttraction.photos.length > 0 ? selectedAttraction.photos[0] : undefined,
       };
 
       audioContext.addTrack(audioTrack);

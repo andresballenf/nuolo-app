@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase';
+import { AudioStreamHandler, StreamHandlerCallbacks } from './AudioStreamHandler';
+import { AudioChunkData } from './AudioChunkManager';
 
 // Timed transcript segment interface used for karaoke-style highlighting
 export interface TranscriptWordTiming {
@@ -52,6 +54,17 @@ interface AttractionInfoResponse {
 }
 
 export class AttractionInfoService {
+  private static streamHandler: AudioStreamHandler | null = null;
+  
+  /**
+   * Get or create stream handler instance
+   */
+  private static getStreamHandler(): AudioStreamHandler {
+    if (!this.streamHandler) {
+      this.streamHandler = new AudioStreamHandler();
+    }
+    return this.streamHandler;
+  }
   /**
    * Generate attraction information using Supabase edge function
    */
@@ -313,6 +326,119 @@ export class AttractionInfoService {
       audio: result.audio,
       transcriptSegments: result.transcriptSegments,
     };
+  }
+
+  /**
+   * Stream generate text and audio with chunking support
+   */
+  static async streamGenerateTextAndAudio(
+    attractionName: string,
+    attractionAddress: string,
+    userLocation: UserLocation,
+    preferences: UserPreferences,
+    callbacks: StreamHandlerCallbacks,
+    testMode: boolean = false
+  ): Promise<void> {
+    const streamHandler = this.getStreamHandler();
+    
+    const requestData: AttractionInfoRequest = {
+      attractionName,
+      attractionAddress,
+      userLocation,
+      preferences: {
+        ...preferences,
+        language: preferences.language || 'en',
+      },
+      generateAudio: true,
+      streamAudio: true,
+      testMode,
+      model: 'gpt-4o',
+      ttsModel: 'tts-1-hd',
+    };
+
+    try {
+      // Use the new streaming endpoint
+      const { data, error } = await supabase.functions.invoke('attraction-info', {
+        body: requestData
+      });
+      
+      // If the edge function doesn't support streaming, throw error to trigger fallback
+      if (error || !data) {
+        throw new Error(error?.message || 'Streaming not supported');
+      }
+      
+      // Process the response
+      if (callbacks.onText && data.info) {
+        callbacks.onText(data.info);
+      }
+      
+      if (callbacks.onComplete) {
+        callbacks.onComplete();
+      }
+    } catch (error) {
+      console.error('Stream generation error:', error);
+      if (callbacks.onError) {
+        callbacks.onError(error instanceof Error ? error.message : 'Stream generation failed');
+      }
+    }
+  }
+
+  /**
+   * Generate text and audio chunks (non-streaming)
+   */
+  static async generateTextAndAudioChunks(
+    attractionName: string,
+    attractionAddress: string,
+    userLocation: UserLocation,
+    preferences: UserPreferences,
+    testMode: boolean = false
+  ): Promise<{
+    text: string;
+    chunks: AudioChunkData[];
+    metadata: any;
+  }> {
+    const streamHandler = this.getStreamHandler();
+    
+    const requestData: AttractionInfoRequest = {
+      attractionName,
+      attractionAddress,
+      userLocation,
+      preferences: {
+        ...preferences,
+        language: preferences.language || 'en',
+      },
+      generateAudio: true,
+      streamAudio: false, // Batch mode
+      testMode,
+      model: 'gpt-4o',
+      ttsModel: 'tts-1-hd',
+    };
+
+    try {
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+      
+      const result = await streamHandler.fetchAudioChunks(
+        `${supabaseUrl}/functions/v1/attraction-info`,
+        { ...requestData, supabaseAnonKey }
+      );
+      
+      return result;
+    } catch (error) {
+      console.error('Chunk generation error:', error);
+      throw new Error(
+        error instanceof Error ? error.message : 'Failed to generate audio chunks'
+      );
+    }
+  }
+
+  /**
+   * Cancel any ongoing streaming
+   */
+  static cancelStreaming() {
+    if (this.streamHandler) {
+      this.streamHandler.cancel();
+    }
   }
 
   /**

@@ -3,6 +3,9 @@ import { Audio } from 'expo-av';
 import { Alert } from 'react-native';
 import { TranscriptSegment } from '../services/AttractionInfoService';
 import { AudioService } from '../services/AudioService';
+import { AudioChunkManager, ChunkPlaybackState } from '../services/AudioChunkManager';
+import { AudioStreamHandler } from '../services/AudioStreamHandler';
+import { AudioGenerationService, GenerationProgress } from '../services/AudioGenerationService';
 
 export interface AudioTrack {
   id: string;
@@ -50,6 +53,15 @@ export interface AudioState {
 
   // Transcript (timed segments)
   transcriptSegments?: TranscriptSegment[];
+  
+  // Chunk playback state
+  isUsingChunks: boolean;
+  currentChunkIndex: number;
+  totalChunks: number;
+  isBuffering: boolean;
+  
+  // Chunk generation progress
+  generationProgress?: GenerationProgress;
 }
 
 export interface AudioActions {
@@ -90,6 +102,11 @@ export interface AudioActions {
   clearGenerationState: () => void;
   setGenerationError: (error: string) => void;
   generateAndPlay: (attraction: any) => Promise<void>;
+  
+  // Chunk-based audio
+  streamGenerateAndPlay: (attraction: any, text: string, preferences: any) => Promise<void>;
+  generateChunkedAudio: (attraction: any, text: string, preferences: any) => Promise<void>;
+  cancelStreaming: () => void;
 }
 
 type AudioContextType = AudioState & AudioActions;
@@ -116,12 +133,19 @@ const initialState: AudioState = {
   position: 0,
   duration: 0,
   transcriptSegments: undefined,
+  isUsingChunks: false,
+  currentChunkIndex: 0,
+  totalChunks: 0,
+  isBuffering: false,
 };
 
 export function AudioProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AudioState>(initialState);
   const soundRef = useRef<Audio.Sound | null>(null);
   const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
+  const chunkManagerRef = useRef<AudioChunkManager | null>(null);
+  const streamHandlerRef = useRef<AudioStreamHandler | null>(null);
+  const audioGenerationServiceRef = useRef<AudioGenerationService | null>(null);
 
   // Configure audio session
   useEffect(() => {
@@ -347,23 +371,38 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, [stopPositionTracking]);
 
   const togglePlayPause = useCallback(() => {
-    if (state.isPlaying) {
-      pause();
+    // Handle chunk-based playback
+    if (state.isUsingChunks && chunkManagerRef.current) {
+      if (state.isPlaying) {
+        chunkManagerRef.current.pause();
+        setState(prev => ({ ...prev, isPlaying: false }));
+      } else {
+        chunkManagerRef.current.resume();
+        setState(prev => ({ ...prev, isPlaying: true }));
+      }
     } else {
-      play();
+      // Original playback logic
+      if (state.isPlaying) {
+        pause();
+      } else {
+        play();
+      }
     }
-  }, [state.isPlaying, play, pause]);
+  }, [state.isPlaying, state.isUsingChunks, play, pause]);
 
   const seek = useCallback(async (position: number) => {
     try {
-      if (soundRef.current) {
+      // Handle chunk-based seeking
+      if (state.isUsingChunks && chunkManagerRef.current) {
+        await chunkManagerRef.current.seek(position);
+      } else if (soundRef.current) {
         await soundRef.current.setPositionAsync(position);
         setState(prev => ({ ...prev, position }));
       }
     } catch (error) {
       console.error('Error seeking audio:', error);
     }
-  }, []);
+  }, [state.isUsingChunks]);
 
   // Volume controls
   const setVolume = useCallback(async (volume: number) => {
@@ -530,6 +569,17 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const closePlayer = useCallback(async () => {
+    // Clean up chunks if using chunked playback
+    if (chunkManagerRef.current) {
+      await chunkManagerRef.current.stop();
+      await chunkManagerRef.current.clear();
+    }
+    
+    // Cancel any ongoing streaming
+    if (streamHandlerRef.current) {
+      streamHandlerRef.current.cancel();
+    }
+    
     await pause();
     setState(prev => ({
       ...prev,
@@ -538,6 +588,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       isFullScreen: false,
       currentTrack: null,
       currentTrackId: null,
+      isUsingChunks: false,
+      currentChunkIndex: 0,
+      totalChunks: 0,
+      isBuffering: false
     }));
   }, [pause]);
 
@@ -586,6 +640,332 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     console.log('Generate and play for attraction:', attraction.name);
   }, []);
 
+  // New chunk-based streaming audio generation
+  const streamGenerateAndPlay = useCallback(async (
+    attraction: any,
+    text: string,
+    preferences: any
+  ) => {
+    try {
+      console.log('Starting chunked audio generation for:', attraction.name);
+      
+      // Initialize chunk manager if needed
+      if (!chunkManagerRef.current) {
+        chunkManagerRef.current = new AudioChunkManager();
+        
+        // Set up callbacks
+        chunkManagerRef.current.setOnStateChange((chunkState: ChunkPlaybackState) => {
+          setState(prev => ({
+            ...prev,
+            isPlaying: chunkState.isPlaying,
+            position: chunkState.totalPosition,
+            duration: chunkState.totalDuration,
+            currentChunkIndex: chunkState.currentChunkIndex,
+            totalChunks: chunkState.totalChunks,
+            isBuffering: chunkState.isLoading,
+            isUsingChunks: true
+          }));
+        });
+        
+        chunkManagerRef.current.setOnAllChunksComplete(() => {
+          console.log('All audio chunks completed');
+          setState(prev => ({ ...prev, isPlaying: false }));
+        });
+      }
+      
+      // Initialize stream handler if needed
+      if (!streamHandlerRef.current) {
+        streamHandlerRef.current = new AudioStreamHandler();
+      }
+      
+      // Clear previous audio
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+      
+      // Clear chunk manager
+      await chunkManagerRef.current.clear();
+      
+      // Update state to show loading
+      setState(prev => ({
+        ...prev,
+        isGeneratingAudio: true,
+        generatingForId: attraction.id,
+        generationMessage: `Loading ${attraction.name}...`,
+        generationError: null,
+        showFloatingPlayer: true,
+        isBuffering: true,
+        isUsingChunks: true
+      }));
+      
+      let firstChunkReceived = false;
+      
+      // Start streaming
+      const { supabase } = await import('../lib/supabase');
+      const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+      
+      await streamHandlerRef.current.streamAudio(
+        `${supabase.supabaseUrl}/functions/v1/attraction-info`,
+        {
+          attractionName: attraction.name,
+          attractionAddress: attraction.address || '',
+          userLocation: attraction.userLocation,
+          preferences: preferences,
+          generateAudio: true,
+          existingText: text,
+          supabaseAnonKey: supabaseAnonKey
+        },
+        {
+          onText: (receivedText) => {
+            console.log('Received text:', receivedText.substring(0, 100) + '...');
+          },
+          onMetadata: (metadata) => {
+            console.log('Audio metadata:', metadata);
+            setState(prev => ({
+              ...prev,
+              generationMessage: `Preparing audio (${metadata.totalChunks} parts)...`
+            }));
+          },
+          onChunk: async (chunk) => {
+            console.log(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
+            
+            // Add chunk to manager
+            await chunkManagerRef.current?.addChunk(chunk);
+            
+            // Start playing after first chunk
+            if (!firstChunkReceived) {
+              firstChunkReceived = true;
+              setState(prev => ({
+                ...prev,
+                isGeneratingAudio: false,
+                generationMessage: '',
+                isBuffering: false
+              }));
+              
+              // Start playback
+              setTimeout(() => {
+                chunkManagerRef.current?.play(0);
+              }, 500); // Small delay to ensure chunk is ready
+            }
+          },
+          onComplete: () => {
+            console.log('Streaming complete');
+            setState(prev => ({
+              ...prev,
+              isGeneratingAudio: false,
+              generationMessage: '',
+              isBuffering: false
+            }));
+          },
+          onError: (error) => {
+            console.error('Streaming error:', error);
+            setState(prev => ({
+              ...prev,
+              isGeneratingAudio: false,
+              generationError: error,
+              isBuffering: false
+            }));
+            Alert.alert('Audio Error', error);
+          }
+        }
+      );
+      
+    } catch (error: any) {
+      console.error('Error in streamGenerateAndPlay:', error);
+      setState(prev => ({
+        ...prev,
+        isGeneratingAudio: false,
+        generationError: error.message,
+        isBuffering: false
+      }));
+      Alert.alert('Audio Error', error.message || 'Failed to generate audio');
+    }
+  }, []);
+
+  // New app-orchestrated chunked audio generation
+  const generateChunkedAudio = useCallback(async (
+    attraction: any,
+    text: string,
+    preferences: any
+  ) => {
+    try {
+      console.log('Starting app-orchestrated chunked audio generation for:', attraction.name);
+      
+      // Initialize chunk manager if needed
+      if (!chunkManagerRef.current) {
+        chunkManagerRef.current = new AudioChunkManager();
+        
+        // Set up callbacks
+        chunkManagerRef.current.setOnStateChange((chunkState: ChunkPlaybackState) => {
+          setState(prev => ({
+            ...prev,
+            isPlaying: chunkState.isPlaying,
+            position: chunkState.totalPosition,
+            duration: chunkState.totalDuration,
+            currentChunkIndex: chunkState.currentChunkIndex,
+            totalChunks: chunkState.totalChunks,
+            isBuffering: chunkState.isLoading,
+            isUsingChunks: true
+          }));
+        });
+        
+        chunkManagerRef.current.setOnAllChunksComplete(() => {
+          console.log('All audio chunks completed');
+          setState(prev => ({ ...prev, isPlaying: false }));
+        });
+      }
+      
+      // Initialize audio generation service if needed
+      if (!audioGenerationServiceRef.current) {
+        audioGenerationServiceRef.current = new AudioGenerationService(chunkManagerRef.current);
+      } else {
+        audioGenerationServiceRef.current.setChunkManager(chunkManagerRef.current);
+      }
+      
+      // Clear previous audio
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+      
+      // Clear chunk manager
+      await chunkManagerRef.current.clear();
+      
+      // Update state to show loading
+      setState(prev => ({
+        ...prev,
+        isGeneratingAudio: true,
+        generatingForId: attraction.id,
+        generationMessage: `Preparing ${attraction.name}...`,
+        generationError: null,
+        showFloatingPlayer: true,
+        isBuffering: true,
+        isUsingChunks: true,
+        // Create track immediately to keep player visible
+        currentTrack: {
+          id: attraction.id,
+          title: attraction.name,
+          subtitle: attraction.address || 'Audio Guide',
+          description: text,
+          location: attraction.address,
+          category: preferences.theme,
+          audioData: '', // Will be filled by chunks
+          duration: 0,
+          imageUrl: attraction.imageUrl
+        },
+        generationProgress: {
+          totalChunks: 0,
+          chunksGenerated: 0,
+          chunksLoading: 0,
+          chunksFailed: 0,
+          isComplete: false
+        }
+      }));
+      
+      // Generate chunks with callbacks
+      await audioGenerationServiceRef.current.generateChunkedAudio(
+        text,
+        preferences.voiceStyle || 'casual',
+        preferences.language || 'en',
+        {
+          onFirstChunkReady: async (chunk) => {
+            console.log('First chunk ready, starting playback');
+            setState(prev => ({
+              ...prev,
+              isGeneratingAudio: false,
+              generationMessage: '',
+              isBuffering: false,
+              // Ensure mini player stays visible
+              showFloatingPlayer: true,
+              // Create a virtual track to keep player visible
+              currentTrack: prev.currentTrack || {
+                id: attraction.id,
+                title: attraction.name,
+                subtitle: attraction.address || 'Audio Guide',
+                description: text,
+                location: attraction.address,
+                category: preferences.theme,
+                audioData: '', // Will be filled by chunks
+                duration: 0,
+                imageUrl: attraction.imageUrl
+              }
+            }));
+            
+            // Start playing immediately
+            setTimeout(() => {
+              chunkManagerRef.current?.play(0);
+            }, 100); // Minimal delay to ensure chunk is ready
+          },
+          onChunkGenerated: (chunk, progress) => {
+            console.log(`Chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} generated`);
+            setState(prev => ({
+              ...prev,
+              generationProgress: progress
+            }));
+          },
+          onChunkFailed: (chunkIndex, error, progress) => {
+            console.warn(`Chunk ${chunkIndex} failed: ${error}`);
+            setState(prev => ({
+              ...prev,
+              generationProgress: progress
+            }));
+          },
+          onProgress: (progress) => {
+            setState(prev => ({
+              ...prev,
+              generationProgress: progress,
+              generationMessage: progress.isComplete ? '' : 
+                `Loading audio (${progress.chunksGenerated}/${progress.totalChunks} parts)...`
+            }));
+          },
+          onComplete: (successful, total) => {
+            console.log(`Generation complete: ${successful}/${total} chunks`);
+            setState(prev => ({
+              ...prev,
+              isGeneratingAudio: false,
+              generationMessage: '',
+              isBuffering: false
+            }));
+            
+            if (successful === 0) {
+              Alert.alert('Audio Error', 'Failed to generate audio. Please try again.');
+            } else if (successful < total) {
+              Alert.alert('Partial Audio', `Generated ${successful} of ${total} audio parts. Some content may be missing.`);
+            }
+          }
+        }
+      );
+      
+    } catch (error: any) {
+      console.error('Error in generateChunkedAudio:', error);
+      setState(prev => ({
+        ...prev,
+        isGeneratingAudio: false,
+        generationError: error.message,
+        isBuffering: false
+      }));
+      Alert.alert('Audio Error', error.message || 'Failed to generate audio');
+    }
+  }, []);
+
+  // Cancel streaming/generation
+  const cancelStreaming = useCallback(() => {
+    if (streamHandlerRef.current) {
+      streamHandlerRef.current.cancel();
+    }
+    if (audioGenerationServiceRef.current) {
+      audioGenerationServiceRef.current.cancel();
+    }
+    setState(prev => ({
+      ...prev,
+      isGeneratingAudio: false,
+      generationMessage: '',
+      isBuffering: false,
+      generationProgress: undefined
+    }));
+  }, []);
+
   const contextValue: AudioContextType = {
     // State
     ...state,
@@ -615,6 +995,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     clearGenerationState,
     setGenerationError,
     generateAndPlay,
+    streamGenerateAndPlay,
+    generateChunkedAudio,
+    cancelStreaming,
   };
 
   return (
