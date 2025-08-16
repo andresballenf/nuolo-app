@@ -832,6 +832,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       // Clear chunk manager
       await chunkManagerRef.current.clear();
       
+      // Debug logging for image URL
+      const imageUrl = attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined;
+      console.log('generateChunkedAudio - attraction photos:', attraction.photos);
+      console.log('generateChunkedAudio - setting imageUrl to:', imageUrl);
+      
       // Update state to show loading
       setState(prev => ({
         ...prev,
@@ -852,7 +857,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           category: preferences.theme,
           audioData: '', // Will be filled by chunks
           duration: 0,
-          imageUrl: attraction.imageUrl
+          imageUrl: imageUrl
         },
         generationProgress: {
           totalChunks: 0,
@@ -878,18 +883,8 @@ export function AudioProvider({ children }: { children: ReactNode }) {
               isBuffering: false,
               // Ensure mini player stays visible
               showFloatingPlayer: true,
-              // Create a virtual track to keep player visible
-              currentTrack: prev.currentTrack || {
-                id: attraction.id,
-                title: attraction.name,
-                subtitle: attraction.address || 'Audio Guide',
-                description: text,
-                location: attraction.address,
-                category: preferences.theme,
-                audioData: '', // Will be filled by chunks
-                duration: 0,
-                imageUrl: attraction.imageUrl
-              }
+              // Keep the existing track which already has the imageUrl set correctly
+              // Don't create a new one that might lose the imageUrl
             }));
             
             // Start playing immediately

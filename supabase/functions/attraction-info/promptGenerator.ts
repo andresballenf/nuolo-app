@@ -18,10 +18,10 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
   
   // Adjust word count based on audio length preference
   const wordCount = preferences.audioLength === 'short'
-    ? '100-150 words (30-60 seconds of audio)'
+    ? '100-250 words (30-60 seconds of audio)'
     : preferences.audioLength === 'medium'
-      ? '250-400 words (1-3 minutes of audio)'
-      : '500-800 words (3-5 minutes of audio)';
+      ? '400-600 words (1-3 minutes of audio)'
+      : '800-1000 words (3-5 minutes of audio)';
 
   // Map theme preferences to content focus
   const themeGuide = {
@@ -66,46 +66,35 @@ THIS IS MANDATORY: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()},
   const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language);
   const unitSystem = useMetric ? 'Use metric units (meters, kilometers)' : 'Use imperial units (feet, miles)';
 
-  return `${languageInstruction}Create a ${wordCount} audio tour narrative for "${attractionName}" that sounds like a knowledgeable local guide with Wikipedia-level detail but delivered in an engaging, fun way.
+  return `${languageInstruction}Create a ${wordCount} audio tour narrative for "${attractionName}".
 
-**Voice & Tone Instructions:**
+Identity resolution
+Use the full address and coordinates to ensure you describe the correct place:
+- Address: ${attractionAddress}
+- Coordinates: ${userLocation.lat}, ${userLocation.lng}
+
+Voice and tone
 ${voiceStyle}
 
-**Content Focus - ${preferences.theme} theme:**
-Prioritize ${themeFocus}.
+Theme guidance
+Emphasize ${themeFocus} if verifiable details exist, but keep a balanced mix of history, culture, architecture, and practical details. Do not force the theme if information is lacking.
 
-**Required Structure (blend naturally, not as a list):**
+Narrative ingredients
+Blend naturally (order can vary):
+- A vivid opening moment
+- Core factual details, spotlighting the theme if possible
+- Authentic local color or trivia, only if true
+- Why locals care or how it fits daily life
+- One insider tip for visitors
 
-1. **Opening Hook**: Paint a vivid scene of what visitors see/feel when they arrive. Make them excited to be there.
-
-2. **Core Information**: Provide Wikipedia-level factual details about the ${preferences.theme === 'general' ? 'place' : preferences.theme} aspects. Include dates, names, specific facts, and verifiable information.
-
-3. **Cultural Color** (if authentically available):
-   - Include any real urban legends, myths, or local gossip about the place
-   - Share quirky facts or lesser-known trivia that locals might know
-   - Mention any pop culture connections (movies filmed here, famous visitors, etc.)
-   - If none exist, don't force it - just skip this section
-
-4. **The Human Touch**: 
-   - Why do locals care about this place?
-   - Any community stories or collective memories?
-   - What role does it play in daily life?
-
-5. **Practical Insider Tip**: One specific, useful tip for visiting (best time, where to stand for photos, hidden details to look for, etc.)
-
-**Critical Instructions:**
+Critical instructions
 - ${unitSystem} for all measurements
-- If information is limited, be honest: "Not much is documented about this specific spot, but..." then share what IS known about the area
-- Never invent facts, myths, or stories - only include what's real and verifiable
-- Speak directly to the listener using "you" throughout
+- Speak directly to the listener using "you"
 - Keep paragraphs short and varied for easy listening
-- No lists, bullet points, or structured formatting in the output
-- Make it sound natural, like a real person talking, not reading from a script${isNonEnglish ? `
-- REMINDER: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()}, NOT ENGLISH!` : ''}
+- No lists, bullet points, or headings in the final output
 
-**Context** (use naturally if relevant, don't state explicitly):
-- Address: ${attractionAddress}
-- User location: ${userLocation.lat}, ${userLocation.lng}
+Final reminder
+Keep it conversational, fluid, and natural for listening, not decorated or literary.${isNonEnglish ? `
 
-Remember: Be fun and engaging while maintaining factual accuracy. If the place is ordinary, find what makes it special to locals. If it's famous, share both well-known and surprising facts. Keep it real, keep it interesting.`;
+REMINDER: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()}, NOT ENGLISH!` : ''}`;
 }

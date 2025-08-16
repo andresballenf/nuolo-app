@@ -40,8 +40,21 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
   const translateY = useRef(new Animated.Value(100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
+  // Debug logging for image URL
+  useEffect(() => {
+    if (track) {
+      console.log('MiniAudioPlayer - track received:', {
+        id: track.id,
+        title: track.title,
+        imageUrl: track.imageUrl,
+        hasImageUrl: !!track.imageUrl
+      });
+    }
+  }, [track]);
+
   // Only show loading when actually generating audio, not when audio is playing
-  const shouldShowLoading = isLoading && !track;
+  // Also check if we have a track but it's still being generated (empty audioData with chunks)
+  const shouldShowLoading = isLoading || (track && !track.audioData && isLoading);
 
   useEffect(() => {
     if (isVisible) {

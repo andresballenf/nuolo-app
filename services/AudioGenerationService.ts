@@ -360,19 +360,28 @@ export class AudioGenerationService {
       try {
         // Exponential backoff for retries
         if (attempt > 0) {
-          const delay = this.RETRY_DELAY * Math.pow(2, attempt - 1);
+          // Longer delays for network errors
+          const baseDelay = lastError?.message.includes('Network error') ? 3000 : this.RETRY_DELAY;
+          const delay = baseDelay * Math.pow(2, attempt - 1);
           await this.delay(delay);
           console.log(`Retry ${attempt} for chunk ${chunk.chunkIndex} after ${delay}ms`);
         }
 
+        // On retry attempts for network errors, try a simpler voice
+        const useSimpleVoice = attempt > 1 && lastError?.message.includes('Network error');
+        
         const request: ChunkRequest = {
           text: chunk.text,
           chunkIndex: chunk.chunkIndex,
           totalChunks: chunk.totalChunks,
-          voiceStyle: voiceStyle,
+          voiceStyle: useSimpleVoice ? 'casual' : voiceStyle, // Fallback to alloy voice
           language: language,
           speed: 1.0
         };
+        
+        if (useSimpleVoice) {
+          console.log('Using fallback voice (alloy) due to network issues');
+        }
 
         console.log(`Generating chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} (attempt ${attempt + 1})`);
         console.log('Request details:', {
@@ -419,6 +428,15 @@ export class AudioGenerationService {
           
           // Try to get more details from the response
           const errorMessage = response.error.message || 'Failed to generate audio chunk';
+          
+          // Check for transient network errors that should be retried
+          if (errorMessage.includes('Failed to send a request') || 
+              errorMessage.includes('FunctionsFetchError') ||
+              errorMessage.includes('network') ||
+              errorMessage.includes('ECONNREFUSED')) {
+            console.log('Network error detected, will retry...');
+            throw new Error('Network error - retrying');
+          }
           
           // Check if it's a function not found error
           if (errorMessage.includes('not found') || 

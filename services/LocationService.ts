@@ -5,21 +5,33 @@ export interface LocationData {
   longitude: number;
   accuracy: number | null;
   timestamp: number;
+  precision?: 'high' | 'balanced' | 'low';
 }
 
 export interface LocationServiceConfig {
   accuracy: Location.Accuracy;
   timeInterval: number;
   distanceInterval: number;
+  privacyMode: 'high' | 'balanced' | 'low';
+}
+
+export interface PrivacySettings {
+  precision: 'high' | 'balanced' | 'low';
+  consentGranted: boolean;
 }
 
 export class LocationService {
   private static instance: LocationService | null = null;
   private watchSubscription: Location.LocationSubscription | null = null;
   private config: LocationServiceConfig = {
-    accuracy: Location.Accuracy.High,
-    timeInterval: 5000, // 5 seconds
-    distanceInterval: 10, // 10 meters
+    accuracy: Location.Accuracy.Balanced, // Default to balanced for privacy
+    timeInterval: 10000, // 10 seconds - less frequent for privacy
+    distanceInterval: 50, // 50 meters - larger interval for privacy
+    privacyMode: 'balanced',
+  };
+  private privacySettings: PrivacySettings = {
+    precision: 'balanced',
+    consentGranted: false,
   };
 
   static getInstance(): LocationService {
@@ -27,6 +39,69 @@ export class LocationService {
       LocationService.instance = new LocationService();
     }
     return LocationService.instance;
+  }
+
+  // Privacy-aware configuration
+  updatePrivacySettings(settings: PrivacySettings): void {
+    this.privacySettings = settings;
+    this.updateConfigForPrivacy();
+  }
+
+  private updateConfigForPrivacy(): void {
+    const { precision } = this.privacySettings;
+    
+    switch (precision) {
+      case 'high':
+        this.config.accuracy = Location.Accuracy.High;
+        this.config.timeInterval = 5000; // 5 seconds
+        this.config.distanceInterval = 10; // 10 meters
+        break;
+      case 'balanced':
+        this.config.accuracy = Location.Accuracy.Balanced;
+        this.config.timeInterval = 10000; // 10 seconds
+        this.config.distanceInterval = 50; // 50 meters
+        break;
+      case 'low':
+        this.config.accuracy = Location.Accuracy.Low;
+        this.config.timeInterval = 30000; // 30 seconds
+        this.config.distanceInterval = 100; // 100 meters
+        break;
+    }
+    
+    this.config.privacyMode = precision;
+  }
+
+  private applyLocationPrivacy(location: LocationData): LocationData {
+    // Apply coordinate obfuscation based on privacy settings
+    const { precision } = this.privacySettings;
+    let obfuscatedLocation = { ...location };
+
+    switch (precision) {
+      case 'low':
+        // Reduce precision to ~1km accuracy
+        obfuscatedLocation.latitude = Math.round(location.latitude * 100) / 100;
+        obfuscatedLocation.longitude = Math.round(location.longitude * 100) / 100;
+        break;
+      case 'balanced':
+        // Reduce precision to ~100m accuracy
+        obfuscatedLocation.latitude = Math.round(location.latitude * 1000) / 1000;
+        obfuscatedLocation.longitude = Math.round(location.longitude * 1000) / 1000;
+        break;
+      case 'high':
+        // Full precision (no obfuscation)
+        break;
+    }
+
+    obfuscatedLocation.precision = precision;
+    return obfuscatedLocation;
+  }
+
+  private checkConsentRequired(): boolean {
+    if (!this.privacySettings.consentGranted) {
+      console.error('Location access attempted without user consent');
+      return false;
+    }
+    return true;
   }
 
   async requestPermissions(): Promise<boolean> {
@@ -41,12 +116,17 @@ export class LocationService {
 
   async getCurrentLocation(): Promise<LocationData | null> {
     try {
+      // Check privacy consent first
+      if (!this.checkConsentRequired()) {
+        return null;
+      }
+
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
         throw new Error('Location permission not granted');
       }
 
-      // Try to get location with fallback strategies
+      // Try to get location with privacy-aware settings
       let location;
       try {
         location = await Location.getCurrentPositionAsync({
@@ -64,12 +144,15 @@ export class LocationService {
         });
       }
 
-      return {
+      const locationData: LocationData = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy,
         timestamp: location.timestamp,
       };
+
+      // Apply privacy obfuscation
+      return this.applyLocationPrivacy(locationData);
     } catch (error) {
       console.error('Error getting current location:', error);
       return null;
@@ -81,6 +164,12 @@ export class LocationService {
     errorCallback?: (error: Error) => void
   ): Promise<boolean> {
     try {
+      // Check privacy consent first
+      if (!this.checkConsentRequired()) {
+        errorCallback?.(new Error('Location access requires user consent'));
+        return false;
+      }
+
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
         errorCallback?.(new Error('Location permission not granted'));
@@ -94,12 +183,16 @@ export class LocationService {
           distanceInterval: this.config.distanceInterval,
         },
         (location) => {
-          callback({
+          const locationData: LocationData = {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
             accuracy: location.coords.accuracy,
             timestamp: location.timestamp,
-          });
+          };
+
+          // Apply privacy obfuscation before calling callback
+          const privacyAwareLocation = this.applyLocationPrivacy(locationData);
+          callback(privacyAwareLocation);
         }
       );
 

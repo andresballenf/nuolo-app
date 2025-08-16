@@ -39,16 +39,15 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
 
   // Initialize Google Places service
   useEffect(() => {
-    const apiKey = Constants.expoConfig?.extra?.googleMapsApiKey || 
-                   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
     
     if (apiKey) {
       googlePlacesService.current = new GooglePlacesService(apiKey);
     } else {
-      console.error('Google Maps API key not found');
+      console.error('Google Maps API key not found in environment variables');
       Alert.alert(
         'Configuration Error',
-        'Google Maps API key is required for attraction discovery'
+        'Google Maps API key must be set in environment variables as EXPO_PUBLIC_GOOGLE_MAPS_API_KEY'
       );
     }
   }, []);

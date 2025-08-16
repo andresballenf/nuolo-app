@@ -78,8 +78,12 @@ export class AttractionInfoService {
       streamAudio?: boolean;
       testMode?: boolean;
       existingText?: string;
+      retryAttempt?: number;
     } = {}
   ): Promise<AttractionInfoResponse> {
+    const currentAttempt = options.retryAttempt || 0;
+    const maxRetries = 2; // Allow up to 2 retries for timeout issues
+    
     try {
       const requestData: AttractionInfoRequest = {
         attractionName,
@@ -108,8 +112,10 @@ export class AttractionInfoService {
       });
 
       // Add timeout and better error handling
+      // Deep-dive content can take longer, especially in other languages
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutMs = preferences.audioLength === 'deep-dive' ? 60000 : 30000; // 60s for deep-dive, 30s for others
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const { data, error } = await supabase.functions.invoke('attraction-info', {
@@ -148,12 +154,29 @@ export class AttractionInfoService {
         };
       } catch (timeoutError) {
         if (controller.signal.aborted) {
+          // If it's a timeout and we haven't exceeded retries, try again
+          if (currentAttempt < maxRetries) {
+            console.log(`Request timeout on attempt ${currentAttempt + 1}, retrying...`);
+            
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Retry with incremented attempt counter
+            return this.generateAttractionInfo(
+              attractionName,
+              attractionAddress,
+              userLocation,
+              preferences,
+              { ...options, retryAttempt: currentAttempt + 1 }
+            );
+          }
+          
           throw new Error('Request timeout: The server took too long to respond. Please try again.');
         }
         throw timeoutError;
       }
     } catch (error) {
-      console.error('Error in generateAttractionInfo:', error);
+      console.error(`Error in generateAttractionInfo (attempt ${currentAttempt + 1}):`, error);
       
       // Return a more user-friendly error message
       let errorMessage = 'Unknown error occurred';

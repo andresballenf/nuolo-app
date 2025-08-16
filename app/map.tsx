@@ -449,6 +449,7 @@ export default function MapScreen() {
               name: attraction.name,
               address: attraction.description || 'Unknown location',
               userLocation: currentLocation,
+              photos: attraction.photos, // Pass the photos array for image display
             },
             text,
             {

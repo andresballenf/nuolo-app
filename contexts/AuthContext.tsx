@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { supabase } from '../lib/supabase';
 import type { Session, AuthError } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 interface User {
@@ -70,8 +71,59 @@ const SECURITY_CONFIG = {
   BIOMETRIC_ENABLED: true,
 };
 
-// Development mode - set to false for production
-const DEV_MODE = false;
+// Secure storage keys
+const SECURE_STORE_KEYS = {
+  BIOMETRIC_EMAIL: 'biometric_email',
+  BIOMETRIC_TOKEN: 'biometric_token',
+  BIOMETRIC_REFRESH_TOKEN: 'biometric_refresh_token',
+  TOKEN_TIMESTAMP: 'token_timestamp'
+};
+
+// Token expiration time (7 days)
+const TOKEN_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000;
+
+// Secure storage utilities
+const secureStorage = {
+  async setItem(key: string, value: string): Promise<void> {
+    try {
+      await SecureStore.setItemAsync(key, value);
+    } catch (error) {
+      console.error('Error storing secure item:', error);
+      throw error;
+    }
+  },
+
+  async getItem(key: string): Promise<string | null> {
+    try {
+      return await SecureStore.getItemAsync(key);
+    } catch (error) {
+      console.error('Error retrieving secure item:', error);
+      return null;
+    }
+  },
+
+  async deleteItem(key: string): Promise<void> {
+    try {
+      await SecureStore.deleteItemAsync(key);
+    } catch (error) {
+      console.error('Error deleting secure item:', error);
+    }
+  },
+
+  async isTokenValid(): Promise<boolean> {
+    try {
+      const timestamp = await this.getItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP);
+      if (!timestamp) return false;
+      
+      const tokenAge = Date.now() - parseInt(timestamp, 10);
+      return tokenAge < TOKEN_EXPIRATION_TIME;
+    } catch (error) {
+      console.error('Error checking token validity:', error);
+      return false;
+    }
+  }
+};
+
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>({
@@ -115,22 +167,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   const initializeAuth = async () => {
     console.log('🔐 Initializing auth...');
-    
-    // Development mode bypass
-    if (DEV_MODE) {
-      console.log('🔧 Development mode: Bypassing authentication');
-      setAuthState(prev => ({
-        ...prev,
-        user: {
-          id: 'dev-user',
-          email: 'dev@nuolo.com',
-          emailVerified: true,
-        },
-        loading: false,
-        isAuthenticated: true,
-      }));
-      return;
-    }
     
     try {
       // Check for existing session
@@ -228,9 +264,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         switch (event) {
           case 'SIGNED_IN':
             await clearLoginAttempts();
+            // Save credentials for biometric auth if available
+            if (session) {
+              await saveBiometricCredentials(session);
+            }
             break;
           case 'TOKEN_REFRESHED':
             setLastActivity(new Date());
+            // Update stored tokens when refreshed
+            if (session) {
+              await saveBiometricCredentials(session);
+            }
             break;
           case 'USER_UPDATED':
             if (session) {
@@ -520,6 +564,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
       
+      // Check if stored credentials are still valid
+      const isTokenValid = await secureStorage.isTokenValid();
+      if (!isTokenValid) {
+        return {
+          error: new Error('Stored credentials have expired. Please sign in again.'),
+        };
+      }
+      
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Authenticate to access Nuolo',
         cancelLabel: 'Cancel',
@@ -528,21 +580,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       
       if (result.success) {
-        // Retrieve stored credentials
-        const storedEmail = await AsyncStorage.getItem('biometric_email');
-        const storedToken = await AsyncStorage.getItem('biometric_token');
+        // Retrieve stored credentials from secure storage
+        const storedEmail = await secureStorage.getItem(SECURE_STORE_KEYS.BIOMETRIC_EMAIL);
+        const storedAccessToken = await secureStorage.getItem(SECURE_STORE_KEYS.BIOMETRIC_TOKEN);
+        const storedRefreshToken = await secureStorage.getItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN);
         
-        if (storedEmail && storedToken) {
-          // Use stored refresh token to sign in
+        if (storedEmail && storedAccessToken && storedRefreshToken) {
+          // Use stored tokens to restore session
           const { error } = await supabase.auth.setSession({
-            access_token: storedToken,
-            refresh_token: storedToken,
+            access_token: storedAccessToken,
+            refresh_token: storedRefreshToken,
           });
+          
+          if (!error) {
+            setLastActivity(new Date());
+          }
           
           return { error };
         } else {
           return {
-            error: new Error('No stored credentials found'),
+            error: new Error('No stored credentials found. Please sign in with email and password first.'),
           };
         }
       } else {
@@ -560,11 +617,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       await supabase.auth.signOut();
+      
+      // Clear both AsyncStorage and SecureStore
       await AsyncStorage.multiRemove([
-        'biometric_email',
-        'biometric_token',
         'loginAttempts',
         'lockoutUntil',
+      ]);
+      
+      // Clear secure storage
+      await Promise.all([
+        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_EMAIL),
+        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_TOKEN),
+        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN),
+        secureStorage.deleteItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP),
       ]);
       
       setAuthState({
@@ -579,6 +644,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error('Sign out error:', error);
+    }
+  };
+  
+  // Save biometric credentials after successful authentication
+  const saveBiometricCredentials = async (session: Session) => {
+    try {
+      if (authState.biometricAvailable && session.access_token && session.refresh_token) {
+        await Promise.all([
+          secureStorage.setItem(SECURE_STORE_KEYS.BIOMETRIC_EMAIL, session.user.email || ''),
+          secureStorage.setItem(SECURE_STORE_KEYS.BIOMETRIC_TOKEN, session.access_token),
+          secureStorage.setItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN, session.refresh_token),
+          secureStorage.setItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP, Date.now().toString()),
+        ]);
+        console.log('Biometric credentials saved securely');
+      }
+    } catch (error) {
+      console.error('Error saving biometric credentials:', error);
     }
   };
   

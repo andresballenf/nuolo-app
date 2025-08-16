@@ -57,10 +57,10 @@
           "microphonePermission": "Allow Nuolo to access your microphone for audio features."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-secure-store"
     ],
     "extra": {
-      "googleMapsApiKey": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
       "router": {},
       "eas": {
         "projectId": "02e81b2a-f890-4c6e-8607-e4893ec8f63f"
