@@ -66,12 +66,11 @@ THIS IS MANDATORY: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()},
   const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language);
   const unitSystem = useMetric ? 'Use metric units (meters, kilometers)' : 'Use imperial units (feet, miles)';
 
-  return `${languageInstruction}Create a ${wordCount} audio tour narrative for "${attractionName}".
+  return `${languageInstruction} Create an audio tour narrative for "${attractionName}" targeting about ${wordCount}, but treat this as a soft goal.
 
 Identity resolution
-Use the full address and coordinates to ensure you describe the correct place:
+Use the full address to ensure you describe the correct place, but avoid mentioning the address in the output:
 - Address: ${attractionAddress}
-- Coordinates: ${userLocation.lat}, ${userLocation.lng}
 
 Voice and tone
 ${voiceStyle}
@@ -87,6 +86,15 @@ Blend naturally (order can vary):
 - Why locals care or how it fits daily life
 - One insider tip for visitors
 
+Detail guidance
+- If this place has strong, verifiable facts, share several specific details that teach the listener something new. Prefer concrete names, dates, design features, cultural context, or cause and effect. Vary angles to avoid repetition.
+- Do not force a specific count of facts. Let available evidence determine depth.
+- If little is documented or the place is ordinary, say so briefly with a line like "Not much is documented about this spot, but…" then share only what is truly known or what locals notice day to day.
+- Never pad with filler to meet a length target.
+
+Precedence rule
+- If Detail guidance conflicts with the word count target, follow Detail guidance. It is acceptable to go shorter when little is known or slightly longer when genuine depth adds value. Keep the narrative tight and spoken-first either way.
+
 Critical instructions
 - ${unitSystem} for all measurements
 - Speak directly to the listener using "you"
@@ -97,4 +105,4 @@ Final reminder
 Keep it conversational, fluid, and natural for listening, not decorated or literary.${isNonEnglish ? `
 
 REMINDER: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()}, NOT ENGLISH!` : ''}`;
-}
+2}

@@ -25,7 +25,7 @@ interface FullScreenAudioModeProps {
   isMuted: boolean;
   onClose: () => void;
   onPlay: () => void;
-  onPause: () => void;
+  onPause: () => Promise<void>;
   onNext?: () => void;
   onPrevious?: () => void;
   onSeek?: (time: number) => void;
@@ -530,7 +530,13 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
 
             <TouchableOpacity
               style={styles.playButton}
-              onPress={isPlaying ? onPause : onPlay}
+              onPress={() => {
+                if (isPlaying) {
+                  onPause().catch(error => console.error('Error pausing:', error));
+                } else {
+                  onPlay();
+                }
+              }}
             >
               <MaterialIcons 
                 name={isPlaying ? "pause" : "play-arrow"} 

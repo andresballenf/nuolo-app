@@ -67,7 +67,7 @@ export interface AudioState {
 export interface AudioActions {
   // Playback controls
   play: () => Promise<void>;
-  pause: () => void;
+  pause: () => Promise<void>;
   togglePlayPause: () => void;
   seek: (position: number) => Promise<void>;
   

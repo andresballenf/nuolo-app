@@ -164,10 +164,10 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
           {/* Track info or loading state */}
           <View style={styles.trackInfo}>
             {shouldShowLoading ? (
-              <>
+              <View style={styles.loadingTextContainer}>
                 <Text style={styles.loadingTitle}>Generating Audio</Text>
                 <Text style={styles.loadingSubtitle}>{loadingMessage}</Text>
-              </>
+              </View>
             ) : track ? (
               <>
                 {/* Show attraction image if available */}
@@ -339,6 +339,11 @@ const styles = StyleSheet.create({
   trackSubtitle: {
     fontSize: 13,
     color: 'rgba(255, 255, 255, 0.85)',
+  },
+  loadingTextContainer: {
+    flexDirection: 'column',
+    justifyContent: 'center',
+    flex: 1,
   },
   loadingTitle: {
     fontSize: 16,

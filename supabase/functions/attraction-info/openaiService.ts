@@ -36,6 +36,19 @@ async function callChatModel(model, prompt, apiKey, language = 'en') {
 
                     Respond in a clear, natural, conversational tone as if speaking aloud. Use contractions, short sentences, and varied pacing so it sounds like someone talking while walking with the listener.
 
+                    Instruction priority
+                    - Identity resolution and factual accuracy
+                    - Detail guidance depth vs brevity
+                    - Clarity and spoken style
+                    - Word count target (soft goal) dont try to reach a minimum if you dont have enough information
+
+                    Voice and tone
+                    - Use simple spoken language, not literary or flowery writing.
+                    - Avoid travel blog or fiction book style.
+                    - Limit adjectives and metaphors to what is necessary for clarity.
+                    - Imagine you are talking live, not reading a prepared script.
+                    - Never invent facts, myths, or stories. If little is known, say so plainly.
+                    - Do not format as lists or headings in the final output. 
                     Style constraints
                     - Use simple spoken language, not literary or flowery writing.
                     - Avoid travel blog or fiction book style.

@@ -10,6 +10,7 @@ import {
   Alert,
   Keyboard,
   ScrollView,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -17,6 +18,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const { 
@@ -43,10 +45,21 @@ export default function LoginScreen() {
     : 0;
   
   useEffect(() => {
-    // Show biometric prompt if available
-    if (biometricAvailable) {
-      handleBiometricLogin();
-    }
+    // Show biometric prompt if available and user has used it before
+    const checkAndPromptBiometric = async () => {
+      if (biometricAvailable) {
+        // Check if user has stored credentials
+        const hasStoredCredentials = await AsyncStorage.getItem('hasBiometricCredentials');
+        if (hasStoredCredentials === 'true') {
+          // Small delay to ensure screen is fully rendered
+          setTimeout(() => {
+            handleBiometricLogin();
+          }, 500);
+        }
+      }
+    };
+    
+    checkAndPromptBiometric();
   }, [biometricAvailable]);
   
   const validateForm = () => {
@@ -107,6 +120,10 @@ export default function LoginScreen() {
         }
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mark that credentials can be saved for biometric
+        if (biometricAvailable) {
+          await AsyncStorage.setItem('hasBiometricCredentials', 'true');
+        }
         router.replace('/map');
       }
     } catch (error) {
@@ -132,16 +149,32 @@ export default function LoginScreen() {
     }
   };
   
-  const handleBiometricLogin = async () => {
+  const handleBiometricLogin = async (showErrors = false) => {
     try {
       const { error } = await signInWithBiometric();
       
       if (!error) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mark that user has successfully used biometric
+        await AsyncStorage.setItem('hasBiometricCredentials', 'true');
         router.replace('/map');
+      } else if (showErrors) {
+        // Only show errors when manually triggered
+        if (error.message.includes('expired') || error.message.includes('No stored credentials')) {
+          Alert.alert(
+            'Biometric Setup Required',
+            'Please sign in with your email and password first to enable biometric authentication.',
+            [{ text: 'OK' }]
+          );
+        } else if (!error.message.includes('cancelled')) {
+          // Don't show error if user cancelled
+          Alert.alert('Authentication Failed', error.message, [{ text: 'OK' }]);
+        }
       }
     } catch (error) {
-      // Silent fail - user can use password instead
+      if (showErrors) {
+        Alert.alert('Error', 'Unable to authenticate with biometrics', [{ text: 'OK' }]);
+      }
     }
   };
   
@@ -172,10 +205,11 @@ export default function LoginScreen() {
             </TouchableOpacity>
             
             <View style={styles.logoContainer}>
-              <View style={styles.logo}>
-                <Icon name="headset" size={32} color="#84cc16" />
-              </View>
-              <Text style={styles.appName}>Nuolo</Text>
+              <Image
+                source={require('../../assets/images/nuolo-logo.png')}
+                style={styles.logo}
+                resizeMode="contain"
+              />
             </View>
           </View>
           
@@ -277,7 +311,7 @@ export default function LoginScreen() {
             {/* Biometric Login */}
             {biometricAvailable && !isLocked && (
               <TouchableOpacity
-                onPress={handleBiometricLogin}
+                onPress={() => handleBiometricLogin(true)}
                 style={styles.biometricButton}
                 disabled={loading}
               >
@@ -363,18 +397,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#f0fdf4',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  appName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    width: 120,
+    height: 40,
   },
   form: {
     flex: 1,

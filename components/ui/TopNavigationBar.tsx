@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
+  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MapPreferencesMenu } from '../map/MapPreferencesMenu';
@@ -109,12 +110,15 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
           >
             {isSearching ? (
               <View style={styles.searchingContent}>
-                <ActivityIndicator size="small" color="#6B7280" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
                 <Text style={styles.searchButtonText}>Searching...</Text>
               </View>
             ) : (
               <View style={styles.searchContent}>
-                <MaterialIcons name="search" size={18} color="#374151" />
+                <Image 
+                  source={require('../../assets/images/nuolo-icon-small.png')} 
+                  style={styles.searchIcon}
+                />
                 <Text style={styles.searchButtonText}>Search this area</Text>
               </View>
             )}
@@ -218,7 +222,7 @@ const styles = StyleSheet.create({
   },
   searchButton: {
     height: 44,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#84cc16',
     borderRadius: 22,
     paddingHorizontal: 20,
     justifyContent: 'center',
@@ -228,27 +232,35 @@ const styles = StyleSheet.create({
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 5,
   },
   searchButtonSearching: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#84cc16',
+    opacity: 0.9,
   },
   searchContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
   },
   searchingContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
+  },
+  searchIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
   },
   searchButtonText: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   searchButtonTouchable: {
     flex: 1,
