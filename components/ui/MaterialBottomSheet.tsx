@@ -391,7 +391,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       if (contentType === 'attractions' && attractions.length > 0) {
         animateToState('collapsed');
       } else if (contentType === 'settings' || contentType === 'profile') {
-        animateToState('collapsed');
+        animateToState('expanded');
       } else if (contentType === 'attraction-detail') {
         animateToState('detail');
       }

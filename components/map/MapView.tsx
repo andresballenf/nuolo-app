@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Alert, Dimensions } from 'react-native';
+import { View, StyleSheet, Alert, Dimensions, Platform } from 'react-native';
 import MapView, { 
   Marker, 
-  PROVIDER_GOOGLE, 
+  PROVIDER_GOOGLE,
+  PROVIDER_DEFAULT, 
   Region, 
   MapViewProps as RNMapViewProps 
 } from 'react-native-maps';
@@ -316,6 +317,19 @@ export default function MapViewComponent({
 
     debounceTimerRef.current = setTimeout(async () => {
       if (!mapRef.current || pointsOfInterest.length === 0) return;
+      
+      // Additional check to ensure map is ready
+      try {
+        // Test if the map is ready by checking if we can get the region
+        const region = await mapRef.current.getMapBoundaries?.();
+        if (!region) {
+          console.warn('Map not ready yet, skipping marker position update');
+          return;
+        }
+      } catch (e) {
+        // Map might not be ready, skip this update
+        return;
+      }
 
       const positions: { [key: string]: { x: number; y: number } } = {};
       const markerPositionsList: MarkerPosition[] = [];
@@ -323,7 +337,35 @@ export default function MapViewComponent({
       // Get screen positions for all markers
       for (const poi of pointsOfInterest) {
         try {
-          const screenPos = await mapRef.current.pointForCoordinate(poi.coordinate);
+          // Ensure mapRef.current exists and has the pointForCoordinate method
+          if (!mapRef.current || !mapRef.current.pointForCoordinate) {
+            console.warn('Map ref not ready for coordinate conversion');
+            continue;
+          }
+          
+          // Ensure coordinate is valid
+          if (!poi.coordinate || typeof poi.coordinate.latitude !== 'number' || typeof poi.coordinate.longitude !== 'number') {
+            console.warn(`Invalid coordinate for POI ${poi.id}`);
+            continue;
+          }
+          
+          let screenPos;
+          try {
+            screenPos = await mapRef.current.pointForCoordinate(poi.coordinate);
+          } catch (innerError) {
+            // Handle null conversion error specifically
+            if (innerError instanceof TypeError && innerError.message.includes('Cannot convert null')) {
+              // Map view might not be ready or marker is outside visible area
+              continue;
+            }
+            throw innerError;
+          }
+          
+          // Ensure screenPos is valid
+          if (!screenPos || typeof screenPos.x !== 'number' || typeof screenPos.y !== 'number') {
+            continue;
+          }
+          
           positions[poi.id] = screenPos;
           markerPositionsList.push({
             id: poi.id,
@@ -334,7 +376,10 @@ export default function MapViewComponent({
             isSelected: selectedPOI?.id === poi.id,
           });
         } catch (error) {
-          console.error('Error getting screen position for marker:', error);
+          // Only log non-null conversion errors
+          if (!(error instanceof TypeError && error.message.includes('Cannot convert null'))) {
+            console.error('Error getting screen position for marker:', error);
+          }
         }
       }
 
@@ -378,12 +423,14 @@ export default function MapViewComponent({
 
   // Log 3D configuration for debugging - only on mount
   React.useEffect(() => {
+    const mapProvider = Platform.OS === 'ios' ? 'PROVIDER_DEFAULT (Apple Maps)' : 'PROVIDER_GOOGLE (Google Maps)';
     console.log('🏗️ 3D Map Configuration:', {
       mapType,
       tilt: initialTilt,
       zoom: initialZoom,
       showsBuildings: true,
-      provider: 'PROVIDER_GOOGLE',
+      provider: mapProvider,
+      platform: Platform.OS,
       camera: {
         pitch: initialTilt,
         zoom: 17,

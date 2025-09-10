@@ -260,13 +260,13 @@ export default function MapScreen() {
   const handleOpenSettings = useCallback(() => {
     setSheetContentType('settings');
     setIsBottomSheetVisible(true);
-    setSheetState('half');
+    setSheetState('expanded');
   }, []);
   
   const handleOpenProfile = useCallback(() => {
     setSheetContentType('profile');
     setIsBottomSheetVisible(true);
-    setSheetState('half');
+    setSheetState('expanded');
   }, []);
 
   const handleGenerateInfo = async (attraction: PointOfInterest) => {

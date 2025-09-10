@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Animated, Dimensions, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../ui/Button';
 import { useOnboarding } from '../../contexts/OnboardingContext';
-import { Ionicons } from '@expo/vector-icons';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -70,9 +69,11 @@ export const WelcomeStep: React.FC = () => {
               },
             ]}
           >
-            <View style={styles.logoCircle}>
-              <Ionicons name="location" size={48} color="#84cc16" />
-            </View>
+            <Image 
+              source={require('../../assets/images/nuolo-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
           </Animated.View>
           
           {/* Title */}
@@ -164,18 +165,9 @@ const styles = StyleSheet.create({
   logoContainer: {
     marginBottom: 48,
   },
-  logoCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#F0FDF4',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#84cc16',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+  logo: {
+    width: 200,
+    height: 60,
   },
   textContainer: {
     alignItems: 'center',

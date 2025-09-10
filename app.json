@@ -16,6 +16,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nuolo.app",
+      "config": {
+        "googleMapsApiKey": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Nuolo uses your location to discover nearby attractions and provide location-based audio tours.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Nuolo uses your location to discover nearby attractions and provide location-based audio tours.",

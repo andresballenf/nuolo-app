@@ -1,0 +1,62 @@
+{
+  "cli": {
+    "version": ">= 16.17.4",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "production": {
+      "ios": {
+        "buildConfiguration": "Release",
+        "distribution": "store",
+        "autoIncrement": true,
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      }
+    },
+    "production-adhoc": {
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      },
+      "ios": {
+        "buildConfiguration": "Release", 
+        "distribution": "internal",
+        "autoIncrement": true,
+        "resourceClass": "m-medium"
+      }
+    },
+    "simulator": {
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+      },
+      "ios": {
+        "simulator": true,
+        "resourceClass": "m-medium"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
