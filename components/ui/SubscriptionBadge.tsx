@@ -46,67 +46,85 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
     return null; // Don't show badge while loading
   }
 
-  const getBadgeInfo = () => {
+  const getDisplayInfo = () => {
+    // Unlimited subscription
+    if (subscription.isActive && subscription.type === 'unlimited') {
+      return {
+        displayValue: '∞',
+        isInfinity: true,
+        showFreeBadge: false,
+        isEmpty: false,
+      };
+    }
+
+    // Premium packages (non-free subscriptions)
     if (subscription.isActive && subscription.type !== 'free') {
+      // Calculate remaining attractions from packages
+      const remainingFromPackages = entitlements.remainingFreeAttractions; // This will be updated to include package attractions
       return {
-        text: 'Premium',
-        icon: 'check-circle',
-        backgroundColor: '#84cc16',
-        textColor: '#FFFFFF',
-        iconColor: '#FFFFFF',
+        displayValue: remainingFromPackages.toString(),
+        isInfinity: false,
+        showFreeBadge: false,
+        isEmpty: remainingFromPackages === 0,
       };
     }
 
-    if (entitlements.remainingFreeAttractions > 0) {
-      return {
-        text: `Free ${entitlements.remainingFreeAttractions}/2`,
-        icon: null,
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        textColor: '#374151',
-        iconColor: '#84cc16',
-      };
-    }
-
+    // Free tier
+    const freeRemaining = entitlements.remainingFreeAttractions;
     return {
-      text: 'Free 0/2',
-      icon: 'lock',
-      backgroundColor: 'rgba(255, 255, 255, 0.95)',
-      textColor: '#EF4444',
-      iconColor: '#EF4444',
+      displayValue: freeRemaining.toString(),
+      isInfinity: false,
+      showFreeBadge: true,
+      isEmpty: freeRemaining === 0,
     };
   };
 
-  const badgeInfo = getBadgeInfo();
+  const displayInfo = getDisplayInfo();
 
   return (
     <Animated.View
       style={[
         styles.container,
-        { 
-          backgroundColor: badgeInfo.backgroundColor,
-          transform: [{ scale: scaleAnim }],
-        },
+        { transform: [{ scale: scaleAnim }] },
         style,
       ]}
     >
       <TouchableOpacity
         style={styles.touchable}
         onPress={handlePress}
-        activeOpacity={1}
+        activeOpacity={0.8}
       >
-        <View style={styles.content}>
-          {badgeInfo.icon && (
+        {/* Main counter display */}
+        <View style={styles.counterContainer}>
+          {displayInfo.isInfinity ? (
             <MaterialIcons 
-              name={badgeInfo.icon as any} 
-              size={14} 
-              color={badgeInfo.iconColor} 
-              style={styles.icon}
+              name="all-inclusive" 
+              size={24} 
+              color="#374151" 
             />
+          ) : (
+            <Text style={[
+              styles.counterText, 
+              displayInfo.isEmpty && styles.counterTextEmpty
+            ]}>
+              {displayInfo.displayValue}
+            </Text>
           )}
-          <Text style={[styles.text, { color: badgeInfo.textColor }]}>
-            {badgeInfo.text}
-          </Text>
+          
+          {/* Lock icon for empty state */}
+          {displayInfo.isEmpty && (
+            <View style={styles.lockOverlay}>
+              <MaterialIcons name="lock" size={14} color="#EF4444" />
+            </View>
+          )}
         </View>
+
+        {/* Free badge overlay */}
+        {displayInfo.showFreeBadge && (
+          <View style={styles.freeBadge}>
+            <Text style={styles.freeBadgeText}>Free</Text>
+          </View>
+        )}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -114,33 +132,69 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: 28,
-    minWidth: 60,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 2,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: 8,
+    elevation: 5,
   },
   touchable: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    position: 'relative',
   },
-  content: {
-    flexDirection: 'row',
+  counterContainer: {
     alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
   },
-  icon: {
-    marginRight: 4,
+  counterText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#374151',
+    textAlign: 'center',
   },
-  text: {
-    fontSize: 12,
-    fontWeight: '600',
+  counterTextEmpty: {
+    color: '#9CA3AF',
+  },
+  lockOverlay: {
+    position: 'absolute',
+    bottom: -8,
+    right: -8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+  },
+  freeBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#84cc16',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  freeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
 });
