@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { monetizationService, SubscriptionStatus, UserEntitlements, AttractionPack } from '../services/MonetizationService';
+import { monetizationService, SubscriptionStatus, UserEntitlements, AttractionPack, AttractionPackage } from '../services/MonetizationService';
 import { useAuth } from './AuthContext';
 
 export interface MonetizationState {
@@ -11,11 +11,13 @@ export interface MonetizationState {
   
   // Product data
   attractionPacks: AttractionPack[];
+  attractionPackages: AttractionPackage[];
   
   // Actions
   purchaseAttraction: (attractionId: string) => Promise<boolean>;
   purchasePack: (packId: string) => Promise<boolean>;
-  purchaseSubscription: (type: 'monthly' | 'yearly' | 'lifetime') => Promise<boolean>;
+  purchaseAttractionPackage?: (packageId: string) => Promise<boolean>;
+  purchaseSubscription: (type: 'monthly' | 'yearly' | 'lifetime' | 'unlimited_monthly') => Promise<boolean>;
   restorePurchases: () => Promise<void>;
   refreshEntitlements: () => Promise<void>;
   
@@ -55,6 +57,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   });
   
   const [attractionPacks, setAttractionPacks] = useState<AttractionPack[]>([]);
+  const [attractionPackages, setAttractionPackages] = useState<AttractionPackage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -95,6 +98,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       await Promise.all([
         refreshEntitlements(),
         loadAttractionPacks(),
+        loadAttractionPackages(),
       ]);
       setInitialized(true);
       console.log('MonetizationProvider initialized successfully');
@@ -113,6 +117,15 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       setAttractionPacks(packs);
     } catch (err) {
       console.error('Failed to load attraction packs:', err);
+    }
+  };
+
+  const loadAttractionPackages = async () => {
+    try {
+      const packages = await monetizationService.getAttractionPackages();
+      setAttractionPackages(packages);
+    } catch (err) {
+      console.error('Failed to load attraction packages:', err);
     }
   };
 
@@ -157,6 +170,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     });
     
     setAttractionPacks([]);
+    setAttractionPackages([]);
     setInitialized(false);
     setError(null);
   };
@@ -215,7 +229,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     }
   }, [user, refreshEntitlements]);
 
-  const purchaseSubscription = useCallback(async (type: 'monthly' | 'yearly' | 'lifetime'): Promise<boolean> => {
+  const purchaseSubscription = useCallback(async (type: 'monthly' | 'yearly' | 'lifetime' | 'unlimited_monthly'): Promise<boolean> => {
     if (!user) {
       setError('User must be authenticated to make purchases');
       return false;
@@ -225,7 +239,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      const subscriptionType = `premium_${type}`;
+      const subscriptionType = type === 'unlimited_monthly' ? 'unlimited_monthly' : `premium_${type}`;
       const success = await monetizationService.purchaseSubscription(subscriptionType);
       if (success) {
         await refreshEntitlements();
@@ -237,6 +251,33 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       const errorMessage = err instanceof Error ? err.message : 'Subscription purchase failed';
       setError(errorMessage);
       console.error('Subscription purchase failed:', errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [user, refreshEntitlements]);
+
+  const purchaseAttractionPackage = useCallback(async (packageId: string): Promise<boolean> => {
+    if (!user) {
+      setError('User must be authenticated to make purchases');
+      return false;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const success = await monetizationService.purchaseAttractionPackage(packageId);
+      if (success) {
+        await refreshEntitlements();
+        setShowPaywall(false); // Close paywall on successful purchase
+        console.log('Successfully purchased package:', packageId);
+      }
+      return success;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Package purchase failed';
+      setError(errorMessage);
+      console.error('Package purchase failed:', errorMessage);
       return false;
     } finally {
       setLoading(false);
@@ -272,7 +313,12 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const recordAttractionUsage = useCallback(async (attractionId: string): Promise<void> => {
-    if (!user || subscription.type !== 'free') return;
+    if (!user) return;
+    
+    // Only record usage for free tier users (not premium/unlimited subscribers)
+    const hasUnlimitedAccess = subscription.isActive && 
+      ['premium_monthly', 'premium_yearly', 'lifetime', 'unlimited_monthly'].includes(subscription.type || '');
+    if (hasUnlimitedAccess) return;
     
     try {
       await monetizationService.recordAttractionUsage(user.id, attractionId);
@@ -282,7 +328,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Failed to record attraction usage:', err);
     }
-  }, [user, subscription.type, refreshEntitlements]);
+  }, [user, subscription.isActive, subscription.type, refreshEntitlements]);
 
   // Enhanced setShowPaywall function that accepts context
   const setShowPaywallWithContext = useCallback((show: boolean, context?: {
@@ -298,6 +344,19 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Development helper - reset free counter
+  const resetFreeCounter = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      await monetizationService.resetUserAttractionUsage(user.id);
+      await refreshEntitlements();
+      console.log('Free counter reset successfully');
+    } catch (err) {
+      console.error('Failed to reset free counter:', err);
+    }
+  }, [user, refreshEntitlements]);
+
   const contextValue: MonetizationState = {
     subscription,
     entitlements,
@@ -305,8 +364,10 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     error,
     initialized,
     attractionPacks,
+    attractionPackages,
     purchaseAttraction,
     purchasePack,
+    purchaseAttractionPackage,
     purchaseSubscription,
     restorePurchases,
     refreshEntitlements,
@@ -315,6 +376,8 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     showPaywall,
     setShowPaywall: setShowPaywallWithContext,
     paywallContext,
+    // @ts-ignore - Development only
+    resetFreeCounter: __DEV__ ? resetFreeCounter : undefined,
   };
 
   return (
@@ -341,9 +404,15 @@ export function useContentAccess() {
     reason: 'premium' | 'owned' | 'free_remaining' | 'blocked';
     message?: string;
   }> => {
-    // Premium subscribers have unlimited access
-    if (subscription.isActive && subscription.type !== 'free') {
+    // Premium/unlimited subscribers have unlimited access
+    if (subscription.isActive && 
+        ['premium_monthly', 'premium_yearly', 'lifetime', 'unlimited_monthly'].includes(subscription.type || '')) {
       return { hasAccess: true, reason: 'premium' };
+    }
+
+    // Check if user has package access
+    if (entitlements.totalAttractionLimit > 2 && entitlements.attractionsUsed < entitlements.totalAttractionLimit) {
+      return { hasAccess: true, reason: 'owned' };
     }
 
     // Check if user owns this specific attraction
@@ -352,7 +421,7 @@ export function useContentAccess() {
     }
 
     // Check free tier allowance
-    if (entitlements.remainingFreeAttractions > 0) {
+    if (entitlements.remainingAttractions > 0) {
       return { hasAccess: true, reason: 'free_remaining' };
     }
 
@@ -387,7 +456,7 @@ export function useContentAccess() {
       };
     } else {
       // Determine paywall trigger based on reason
-      const trigger = entitlements.remainingFreeAttractions === 0 ? 'free_limit' : 'premium_attraction';
+      const trigger = entitlements.remainingAttractions === 0 ? 'free_limit' : 'premium_attraction';
       
       return {
         canGenerate: false,

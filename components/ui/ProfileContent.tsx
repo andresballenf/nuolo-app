@@ -13,6 +13,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
 import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useMonetization } from '../../contexts/MonetizationContext';
 import { Button } from './Button';
 import { router } from 'expo-router';
 
@@ -41,6 +42,8 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
   const { userPreferences, setUserPreferences } = useApp();
   const { resetOnboarding } = useOnboarding();
   const { user, signOut, isAuthenticated } = useAuth();
+  const monetization = useMonetization();
+  const { subscription, entitlements, setShowPaywall } = monetization;
   
   // Modal states for editing preferences
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -168,6 +171,86 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
         </View>
       </View>
       
+      {/* Subscription Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Subscription</Text>
+        <View style={styles.subscriptionCard}>
+          <View style={styles.subscriptionHeader}>
+            <View style={styles.subscriptionInfo}>
+              <Text style={styles.subscriptionPlan}>
+                {subscription.isActive && subscription.type !== 'free' ? 'Premium' : 'Free Tier'}
+              </Text>
+              {subscription.isActive && subscription.type !== 'free' ? (
+                <View style={styles.subscriptionBadge}>
+                  <MaterialIcons name="check-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.subscriptionBadgeText}>Active</Text>
+                </View>
+              ) : (
+                <View style={styles.subscriptionBadgeFree}>
+                  <Text style={styles.subscriptionBadgeFreeText}>
+                    {entitlements.remainingFreeAttractions} of 2 free guides remaining
+                  </Text>
+                </View>
+              )}
+            </View>
+            {subscription.isActive && subscription.type !== 'free' && (
+              <MaterialIcons name="star" size={24} color="#84cc16" />
+            )}
+          </View>
+          
+          <View style={styles.subscriptionFeatures}>
+            {subscription.isActive && subscription.type !== 'free' ? (
+              <>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="check" size={16} color="#84cc16" />
+                  <Text style={styles.subscriptionFeatureText}>Unlimited audio guides</Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="check" size={16} color="#84cc16" />
+                  <Text style={styles.subscriptionFeatureText}>All locations worldwide</Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="check" size={16} color="#84cc16" />
+                  <Text style={styles.subscriptionFeatureText}>Premium voice narration</Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="check" size={16} color="#84cc16" />
+                  <Text style={styles.subscriptionFeatureText}>Offline download support</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="info-outline" size={16} color="#6B7280" />
+                  <Text style={styles.subscriptionFeatureText}>2 free audio guides included</Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="lock-outline" size={16} color="#6B7280" />
+                  <Text style={styles.subscriptionFeatureText}>Upgrade for unlimited access</Text>
+                </View>
+              </>
+            )}
+          </View>
+          
+          {(!subscription.isActive || subscription.type === 'free') && (
+            <Button
+              title="Upgrade to Premium"
+              onPress={() => setShowPaywall(true, { trigger: 'profile' })}
+              variant="primary"
+              size="md"
+              style={styles.upgradeButton}
+              icon="star"
+            />
+          )}
+          
+          {subscription.isActive && subscription.type !== 'free' && subscription.expirationDate && (
+            <Text style={styles.subscriptionExpiry}>
+              Renews on {new Date(subscription.expirationDate).toLocaleDateString()}
+            </Text>
+          )}
+        </View>
+      </View>
+      
       {/* Language Selection */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Language</Text>
@@ -246,6 +329,22 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
           size="md"
           style={styles.actionButton}
         />
+        {__DEV__ && (
+          <Button
+            title="🔧 Reset Free Counter (Dev)"
+            onPress={async () => {
+              // @ts-ignore
+              if (monetization.resetFreeCounter) {
+                // @ts-ignore
+                await monetization.resetFreeCounter();
+                Alert.alert('Success', 'Free counter has been reset to 2/2');
+              }
+            }}
+            variant="outline"
+            size="md"
+            style={[styles.actionButton, { backgroundColor: '#FEE2E2' }]}
+          />
+        )}
         {isAuthenticated ? (
           <Button
             title="Sign Out"
@@ -583,5 +682,70 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#6B7280',
+  },
+  subscriptionCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  subscriptionInfo: {
+    flex: 1,
+  },
+  subscriptionPlan: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 6,
+  },
+  subscriptionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#84cc16',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    gap: 4,
+  },
+  subscriptionBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  subscriptionBadgeFree: {
+    paddingVertical: 4,
+  },
+  subscriptionBadgeFreeText: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  subscriptionFeatures: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  subscriptionFeature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  subscriptionFeatureText: {
+    fontSize: 14,
+    color: '#4B5563',
+    flex: 1,
+  },
+  upgradeButton: {
+    marginTop: 8,
+  },
+  subscriptionExpiry: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 12,
   },
 });

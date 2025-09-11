@@ -8,9 +8,12 @@ import { SettingsContent } from '../components/ui/SettingsContent';
 import { FullScreenAudioMode } from '../components/audio/FullScreenAudioMode';
 import { MiniAudioPlayer } from '../components/audio/MiniAudioPlayer';
 import { TopNavigationBar } from '../components/ui/TopNavigationBar';
+import { PaywallModal } from '../components/ui/PaywallModal';
 import { useApp } from '../contexts/AppContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAudio } from '../contexts/AudioContext';
+import { useMonetization } from '../contexts/MonetizationContext';
+import { useContentAccess } from '../contexts/MonetizationContext';
 import { Button } from '../components/ui/Button';
 import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
@@ -21,6 +24,8 @@ export default function MapScreen() {
   const { setSelectedAttraction, setIsBottomSheetOpen, gpsStatus, userPreferences, setGpsStatus } = useApp();
   const { resetOnboarding } = useOnboarding();
   const audioContext = useAudio();
+  const { showPaywall, setShowPaywall, paywallContext } = useMonetization();
+  const { generateAudioGuideWithValidation } = useContentAccess();
 
   // Test location state
   const [isTestModeEnabled, setIsTestModeEnabled] = useState(false);
@@ -330,6 +335,17 @@ export default function MapScreen() {
   // NEW: Chunked audio generation with streaming support
   const handlePlayAudio = async (attraction: PointOfInterest) => {
     try {
+      // Check monetization entitlements first
+      const validationResult = await generateAudioGuideWithValidation(attraction.id, attraction.name);
+      
+      if (!validationResult.canGenerate) {
+        // Show paywall if user can't generate
+        if (validationResult.shouldShowPaywall) {
+          setShowPaywall(true);
+        }
+        return;
+      }
+
       // Clear any existing generation state first (allows switching attractions)
       audioContext.clearGenerationState();
       
@@ -936,6 +952,15 @@ export default function MapScreen() {
         position={audioContext.position}
         duration={audioContext.duration}
         transcriptSegments={transcriptSegments}
+      />
+
+      {/* Paywall Modal */}
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        trigger={paywallContext?.trigger}
+        attractionId={paywallContext?.attractionId}
+        attractionName={paywallContext?.attractionName}
       />
     </View>
   );

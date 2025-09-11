@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { useMonetization } from '../../contexts/MonetizationContext';
 
 interface PopularLocation {
   name: string;
@@ -59,6 +60,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
   popularLocations = POPULAR_LOCATIONS,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const monetization = useMonetization();
 
   const validateAndApplyCoordinates = () => {
     const lat = parseFloat(testLatitude);
@@ -267,6 +269,38 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
               </View>
             )}
           </View>
+
+          {/* Development Tools */}
+          {__DEV__ && (
+            <View style={styles.devToolsContainer}>
+              <Text style={styles.sectionTitle}>Development Tools</Text>
+              
+              <Button
+                title="🔄 Reset Free Counter"
+                onPress={async () => {
+                  // @ts-ignore
+                  if (monetization.resetFreeCounter) {
+                    try {
+                      // @ts-ignore
+                      await monetization.resetFreeCounter();
+                      Alert.alert('Success', 'Free counter has been reset to 2/2');
+                    } catch (error) {
+                      Alert.alert('Error', 'Failed to reset free counter');
+                    }
+                  } else {
+                    Alert.alert('Info', 'Reset function not available');
+                  }
+                }}
+                variant="secondary"
+                size="sm"
+                style={styles.resetButton}
+              />
+              
+              <Text style={styles.devHint}>
+                Resets the free attraction usage counter back to 2/2
+              </Text>
+            </View>
+          )}
           </View>
         </Card>
       )}
@@ -498,5 +532,21 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontStyle: 'italic',
     marginTop: 6,
+  },
+  devToolsContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  resetButton: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#EF4444',
+    marginBottom: 8,
+  },
+  devHint: {
+    fontSize: 11,
+    color: '#9ca3af',
+    fontStyle: 'italic',
   },
 });

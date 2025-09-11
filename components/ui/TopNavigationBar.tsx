@@ -12,7 +12,9 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { MapPreferencesMenu } from '../map/MapPreferencesMenu';
 import { ProfileMenu } from './ProfileMenu';
+import { SubscriptionBadge } from './SubscriptionBadge';
 import { useAuth } from '../../contexts/AuthContext';
+import { useMonetization } from '../../contexts/MonetizationContext';
 
 interface TopNavigationBarProps {
   // Search functionality
@@ -42,6 +44,7 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
 }) => {
   // Get auth context
   const { user, isAuthenticated } = useAuth();
+  const { setShowPaywall } = useMonetization();
   
   // State for menus
   const [showMapPreferences, setShowMapPreferences] = useState(false);
@@ -124,6 +127,12 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
             )}
           </TouchableOpacity>
         </Animated.View>
+
+        {/* Subscription Badge */}
+        <SubscriptionBadge 
+          onPress={() => setShowPaywall(true, { trigger: 'manual' })}
+          style={styles.subscriptionBadge}
+        />
 
         {/* Map Preferences Button - Circular */}
         <Animated.View
@@ -301,5 +310,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  subscriptionBadge: {
+    marginHorizontal: 4,
   },
 });

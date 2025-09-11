@@ -11,6 +11,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { PointOfInterest } from '../../services/GooglePlacesService';
+import { useMonetization } from '../../contexts/MonetizationContext';
 
 interface AttractionListItemProps {
   attraction: PointOfInterest;
@@ -33,6 +34,14 @@ export const AttractionListItem: React.FC<AttractionListItemProps> = ({
   onPlayPress,
   onMenuPress,
 }) => {
+  const { subscription, entitlements } = useMonetization();
+  
+  // Determine if this is a free guide or requires payment
+  const isPremium = subscription.isActive && subscription.type !== 'free';
+  const hasFreeRemaining = entitlements.remainingFreeAttractions > 0;
+  const isOwned = entitlements.ownedAttractions.includes(attraction.id);
+  const canAccess = isPremium || hasFreeRemaining || isOwned;
+  
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress?.();
@@ -111,24 +120,37 @@ export const AttractionListItem: React.FC<AttractionListItemProps> = ({
 
       {/* Right: Play Button and Menu */}
       <View style={styles.actionsContainer}>
-        <TouchableOpacity
-          style={[styles.playButton, isPlaying && styles.playButtonPlaying]}
-          onPress={handlePlayPress}
-          disabled={isLoading}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel={isLoading ? "Loading audio" : isPlaying ? "Pause audio" : "Play audio"}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#1F2937" />
-          ) : (
-            <MaterialIcons 
-              name={isPlaying ? "pause" : "play-arrow"} 
-              size={24} 
-              color={isPlaying ? "#FFFFFF" : "#1F2937"} 
-            />
+        <View style={styles.playButtonContainer}>
+          <TouchableOpacity
+            style={[styles.playButton, isPlaying && styles.playButtonPlaying]}
+            onPress={handlePlayPress}
+            disabled={isLoading}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={isLoading ? "Loading audio" : isPlaying ? "Pause audio" : "Play audio"}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color="#1F2937" />
+            ) : (
+              <MaterialIcons 
+                name={isPlaying ? "pause" : "play-arrow"} 
+                size={24} 
+                color={isPlaying ? "#FFFFFF" : "#1F2937"} 
+              />
+            )}
+          </TouchableOpacity>
+          
+          {/* Entitlement Badge */}
+          {!isPremium && !isOwned && (
+            <View style={styles.entitlementBadge}>
+              {hasFreeRemaining ? (
+                <Text style={styles.freeBadgeText}>Free</Text>
+              ) : (
+                <MaterialIcons name="lock" size={10} color="#EF4444" />
+              )}
+            </View>
           )}
-        </TouchableOpacity>
+        </View>
         
         <TouchableOpacity
           style={styles.menuButton}
@@ -215,6 +237,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  playButtonContainer: {
+    position: 'relative',
+  },
   playButton: {
     width: 40,
     height: 40,
@@ -226,6 +251,31 @@ const styles = StyleSheet.create({
   },
   playButtonPlaying: {
     backgroundColor: '#84cc16',
+  },
+  entitlementBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -2,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  freeBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#84cc16',
+    letterSpacing: 0.5,
   },
   menuButton: {
     width: 32,
