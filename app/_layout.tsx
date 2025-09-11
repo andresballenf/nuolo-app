@@ -8,6 +8,8 @@ import { AuthProvider } from '../contexts/AuthContext';
 import { OnboardingProvider } from '../contexts/OnboardingContext';
 import { AudioProvider } from '../contexts/AudioContext';
 import { PrivacyProvider } from '../contexts/PrivacyContext';
+import { PurchaseProvider } from '../contexts/PurchaseContext';
+import { MonetizationProvider } from '../contexts/MonetizationContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 
 const queryClient = new QueryClient({
@@ -34,20 +36,24 @@ export default function RootLayout() {
       <PrivacyProvider>
         <AppProvider>
           <AuthProvider>
-            <OnboardingProvider>
-              <AudioProvider>
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="index" />
-                  <Stack.Screen name="auth" />
-                  <Stack.Screen name="auth/login" />
-                  <Stack.Screen name="auth/signup" />
-                  <Stack.Screen name="auth/reset-password" />
-                  <Stack.Screen name="map" />
-                </Stack>
-                <OnboardingFlow />
-                <StatusBar style="light" backgroundColor="#84cc16" />
-              </AudioProvider>
-            </OnboardingProvider>
+            <MonetizationProvider>
+              <PurchaseProvider>
+                <OnboardingProvider>
+                <AudioProvider>
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="index" />
+                    <Stack.Screen name="auth" />
+                    <Stack.Screen name="auth/login" />
+                    <Stack.Screen name="auth/signup" />
+                    <Stack.Screen name="auth/reset-password" />
+                    <Stack.Screen name="map" />
+                  </Stack>
+                  <OnboardingFlow />
+                  <StatusBar style="light" backgroundColor="#84cc16" />
+                </AudioProvider>
+                </OnboardingProvider>
+              </PurchaseProvider>
+            </MonetizationProvider>
           </AuthProvider>
         </AppProvider>
       </PrivacyProvider>
