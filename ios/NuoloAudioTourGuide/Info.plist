@@ -27,8 +27,8 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>nuolo</string>
           <string>com.nuolo.app</string>
+          <string>nuolo</string>
         </array>
       </dict>
       <dict>
@@ -66,6 +66,13 @@
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
+    </array>
+    <key>SKAdNetworkItems</key>
+    <array>
+      <dict>
+        <key>SKAdNetworkIdentifier</key>
+        <string>cstr6suwn9.skadnetwork</string>
+      </dict>
     </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>

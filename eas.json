@@ -33,8 +33,8 @@
       "env": {
         "EXPO_NO_CAPABILITY_SYNC": "1",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xjqyywcdrnjvahkdkrbt.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqcXl5d2Nkcm5qdmFoa2RrcmJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzM5NDkxMzMsImV4cCI6MjA0OTUyNTEzM30.hQ1p_a3Jj7bXsBOgRc1kHJY-5VN_GzOVKLJqPFBBWJk"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://odppmbshkubichmbwunl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA"
       }
     },
     "production-adhoc": {
