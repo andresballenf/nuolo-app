@@ -156,6 +156,25 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   const audioContext = useAudio();
   const { isPlaying, currentTrack, showFloatingPlayer, isGeneratingAudio, generatingForId } = audioContext;
   
+  // Smart attraction play handler - checks if audio is loaded before generating
+  const handleAttractionPlayPress = useCallback((attraction: PointOfInterest) => {
+    // Check if this attraction already has audio loaded
+    if (currentTrack?.id === attraction.id) {
+      // Audio is loaded for this attraction, just toggle play/pause
+      if (isPlaying) {
+        console.log('Pausing current track:', attraction.name);
+        audioContext.pause();
+      } else {
+        console.log('Playing current track:', attraction.name);
+        audioContext.play();
+      }
+    } else {
+      // No audio loaded for this attraction, generate it first
+      console.log('Generating audio for new attraction:', attraction.name);
+      onGenerateAudioGuide?.(attraction);
+    }
+  }, [currentTrack, isPlaying, audioContext, onGenerateAudioGuide]);
+  
   // Calculate bottom offset based on mini player visibility
   const bottomOffset = useMemo(() => {
     if (showFloatingPlayer && (currentTrack || isGeneratingAudio)) {
@@ -412,11 +431,11 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
         isPlaying={currentTrack?.id === item.id && isPlaying}
         showDetails={false}
         onPress={() => handleAttractionSelect(item)}
-        onPlayPress={() => onGenerateAudioGuide?.(item)}
+        onPlayPress={() => handleAttractionPlayPress(item)}
         onMenuPress={() => handleAttractionSelect(item)}
       />
     );
-  }, [userLocation, calculateDistance, handleAttractionSelect, isGeneratingAudio, generatingForId, currentTrack, isPlaying, onGenerateAudioGuide]);
+  }, [userLocation, calculateDistance, handleAttractionSelect, isGeneratingAudio, generatingForId, currentTrack, isPlaying, handleAttractionPlayPress]);
   
   // Render content based on type
   const renderContent = () => {
@@ -464,7 +483,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
                 isPlaying={currentTrack?.id === selectedAttraction.id && isPlaying}
                 showDetails={true}
                 onPress={() => {}}
-                onPlayPress={() => onGenerateAudioGuide?.(selectedAttraction)}
+                onPlayPress={() => handleAttractionPlayPress(selectedAttraction)}
                 onMenuPress={() => {
                   // Already in detail view, no action needed
                 }}

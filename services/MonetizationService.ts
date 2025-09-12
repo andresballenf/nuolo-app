@@ -25,7 +25,7 @@ export interface SubscriptionStatus {
 export interface UserEntitlements {
   hasUnlimitedAccess: boolean;
   totalAttractionLimit: number;
-  remainingAttractions: number;
+  remainingFreeAttractions: number;
   attractionsUsed: number;
   ownedAttractions: string[];
   ownedPacks: string[];
@@ -54,7 +54,7 @@ export interface AttractionPackage {
   google_product_id: string;
   sort_order: number;
   badge_text?: string;
-  active: boolean;
+  is_active: boolean;
 }
 
 export interface PurchaseResult {
@@ -177,7 +177,7 @@ export class MonetizationService {
       const { data: packages } = await supabase
         .from('attraction_packages')
         .select('apple_product_id, google_product_id')
-        .eq('active', true);
+        .eq('is_active', true);
       
       if (packages) {
         const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
@@ -420,7 +420,7 @@ export class MonetizationService {
     const { data, error } = await supabase
       .from('attraction_packages')
       .select('*')
-      .eq('active', true)
+      .eq('is_active', true)
       .order('sort_order', { ascending: true });
 
     if (error) {
@@ -544,24 +544,44 @@ export class MonetizationService {
       // Get subscription status
       const subscription = await this.getSubscriptionStatus(userId);
       
-      // Get package entitlements using new function
-      const { data: packageEntitlements } = await supabase.rpc('get_user_package_entitlements', {
-        user_uuid: userId
-      });
-
-      const entitlement = packageEntitlements?.[0] || {
+      // Try to get package entitlements using RPC function first
+      let entitlement = {
         total_attraction_limit: 2,
         attractions_used: 0,
         remaining_attractions: 2,
-        owned_packages: []
+        owned_packages: [] as string[]
       };
+
+      try {
+        const { data: packageEntitlements } = await supabase.rpc('get_user_package_entitlements', {
+          user_uuid: userId
+        });
+        
+        if (packageEntitlements?.[0]) {
+          entitlement = packageEntitlements[0];
+        }
+      } catch (rpcError) {
+        // Fallback to direct query if RPC fails
+        console.log('RPC failed, falling back to direct query');
+        const { data: userUsage } = await supabase
+          .from('user_usage')
+          .select('usage_count, package_limit')
+          .eq('user_id', userId)
+          .single();
+        
+        if (userUsage) {
+          entitlement.attractions_used = userUsage.usage_count || 0;
+          entitlement.total_attraction_limit = userUsage.package_limit || 2;
+          entitlement.remaining_attractions = Math.max(0, entitlement.total_attraction_limit - entitlement.attractions_used);
+        }
+      }
 
       // Get owned packages details
       const { data: ownedPackages } = await supabase
         .from('attraction_packages')
         .select('*')
         .in('id', entitlement.owned_packages || [])
-        .eq('active', true);
+        .eq('is_active', true);
 
       // Get individual purchases (legacy)
       const { data: purchases } = await supabase
@@ -586,7 +606,7 @@ export class MonetizationService {
         hasUnlimitedAccess: subscription.isActive && 
           ['unlimited_monthly', 'premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || ''),
         totalAttractionLimit: entitlement.total_attraction_limit,
-        remainingAttractions: entitlement.remaining_attractions,
+        remainingFreeAttractions: entitlement.remaining_attractions,
         attractionsUsed: entitlement.attractions_used,
         ownedAttractions: Array.from(new Set(ownedAttractions)),
         ownedPacks: Array.from(new Set(ownedPacks)),
@@ -597,7 +617,7 @@ export class MonetizationService {
       return {
         hasUnlimitedAccess: false,
         totalAttractionLimit: 2,
-        remainingAttractions: 2,
+        remainingFreeAttractions: 2,
         attractionsUsed: 0,
         ownedAttractions: [],
         ownedPacks: [],

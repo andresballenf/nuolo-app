@@ -24,7 +24,7 @@ export default function MapScreen() {
   const { setSelectedAttraction, setIsBottomSheetOpen, gpsStatus, userPreferences, setGpsStatus } = useApp();
   const { resetOnboarding } = useOnboarding();
   const audioContext = useAudio();
-  const { showPaywall, setShowPaywall, paywallContext } = useMonetization();
+  const { showPaywall, setShowPaywall, paywallContext, recordAttractionUsage } = useMonetization();
   const { generateAudioGuideWithValidation } = useContentAccess();
 
   // Test location state
@@ -334,6 +334,8 @@ export default function MapScreen() {
 
   // NEW: Chunked audio generation with streaming support
   const handlePlayAudio = async (attraction: PointOfInterest) => {
+    let shouldRecordUsage = false;
+    
     try {
       // Check monetization entitlements first
       const validationResult = await generateAudioGuideWithValidation(attraction.id, attraction.name);
@@ -345,6 +347,9 @@ export default function MapScreen() {
         }
         return;
       }
+      
+      // Store whether we need to record usage after successful generation
+      shouldRecordUsage = validationResult.shouldRecordUsage;
 
       // Clear any existing generation state first (allows switching attractions)
       audioContext.clearGenerationState();
@@ -479,6 +484,17 @@ export default function MapScreen() {
           audioGenerated = true;
           console.log('App-orchestrated chunked audio generation initiated');
           
+          // Record usage for free tier users after successful generation
+          if (shouldRecordUsage) {
+            try {
+              await recordAttractionUsage(attraction.id);
+              console.log('Recorded attraction usage after successful chunked audio generation');
+            } catch (usageError) {
+              console.error('Failed to record attraction usage:', usageError);
+              // Don't fail the audio generation for usage recording errors
+            }
+          }
+          
         } catch (chunkError) {
           console.error('App-orchestrated chunked audio failed:', chunkError);
           
@@ -555,6 +571,17 @@ export default function MapScreen() {
           
           audioGenerated = true;
           console.log('Audio generation completed using standard method');
+          
+          // Record usage for free tier users after successful generation
+          if (shouldRecordUsage) {
+            try {
+              await recordAttractionUsage(attraction.id);
+              console.log('Recorded attraction usage after successful fallback audio generation');
+            } catch (usageError) {
+              console.error('Failed to record attraction usage:', usageError);
+              // Don't fail the audio generation for usage recording errors
+            }
+          }
         } catch (audioError) {
           console.error('Audio generation failed:', audioError);
           throw audioError;

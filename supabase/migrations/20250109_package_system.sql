@@ -13,7 +13,7 @@ CREATE TABLE attraction_packages (
   google_product_id TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
   badge_text TEXT, -- 'Most Popular', etc.
-  active BOOLEAN DEFAULT TRUE,
+  is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -43,7 +43,7 @@ ADD CONSTRAINT valid_subscription_type CHECK (subscription_type IN ('premium_mon
 -- Create indexes for performance
 CREATE INDEX idx_user_package_purchases_user_id ON user_package_purchases(user_id);
 CREATE INDEX idx_user_package_purchases_package_id ON user_package_purchases(package_id);
-CREATE INDEX idx_attraction_packages_active ON attraction_packages(active, sort_order) WHERE active = TRUE;
+CREATE INDEX idx_attraction_packages_is_active ON attraction_packages(is_active, sort_order) WHERE is_active = TRUE;
 
 -- Enable Row Level Security
 ALTER TABLE attraction_packages ENABLE ROW LEVEL SECURITY;
@@ -51,7 +51,7 @@ ALTER TABLE user_package_purchases ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
 CREATE POLICY "Public can view active packages" ON attraction_packages
-  FOR SELECT USING (active = TRUE);
+  FOR SELECT USING (is_active = TRUE);
 
 CREATE POLICY "Users can view own package purchases" ON user_package_purchases
   FOR SELECT USING (auth.uid() = user_id);
@@ -85,7 +85,7 @@ BEGIN
   IF user_packages IS NOT NULL AND array_length(user_packages, 1) > 0 THEN
     SELECT MAX(attraction_count) INTO max_package_limit
     FROM attraction_packages 
-    WHERE id = ANY(user_packages) AND active = TRUE;
+    WHERE id = ANY(user_packages) AND is_active = TRUE;
   END IF;
   
   -- Get current usage count

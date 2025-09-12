@@ -57,10 +57,24 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       };
     }
 
-    // Premium packages (non-free subscriptions)
-    if (subscription.isActive && subscription.type !== 'free') {
-      // Calculate remaining attractions from packages
-      const remainingFromPackages = entitlements.remainingFreeAttractions; // This will be updated to include package attractions
+    // Premium subscription (monthly/yearly/lifetime)
+    if (subscription.isActive && 
+        ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '')) {
+      return {
+        displayValue: '∞',
+        isInfinity: true,
+        showFreeBadge: false,
+        isEmpty: false,
+      };
+    }
+
+    // Package users (have purchased attraction packages)
+    const totalLimit = entitlements.totalAttractionLimit ?? 2;
+    if (totalLimit > 2) {
+      // User has packages - calculate remaining from package balance
+      const used = entitlements.attractionsUsed ?? 0;
+      const remainingFromPackages = Math.max(0, totalLimit - used);
+      
       return {
         displayValue: remainingFromPackages.toString(),
         isInfinity: false,
@@ -69,8 +83,8 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       };
     }
 
-    // Free tier
-    const freeRemaining = entitlements.remainingFreeAttractions;
+    // Free tier (default 2 free attractions)
+    const freeRemaining = entitlements.remainingFreeAttractions ?? 0;
     return {
       displayValue: freeRemaining.toString(),
       isInfinity: false,

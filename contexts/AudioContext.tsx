@@ -337,7 +337,21 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // Playback controls
   const play = useCallback(async () => {
     try {
-      if (soundRef.current) {
+      // Handle chunk-based playback
+      if (state.isUsingChunks && chunkManagerRef.current) {
+        chunkManagerRef.current.resume();
+        setState(prev => ({ 
+          ...prev, 
+          isPlaying: true,
+          // Clear generation state when audio starts playing
+          isGeneratingAudio: false,
+          generatingForId: null,
+          generationMessage: '',
+          generationError: null
+        }));
+        console.log('Chunk-based audio resumed');
+      } else if (soundRef.current) {
+        // Original logic for regular audio
         await soundRef.current.playAsync();
         setState(prev => ({ 
           ...prev, 
@@ -355,11 +369,17 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       console.error('Error playing audio:', error);
       Alert.alert('Playback Error', 'Failed to play audio');
     }
-  }, [startPositionTracking]);
+  }, [state.isUsingChunks, startPositionTracking]);
 
   const pause = useCallback(async () => {
     try {
-      if (soundRef.current) {
+      // Handle chunk-based playback
+      if (state.isUsingChunks && chunkManagerRef.current) {
+        chunkManagerRef.current.pause();
+        setState(prev => ({ ...prev, isPlaying: false }));
+        console.log('Chunk-based audio paused');
+      } else if (soundRef.current) {
+        // Original logic for regular audio
         await soundRef.current.pauseAsync();
         setState(prev => ({ ...prev, isPlaying: false }));
         stopPositionTracking();
@@ -368,7 +388,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error pausing audio:', error);
     }
-  }, [stopPositionTracking]);
+  }, [state.isUsingChunks, stopPositionTracking]);
 
   const togglePlayPause = useCallback(() => {
     // Handle chunk-based playback

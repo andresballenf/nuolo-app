@@ -51,9 +51,12 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   
   const [entitlements, setEntitlements] = useState<UserEntitlements>({
     hasUnlimitedAccess: false,
+    totalAttractionLimit: 2,
     remainingFreeAttractions: 2,
+    attractionsUsed: 0,
     ownedAttractions: [],
     ownedPacks: [],
+    ownedPackages: [],
   });
   
   const [attractionPacks, setAttractionPacks] = useState<AttractionPack[]>([]);
@@ -164,9 +167,12 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     
     setEntitlements({
       hasUnlimitedAccess: false,
+      totalAttractionLimit: 2,
       remainingFreeAttractions: 2,
+      attractionsUsed: 0,
       ownedAttractions: [],
       ownedPacks: [],
+      ownedPackages: [],
     });
     
     setAttractionPacks([]);
@@ -421,7 +427,7 @@ export function useContentAccess() {
     }
 
     // Check free tier allowance
-    if (entitlements.remainingAttractions > 0) {
+    if (entitlements.remainingFreeAttractions > 0) {
       return { hasAccess: true, reason: 'free_remaining' };
     }
 
@@ -436,6 +442,7 @@ export function useContentAccess() {
   const generateAudioGuideWithValidation = async (attractionId: string, attractionName?: string): Promise<{
     canGenerate: boolean;
     shouldShowPaywall: boolean;
+    shouldRecordUsage: boolean;
     paywallContext?: {
       trigger: 'free_limit' | 'premium_attraction';
       attractionId: string;
@@ -445,22 +452,19 @@ export function useContentAccess() {
     const accessResult = await checkAttractionAccess(attractionId);
     
     if (accessResult.hasAccess) {
-      // If using free tier, record the usage
-      if (accessResult.reason === 'free_remaining') {
-        await recordAttractionUsage(attractionId);
-      }
-      
       return {
         canGenerate: true,
         shouldShowPaywall: false,
+        shouldRecordUsage: accessResult.reason === 'free_remaining',
       };
     } else {
       // Determine paywall trigger based on reason
-      const trigger = entitlements.remainingAttractions === 0 ? 'free_limit' : 'premium_attraction';
+      const trigger = entitlements.remainingFreeAttractions === 0 ? 'free_limit' : 'premium_attraction';
       
       return {
         canGenerate: false,
         shouldShowPaywall: true,
+        shouldRecordUsage: false,
         paywallContext: {
           trigger,
           attractionId,
