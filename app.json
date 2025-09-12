@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nuolo.app",
+      "usesAppleSignIn": true,
       "config": {
         "googleMapsApiKey": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
       },
@@ -27,6 +28,14 @@
           {
             "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"
           }
+        ],
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.nuolo.app",
+              "nuolo"
+            ]
+          }
         ]
       }
     },
@@ -37,6 +46,20 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nuolo.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "nuolo"
+            },
+            {
+              "scheme": "com.nuolo.app"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -68,7 +91,8 @@
       ],
       "expo-audio",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "extra": {
       "router": {},

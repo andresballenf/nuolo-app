@@ -11,6 +11,7 @@ import { PrivacyProvider } from '../contexts/PrivacyContext';
 import { PurchaseProvider } from '../contexts/PurchaseContext';
 import { MonetizationProvider } from '../contexts/MonetizationContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,31 +33,33 @@ export default function RootLayout() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <PrivacyProvider>
-        <AppProvider>
-          <AuthProvider>
-            <MonetizationProvider>
-              <PurchaseProvider>
-                <OnboardingProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <PrivacyProvider>
+          <AppProvider>
+            <AuthProvider>
+              <OnboardingProvider>
                 <AudioProvider>
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="auth" />
-                    <Stack.Screen name="auth/login" />
-                    <Stack.Screen name="auth/signup" />
-                    <Stack.Screen name="auth/reset-password" />
-                    <Stack.Screen name="map" />
-                  </Stack>
-                  <OnboardingFlow />
-                  <StatusBar style="light" backgroundColor="#84cc16" />
+                  <MonetizationProvider>
+                    <PurchaseProvider>
+                      <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="index" />
+                        <Stack.Screen name="auth" />
+                        <Stack.Screen name="auth/login" />
+                        <Stack.Screen name="auth/signup" />
+                        <Stack.Screen name="auth/reset-password" />
+                        <Stack.Screen name="map" />
+                      </Stack>
+                      <OnboardingFlow />
+                      <StatusBar style="light" backgroundColor="#84cc16" />
+                    </PurchaseProvider>
+                  </MonetizationProvider>
                 </AudioProvider>
-                </OnboardingProvider>
-              </PurchaseProvider>
-            </MonetizationProvider>
-          </AuthProvider>
-        </AppProvider>
-      </PrivacyProvider>
-    </QueryClientProvider>
+              </OnboardingProvider>
+            </AuthProvider>
+          </AppProvider>
+        </PrivacyProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

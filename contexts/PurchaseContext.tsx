@@ -1,9 +1,31 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
-import * as InAppPurchases from 'expo-in-app-purchases';
 import { storage } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+
+// Safely import IAP module with fallback
+let InAppPurchases: any = null;
+try {
+  InAppPurchases = require('expo-in-app-purchases');
+} catch (error) {
+  console.log('In-App Purchases module not available - using mock implementation');
+  // Mock implementation for when module is not available
+  InAppPurchases = {
+    connectAsync: async () => Promise.resolve(),
+    disconnectAsync: async () => Promise.resolve(),
+    getProductsAsync: async () => ({ responseCode: 0, results: [] }),
+    purchaseItemAsync: async () => ({ responseCode: 1, results: [] }),
+    getPurchaseHistoryAsync: async () => ({ responseCode: 0, results: [] }),
+    finishTransactionAsync: async () => Promise.resolve(),
+    IAPResponseCode: {
+      OK: 0,
+      USER_CANCELED: 1,
+      ERROR: 2,
+      DEFERRED: 3
+    }
+  };
+}
 
 export type EntitlementStatus = 'free' | 'premium' | 'unlimited';
 
@@ -175,7 +197,12 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initializePurchases();
     return () => {
-      InAppPurchases.finishTransactionAsync();
+      // Only call if module is available
+      if (InAppPurchases && InAppPurchases.finishTransactionAsync) {
+        InAppPurchases.finishTransactionAsync().catch(() => {
+          // Ignore cleanup errors
+        });
+      }
     };
   }, []);
   
@@ -199,12 +226,24 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
+      // Check if IAP module is available
+      if (!InAppPurchases || !InAppPurchases.connectAsync) {
+        console.log('In-App Purchases not available in this environment');
+        return;
+      }
+      
       // Connect to store - handle "Already connected" gracefully
       try {
         await InAppPurchases.connectAsync();
       } catch (connectError: any) {
         // If already connected, that's fine - continue
         if (!connectError?.message?.includes('Already connected')) {
+          // If module not found, just log and continue
+          if (connectError?.message?.includes('native module') || 
+              connectError?.message?.includes('ExpoInAppPurchases')) {
+            console.log('IAP native module not available - continuing without IAP');
+            return;
+          }
           throw connectError;
         }
         console.log('IAP already connected, continuing...');
@@ -216,7 +255,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       
       // Update packages with localized prices
       const updatedPackages = attractionPackages.map(pkg => {
-        const product = products.find(p => p.productId === pkg.id);
+        const product = products?.find((p: any) => p.productId === pkg.id);
         return {
           ...pkg,
           localizedPrice: product?.price || `$${pkg.price}`,
@@ -224,7 +263,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       });
       
       const updatedPlans = subscriptionPlans.map(plan => {
-        const product = products.find(p => p.productId === plan.id);
+        const product = products?.find((p: any) => p.productId === plan.id);
         return {
           ...plan,
           localizedPrice: product?.price || `$${plan.price}`,
@@ -232,15 +271,20 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       });
       
       console.log('In-App Purchases initialized successfully');
-      console.log('Products loaded:', products.length);
+      console.log('Products loaded:', products?.length || 0);
       
     } catch (error) {
       console.error('Failed to initialize In-App Purchases:', error);
-      setPurchaseError({
-        code: 'INIT_ERROR',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        userFriendly: 'Unable to load store information. Please try again later.',
-      });
+      // Only show error if it's not a module availability issue
+      if (error instanceof Error && 
+          !error.message.includes('native module') && 
+          !error.message.includes('ExpoInAppPurchases')) {
+        setPurchaseError({
+          code: 'INIT_ERROR',
+          message: error.message,
+          userFriendly: 'Unable to load store information. Please try again later.',
+        });
+      }
     } finally {
       setIsLoading(false);
     }

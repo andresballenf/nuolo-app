@@ -4,6 +4,14 @@ import type { Session, AuthError } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { Platform } from 'react-native';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
+import * as AppleAuthentication from 'expo-apple-authentication';
+
+// OAuth features are enabled in development build
+const isExpoGo = false;
 
 interface User {
   id: string;
@@ -162,7 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   // Initialize authentication state
   useEffect(() => {
-    initializeAuth();
+    // Delay initialization to ensure all contexts are ready
+    const timer = setTimeout(() => {
+      initializeAuth();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, []);
   
   const initializeAuth = async () => {
@@ -239,6 +252,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async (event, session) => {
         console.log('Auth event:', event);
         
+        // Handle token refresh errors specifically
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          console.log('Token refresh failed - clearing session');
+          // Clear invalid session data
+          await AsyncStorage.removeItem('supabase.auth.token');
+          setAuthState(prev => ({
+            ...prev,
+            user: null,
+            session: null,
+            isAuthenticated: false,
+            loading: false,
+          }));
+          return;
+        }
+        
         if (session) {
           const user = await loadUserProfile(session.user.id);
           
@@ -270,9 +298,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             break;
           case 'TOKEN_REFRESHED':
-            setLastActivity(new Date());
-            // Update stored tokens when refreshed
             if (session) {
+              setLastActivity(new Date());
+              // Update stored tokens when refreshed
               await saveBiometricCredentials(session);
             }
             break;
@@ -518,15 +546,102 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   const signInWithOAuth = async (provider: 'google' | 'apple') => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
+      // Handle Apple Sign-In natively on iOS
+      if (provider === 'apple' && Platform.OS === 'ios' && AppleAuthentication) {
+        // Check if Apple Authentication is available
+        const isAvailable = await AppleAuthentication.isAvailableAsync();
+        if (!isAvailable) {
+          return {
+            error: {
+              message: 'Apple Sign-In is not available on this device',
+              status: 400
+            } as AuthError
+          };
+        }
+
+        try {
+          // Request Apple authentication
+          const credential = await AppleAuthentication.signInAsync({
+            requestedScopes: [
+              AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+              AppleAuthentication.AppleAuthenticationScope.EMAIL,
+            ],
+          });
+
+          // Extract the identity token
+          const { identityToken, email, fullName, user: appleUserId } = credential;
+          
+          if (!identityToken) {
+            throw new Error('No identity token received from Apple');
+          }
+
+          // Sign in with Supabase using the Apple ID token
+          const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'apple',
+            token: identityToken,
+            options: {
+              data: {
+                // Include user metadata if available (only on first sign-in)
+                full_name: fullName ? `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : undefined,
+                email: email,
+              }
+            }
+          });
+
+          if (!error && data.user) {
+            // Check if profile exists, create if not
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', data.user.id)
+              .single();
+
+            if (!profile) {
+              // Create profile for Apple user
+              const fullNameString = fullName ? `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : null;
+              await supabase.from('profiles').insert({
+                id: data.user.id,
+                email: email || data.user.email,
+                full_name: fullNameString || data.user.user_metadata?.full_name,
+                created_at: new Date().toISOString(),
+              });
+            }
+          }
+
+          return { error };
+        } catch (appleError: any) {
+          // Handle Apple-specific errors
+          if (appleError.code === 'ERR_CANCELED') {
+            return {
+              error: {
+                message: 'Sign in with Apple was cancelled',
+                status: 400
+              } as AuthError
+            };
+          }
+          throw appleError;
+        }
+      }
+
+      // For Google, use Supabase's OAuth method
+      // For React Native, we need to use a simpler approach
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider as 'google',
         options: {
-          skipBrowserRedirect: true, // For React Native
-        },
+          redirectTo: 'nuolo://auth/callback',
+          skipBrowserRedirect: false, // Allow browser redirect for mobile
+        }
       });
-      
-      return { error };
+
+      if (error) {
+        return { error };
+      }
+
+      // The OAuth flow will handle the redirect back to the app
+      // Supabase will automatically manage the session
+      return { error: null };
     } catch (error) {
+      console.error('OAuth error:', error);
       return {
         error: error as AuthError,
       };
@@ -714,11 +829,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshSession = async () => {
     try {
       const { data, error } = await supabase.auth.refreshSession();
-      if (!error && data.session) {
+      
+      if (error) {
+        console.error('Session refresh error:', error);
+        
+        // If refresh token is invalid, clear session
+        if (error.message?.includes('Refresh Token') || 
+            error.message?.includes('Invalid Refresh Token') ||
+            error.message?.includes('Refresh Token Not Found')) {
+          console.log('Invalid refresh token - clearing session');
+          
+          // Clear all auth data
+          await AsyncStorage.multiRemove([
+            'supabase.auth.token',
+            'loginAttempts',
+            'lockoutUntil'
+          ]);
+          
+          // Clear secure store
+          try {
+            await SecureStore.deleteItemAsync(SECURE_STORE_KEYS.BIOMETRIC_TOKEN);
+            await SecureStore.deleteItemAsync(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN);
+          } catch (e) {
+            // Ignore secure store errors
+          }
+          
+          // Reset auth state
+          setAuthState(prev => ({
+            ...prev,
+            user: null,
+            session: null,
+            isAuthenticated: false,
+            loading: false,
+          }));
+          
+          return;
+        }
+      }
+      
+      if (data?.session) {
         setLastActivity(new Date());
+        setAuthState(prev => ({
+          ...prev,
+          session: data.session,
+        }));
       }
     } catch (error) {
       console.error('Session refresh error:', error);
+      // Don't throw - just log the error
     }
   };
   
