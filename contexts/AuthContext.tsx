@@ -519,6 +519,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: {
           data: metadata,
+          emailRedirectTo: 'nuolo://auth/confirm',
         },
       });
       
@@ -791,7 +792,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       const { error } = await supabase.auth.resetPasswordForEmail(
-        email.toLowerCase().trim()
+        email.toLowerCase().trim(),
+        {
+          redirectTo: 'nuolo://auth/reset-password',
+        }
       );
       
       return { error };
