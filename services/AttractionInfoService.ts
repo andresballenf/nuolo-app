@@ -26,6 +26,7 @@ interface UserPreferences {
   audioLength: string;
   voiceStyle: string;
   language?: string;
+  aiProvider?: 'openai' | 'gemini';
 }
 
 interface AttractionInfoRequest {
@@ -42,6 +43,7 @@ interface AttractionInfoRequest {
   model?: string; // e.g. "gpt-5.0-turbo"
   ttsModel?: string; // e.g. "tts-1-hd"
   returnWordTimestamps?: boolean; // request sentence/word timings
+  aiProvider?: 'openai' | 'gemini'; // AI provider selection
 }
 
 interface AttractionInfoResponse {
@@ -101,6 +103,7 @@ export class AttractionInfoService {
         model: 'gpt-4o',
         ttsModel: 'tts-1-hd',
         returnWordTimestamps: true,
+        aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection to backend
       };
 
       console.log('Calling attraction-info edge function with:', {

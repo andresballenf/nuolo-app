@@ -7,6 +7,7 @@ type Theme = 'history' | 'nature' | 'architecture' | 'culture';
 type AudioLength = 'short' | 'medium' | 'deep-dive';
 type Language = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja';
 type VoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
+type AIProvider = 'openai' | 'gemini';
 
 interface GpsStatus {
   active: boolean;
@@ -25,6 +26,7 @@ interface UserPreferences {
   batteryOptimization: boolean;
   locationLock?: boolean;
   autoFix?: boolean;
+  aiProvider?: AIProvider;
 }
 
 interface SelectedAttraction {
@@ -69,6 +71,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     language: 'en',
     voiceStyle: 'casual',
     batteryOptimization: false,
+    aiProvider: 'openai',
   });
 
   const [selectedAttraction, setSelectedAttraction] = useState<SelectedAttraction | null>(null);

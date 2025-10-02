@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { generateAttractionInfo } from './openaiService.ts';
 import { processAudioGeneration } from './audioProcessor.ts';
 import { applyRateLimit, recordRequestCompletion, getUserIdFromRequest } from './rateLimiter.ts';
+import { AIProviderFactory } from './factory/AIProviderFactory.ts';
 import { 
   withRequestTimeout, 
   timeoutOpenAITextGeneration, 
@@ -203,7 +204,8 @@ serve(async (req) => {
       streamAudio = false,
       testMode = false,
       existingText,
-      useChunkedAudio = false // New flag for chunked audio generation
+      useChunkedAudio = false, // New flag for chunked audio generation
+      aiProvider = 'openai' // AI provider type from client (default: openai)
     } = requestData;
     
     // Validate required fields
@@ -241,6 +243,7 @@ serve(async (req) => {
       testMode,
       streamAudio,
       useChunkedAudio,
+      aiProvider,
       voiceStyle: preferences?.voiceStyle || 'casual',
       hasLocation: true,
       hasPreferences: Object.keys(preferences).length > 0
@@ -248,41 +251,95 @@ serve(async (req) => {
 
     // Generate or use existing text with timeout protection
     let generatedInfo = existingText;
+    let audioResult: any = null;
+    let providerUsed = 'unknown';
+
+    // Create AI provider based on request
+    let provider;
+    try {
+      provider = await AIProviderFactory.createProvider(aiProvider);
+      providerUsed = provider.getProviderName();
+      logInfo('ai', `Using AI provider: ${providerUsed}`);
+    } catch (providerError) {
+      logWarn('ai', `Failed to create ${aiProvider} provider, falling back to OpenAI`, {
+        error: (providerError as Error).message
+      });
+      provider = await AIProviderFactory.createProvider('openai');
+      providerUsed = 'OpenAI (fallback)';
+    }
+
     if (!generatedInfo) {
       const textTimer = startTimer('text_generation');
-      logInfo('ai', 'Starting text generation');
-      
+      logInfo('ai', 'Starting content generation');
+
       try {
-        generatedInfo = await timeoutOpenAITextGeneration(async () => {
-          return generateAttractionInfo(
-            sanitizedAttractionName,
-            sanitizedAttractionAddress,
-            userLocation,
-            preferences,
-            openAiApiKey
-          );
-        });
-        
-        const duration = endTimer(textTimer, 'text_generation', true);
-        logInfo('ai', 'Text generation completed successfully', {
-          duration,
-          textLength: generatedInfo.length
-        });
-        
+        // Check if provider supports simultaneous generation and audio is requested
+        if (generateAudio && provider.supportsSimultaneousGeneration && provider.generateSimultaneous) {
+          logInfo('ai', 'Using simultaneous content + audio generation');
+
+          const simultaneousResult = await timeoutOpenAITextGeneration(async () => {
+            return provider.generateSimultaneous!({
+              attractionName: sanitizedAttractionName,
+              attractionAddress: sanitizedAttractionAddress,
+              userLocation,
+              preferences,
+              text: '', // Will be generated
+              voice: preferences.voiceStyle || 'casual',
+              speed: 1.0,
+              language: preferences.language || 'en',
+              testMode,
+            });
+          });
+
+          generatedInfo = simultaneousResult.content;
+          audioResult = {
+            audio: simultaneousResult.audioBase64,
+            audioData: simultaneousResult.audioData,
+            format: simultaneousResult.format,
+            voiceUsed: simultaneousResult.voiceUsed,
+          };
+
+          const duration = endTimer(textTimer, 'simultaneous_generation', true);
+          logInfo('ai', 'Simultaneous generation completed successfully', {
+            duration,
+            textLength: generatedInfo.length,
+            audioSize: simultaneousResult.audioData.byteLength
+          });
+        } else {
+          // Generate text only
+          const contentResult = await timeoutOpenAITextGeneration(async () => {
+            return provider.generateContent({
+              attractionName: sanitizedAttractionName,
+              attractionAddress: sanitizedAttractionAddress,
+              userLocation,
+              preferences,
+            });
+          });
+
+          generatedInfo = contentResult.content;
+
+          const duration = endTimer(textTimer, 'text_generation', true);
+          logInfo('ai', 'Text generation completed successfully', {
+            duration,
+            textLength: generatedInfo.length,
+            modelUsed: contentResult.modelUsed
+          });
+        }
+
       } catch (textError) {
         const duration = endTimer(textTimer, 'text_generation', false);
         const secureError = createSecureError(
-          textError as Error, 
-          'openai_text_generation', 
+          textError as Error,
+          'ai_content_generation',
           userId
         );
-        
-        logError('ai', 'Text generation failed, using fallback', {
+
+        logError('ai', 'Content generation failed, using fallback', {
           duration,
           errorType: secureError.errorType,
           errorCode: secureError.errorCode
         });
-        
+
         generatedInfo = buildFallbackInfo(sanitizedAttractionName, preferences?.theme);
       }
     } else {
@@ -444,21 +501,38 @@ serve(async (req) => {
       }
     }
 
-    // Fallback to old audio generation method if requested
-    if (generateAudio && !useChunkedAudio) {
-      console.log("Using fallback audio generation method...");
+    // Generate audio separately if not already done via simultaneous generation
+    if (generateAudio && !useChunkedAudio && !audioResult) {
+      console.log("Generating audio separately from text...");
       try {
-        const audioResponse = await timeoutOpenAIAudioGeneration(async () => {
-          return processAudioGeneration(
-            generatedInfo,
-            preferences,
+        const audioGenResult = await timeoutOpenAIAudioGeneration(async () => {
+          return provider.generateAudio(generatedInfo, {
+            text: generatedInfo,
+            voice: preferences.voiceStyle || 'casual',
+            speed: 1.0,
+            language: preferences.language || 'en',
             testMode,
-            false, // iosSafari
-            openAiApiKey
-          );
+          });
         });
+
+        audioResult = {
+          audio: audioGenResult.audioBase64,
+          audioData: audioGenResult.audioData,
+          format: audioGenResult.format,
+          voiceUsed: audioGenResult.voiceUsed,
+        };
+
+        logInfo('audio', 'Audio generation completed successfully', {
+          audioSize: audioGenResult.audioData.byteLength,
+          format: audioGenResult.format
+        });
+
         requestSuccessful = true;
-        return new Response(JSON.stringify(audioResponse), {
+        return new Response(JSON.stringify({
+          info: generatedInfo,
+          ...audioResult,
+          modelUsed: providerUsed,
+        }), {
           headers: {
             ...corsHeaders,
             ...rateLimitResult.headers,
@@ -467,11 +541,11 @@ serve(async (req) => {
         });
       } catch (audioError) {
         const secureError = createSecureError(
-          audioError as Error, 
-          'fallback_audio_generation', 
+          audioError as Error,
+          'audio_generation',
           userId
         );
-        console.error('Fallback audio generation error:', secureError);
+        console.error('Audio generation error:', secureError);
         return new Response(JSON.stringify({
           info: generatedInfo,
           audio: null,
@@ -484,6 +558,22 @@ serve(async (req) => {
           }
         });
       }
+    }
+
+    // If simultaneous generation already produced audio, return it
+    if (audioResult) {
+      requestSuccessful = true;
+      return new Response(JSON.stringify({
+        info: generatedInfo,
+        ...audioResult,
+        modelUsed: providerUsed,
+      }), {
+        headers: {
+          ...corsHeaders,
+          ...rateLimitResult.headers,
+          'Content-Type': 'application/json'
+        }
+      });
     }
 
     // Default response: Just return the text (no audio)

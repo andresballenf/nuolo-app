@@ -274,7 +274,54 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
           {__DEV__ && (
             <View style={styles.devToolsContainer}>
               <Text style={styles.sectionTitle}>Development Tools</Text>
-              
+
+              {/* AI Provider Selection */}
+              <View style={styles.aiProviderSection}>
+                <Text style={styles.controlLabel}>AI Provider</Text>
+                <View style={styles.aiProviderContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.aiProviderButton,
+                      (useApp().userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderButtonActive
+                    ]}
+                    onPress={() => {
+                      useApp().setUserPreferences({ aiProvider: 'openai' });
+                      Alert.alert('AI Provider', 'Switched to OpenAI + ElevenLabs');
+                    }}
+                  >
+                    <Text style={[
+                      styles.aiProviderText,
+                      (useApp().userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderTextActive
+                    ]}>
+                      OpenAI
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.aiProviderButton,
+                      useApp().userPreferences.aiProvider === 'gemini' && styles.aiProviderButtonActive
+                    ]}
+                    onPress={() => {
+                      useApp().setUserPreferences({ aiProvider: 'gemini' });
+                      Alert.alert('AI Provider', 'Switched to Gemini Native Audio');
+                    }}
+                  >
+                    <Text style={[
+                      styles.aiProviderText,
+                      useApp().userPreferences.aiProvider === 'gemini' && styles.aiProviderTextActive
+                    ]}>
+                      Gemini
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.aiProviderHint}>
+                  {(useApp().userPreferences.aiProvider || 'openai') === 'openai'
+                    ? 'Two-step: GPT-4 text + TTS audio'
+                    : 'Single-step: Gemini generates text + audio simultaneously'}
+                </Text>
+              </View>
+
               <Button
                 title="🔄 Reset Free Counter"
                 onPress={async () => {
@@ -295,7 +342,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                 size="sm"
                 style={styles.resetButton}
               />
-              
+
               <Text style={styles.devHint}>
                 Resets the free attraction usage counter back to 2/2
               </Text>
@@ -538,6 +585,41 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: '#e5e7eb',
+  },
+  aiProviderSection: {
+    marginBottom: 16,
+  },
+  aiProviderContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  aiProviderButton: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  aiProviderButtonActive: {
+    backgroundColor: '#84cc16',
+    borderColor: '#84cc16',
+  },
+  aiProviderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  aiProviderTextActive: {
+    color: '#ffffff',
+  },
+  aiProviderHint: {
+    fontSize: 11,
+    color: '#65a30d',
+    marginTop: 6,
+    fontStyle: 'italic',
   },
   resetButton: {
     backgroundColor: '#FEE2E2',
