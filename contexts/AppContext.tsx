@@ -128,6 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           language: supabasePrefs.language as Language,
           voiceStyle: supabasePrefs.voiceStyle as VoiceStyle,
           batteryOptimization: supabasePrefs.batteryOptimization,
+          aiProvider: (supabasePrefs.aiProvider as AIProvider) || 'openai',
         };
         setUserPreferencesState(preferences);
         // Also save to local storage for offline access
@@ -150,11 +151,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setUserPreferences = async (preferences: Partial<UserPreferences>) => {
     const newPreferences = { ...userPreferences, ...preferences };
     setUserPreferencesState(newPreferences);
-    
+
+    console.log('💾 Saving user preferences:', newPreferences);
+
     try {
       // Save to local storage first
       await storage.setObject(USER_PREFERENCES_KEY, newPreferences);
-      
+
       // If user is logged in, also save to Supabase
       if (currentUserId) {
         const supabasePrefs = {
@@ -163,6 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           voiceStyle: newPreferences.voiceStyle,
           language: newPreferences.language,
           batteryOptimization: newPreferences.batteryOptimization,
+          aiProvider: newPreferences.aiProvider,
         };
         await PreferencesService.saveUserPreferences(currentUserId, supabasePrefs);
       }

@@ -40,8 +40,8 @@ interface AttractionInfoRequest {
   iosSafari?: boolean;
   existingText?: string;
   // New optional fields to control backend model behavior
-  model?: string; // e.g. "gpt-5.0-turbo"
-  ttsModel?: string; // e.g. "tts-1-hd"
+  model?: string; // e.g. "gpt-4.1-mini"
+  ttsModel?: string; // e.g. "gpt-4o-mini-tts"
   returnWordTimestamps?: boolean; // request sentence/word timings
   aiProvider?: 'openai' | 'gemini'; // AI provider selection
 }
@@ -100,11 +100,13 @@ export class AttractionInfoService {
         testMode: options.testMode || false,
         iosSafari: false, // React Native doesn't need Safari-specific handling
         existingText: options.existingText,
-        model: 'gpt-4o',
-        ttsModel: 'tts-1-hd',
+        model: 'gpt-4.1-mini',
+        ttsModel: 'gpt-4o-mini-tts',
         returnWordTimestamps: true,
-        aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection to backend
+        aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection to backend at top level
       };
+
+      console.log('🤖 AI Provider selected:', requestData.aiProvider);
 
       console.log('Calling attraction-info edge function with:', {
         attractionName,
@@ -378,8 +380,9 @@ export class AttractionInfoService {
       generateAudio: true,
       streamAudio: true,
       testMode,
-      model: 'gpt-4o',
-      ttsModel: 'tts-1-hd',
+      model: 'gpt-4.1-mini',
+      ttsModel: 'gpt-4o-mini-tts',
+      aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection
     };
 
     try {
@@ -436,8 +439,9 @@ export class AttractionInfoService {
       generateAudio: true,
       streamAudio: false, // Batch mode
       testMode,
-      model: 'gpt-4o',
-      ttsModel: 'tts-1-hd',
+      model: 'gpt-4.1-mini',
+      ttsModel: 'gpt-4o-mini-tts',
+      aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection
     };
 
     try {

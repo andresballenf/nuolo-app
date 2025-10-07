@@ -17,7 +17,7 @@ export interface MonetizationState {
   purchaseAttraction: (attractionId: string) => Promise<boolean>;
   purchasePack: (packId: string) => Promise<boolean>;
   purchaseAttractionPackage?: (packageId: string) => Promise<boolean>;
-  purchaseSubscription: (type: 'monthly' | 'yearly' | 'lifetime' | 'unlimited_monthly') => Promise<boolean>;
+  purchaseSubscription: () => Promise<boolean>;
   restorePurchases: () => Promise<void>;
   refreshEntitlements: () => Promise<void>;
   
@@ -235,22 +235,22 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     }
   }, [user, refreshEntitlements]);
 
-  const purchaseSubscription = useCallback(async (type: 'monthly' | 'yearly' | 'lifetime' | 'unlimited_monthly'): Promise<boolean> => {
+  const purchaseSubscription = useCallback(async (): Promise<boolean> => {
     if (!user) {
       setError('User must be authenticated to make purchases');
       return false;
     }
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
-      const subscriptionType = type === 'unlimited_monthly' ? 'unlimited_monthly' : `premium_${type}`;
-      const success = await monetizationService.purchaseSubscription(subscriptionType);
+      // Only unlimited_monthly subscription is available
+      const success = await monetizationService.purchaseSubscription('unlimited_monthly');
       if (success) {
         await refreshEntitlements();
         setShowPaywall(false); // Close paywall on successful purchase
-        console.log('Successfully purchased subscription:', subscriptionType);
+        console.log('Successfully purchased unlimited monthly subscription');
       }
       return success;
     } catch (err) {
@@ -320,11 +320,13 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
 
   const recordAttractionUsage = useCallback(async (attractionId: string): Promise<void> => {
     if (!user) return;
-    
-    // Only record usage for free tier users (not premium/unlimited subscribers)
-    const hasUnlimitedAccess = subscription.isActive && 
-      ['premium_monthly', 'premium_yearly', 'lifetime', 'unlimited_monthly'].includes(subscription.type || '');
-    if (hasUnlimitedAccess) return;
+
+    // Only record usage for free tier users (not unlimited subscribers)
+    const hasUnlimitedAccess = subscription.isActive && subscription.type === 'unlimited_monthly';
+    // Legacy subscriptions also get unlimited access
+    const hasLegacySubscription = subscription.isActive &&
+      ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '');
+    if (hasUnlimitedAccess || hasLegacySubscription) return;
     
     try {
       await monetizationService.recordAttractionUsage(user.id, attractionId);
@@ -410,9 +412,14 @@ export function useContentAccess() {
     reason: 'premium' | 'owned' | 'free_remaining' | 'blocked';
     message?: string;
   }> => {
-    // Premium/unlimited subscribers have unlimited access
-    if (subscription.isActive && 
-        ['premium_monthly', 'premium_yearly', 'lifetime', 'unlimited_monthly'].includes(subscription.type || '')) {
+    // Unlimited subscribers have unlimited access
+    if (subscription.isActive && subscription.type === 'unlimited_monthly') {
+      return { hasAccess: true, reason: 'premium' };
+    }
+
+    // Legacy subscription holders also have unlimited access
+    if (subscription.isActive &&
+        ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '')) {
       return { hasAccess: true, reason: 'premium' };
     }
 

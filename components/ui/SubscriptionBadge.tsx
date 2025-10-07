@@ -47,8 +47,8 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
   }
 
   const getDisplayInfo = () => {
-    // Unlimited subscription
-    if (subscription.isActive && subscription.type === 'unlimited') {
+    // Unlimited monthly subscription
+    if (subscription.isActive && subscription.type === 'unlimited_monthly') {
       return {
         displayValue: '∞',
         isInfinity: true,
@@ -57,8 +57,8 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       };
     }
 
-    // Premium subscription (monthly/yearly/lifetime)
-    if (subscription.isActive && 
+    // Legacy premium subscriptions (grandfathered)
+    if (subscription.isActive &&
         ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '')) {
       return {
         displayValue: '∞',

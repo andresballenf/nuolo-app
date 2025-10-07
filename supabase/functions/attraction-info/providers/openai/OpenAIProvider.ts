@@ -34,8 +34,9 @@ export class OpenAIProvider implements IAIProvider {
     console.log(`[OpenAI] Generating content in language: ${language}`);
 
     const fallbackModels = [
-      'gpt-4o',
+      'gpt-4.1-mini',
       'gpt-4o-mini',
+      'gpt-4o',
       'gpt-4-turbo',
       'gpt-4',
       'gpt-3.5-turbo',
@@ -66,49 +67,45 @@ export class OpenAIProvider implements IAIProvider {
     text: string,
     options: AudioGenerationOptions
   ): Promise<AudioGenerationResult> {
-    console.log('[OpenAI] Audio generation options:', {
-      model: 'tts-1-hd',
-      voice: options.voice,
-      textLength: text.length,
-      speed: options.speed || 1.0,
-    });
+    const candidateModels = ['gpt-4o-mini-tts', 'gpt-4o-audio-preview', 'tts-1'];
 
-    const audioOptions = {
-      model: 'tts-1-hd',
+    const baseOptions = {
       input: text,
       voice: this.mapVoiceStyle(options.voice),
       speed: options.speed || 1.0,
     };
 
-    try {
-      const audioData = await this.callTts('tts-1-hd', audioOptions);
-      console.log('[OpenAI] Received audio buffer (primary). Size:', audioData.byteLength);
+    let lastError: Error | null = null;
 
-      const audioBase64 = arrayBufferToBase64(audioData);
+    for (const model of candidateModels) {
+      const audioOptions = { ...baseOptions, model };
+      console.log('[OpenAI] Attempting audio generation with model:', {
+        model,
+        voice: audioOptions.voice,
+        textLength: text.length,
+        speed: audioOptions.speed,
+      });
 
-      return {
-        audioData,
-        audioBase64,
-        format: 'mp3',
-        voiceUsed: audioOptions.voice,
-        modelUsed: 'tts-1-hd',
-      };
-    } catch (primaryErr) {
-      console.warn('[OpenAI] Primary TTS failed, falling back to tts-1:', primaryErr);
+      try {
+        const audioData = await this.callTts(model, audioOptions);
+        console.log(`[OpenAI] Audio buffer received (${model}). Size:`, audioData.byteLength);
 
-      const fallbackAudioData = await this.callTts('tts-1', audioOptions);
-      console.log('[OpenAI] Received audio buffer (fallback). Size:', fallbackAudioData.byteLength);
+        const audioBase64 = arrayBufferToBase64(audioData);
 
-      const audioBase64 = arrayBufferToBase64(fallbackAudioData);
-
-      return {
-        audioData: fallbackAudioData,
-        audioBase64,
-        format: 'mp3',
-        voiceUsed: audioOptions.voice,
-        modelUsed: 'tts-1',
-      };
+        return {
+          audioData,
+          audioBase64,
+          format: 'mp3',
+          voiceUsed: audioOptions.voice,
+          modelUsed: model,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.warn(`[OpenAI] TTS model failed (${model}), trying next fallback:`, lastError.message);
+      }
     }
+
+    throw new Error(lastError?.message || 'All OpenAI TTS models failed');
   }
 
   // Private methods (migrated from openaiService.ts)

@@ -794,7 +794,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.toLowerCase().trim(),
         {
-          redirectTo: 'nuolo://auth/reset-password',
+          redirectTo: 'nuolo://auth/update-password',
         }
       );
       

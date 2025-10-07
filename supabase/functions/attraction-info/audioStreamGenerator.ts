@@ -50,49 +50,52 @@ export class AudioStreamGenerator {
       console.log(`Generating audio for chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
       console.log(`Chunk size: ${chunk.characterCount} characters`);
       
-      const requestBody = {
-        model: 'tts-1-hd',
-        input: chunk.text,
-        voice: voice,
-        response_format: 'mp3',
-        speed: speed
-      };
+      const candidateModels = ['gpt-4o-mini-tts', 'gpt-4o-audio-preview', 'tts-1'];
+      let lastError: Error | null = null;
 
-      const response = await fetch(this.OPENAI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openAiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      for (const model of candidateModels) {
+        const requestBody = {
+          model,
+          input: chunk.text,
+          voice: voice,
+          response_format: 'mp3',
+          speed: speed
+        };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`OpenAI TTS API error for chunk ${chunk.chunkIndex}:`, errorText);
-        throw new Error(`TTS API error: ${response.status} - ${errorText}`);
+        const response = await fetch(this.OPENAI_API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openAiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          lastError = new Error(`TTS API error (${model}): ${response.status} - ${errorText}`);
+          console.warn(`OpenAI TTS API error for chunk ${chunk.chunkIndex} with model ${model}:`, errorText);
+          continue;
+        }
+
+        const audioBuffer = await response.arrayBuffer();
+        console.log(`Audio generated for chunk ${chunk.chunkIndex} with ${model}, size: ${audioBuffer.byteLength} bytes`);
+
+        const base64Audio = this.arrayBufferToBase64(audioBuffer);
+        const actualDuration = Math.round(audioBuffer.byteLength / 16000);
+
+        return {
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          text: chunk.text,
+          audio: base64Audio,
+          characterCount: chunk.characterCount,
+          estimatedDuration: chunk.estimatedDuration,
+          actualDuration: actualDuration
+        };
       }
 
-      // Get audio data as ArrayBuffer
-      const audioBuffer = await response.arrayBuffer();
-      console.log(`Audio generated for chunk ${chunk.chunkIndex}, size: ${audioBuffer.byteLength} bytes`);
-
-      // Convert to base64
-      const base64Audio = this.arrayBufferToBase64(audioBuffer);
-      
-      // Estimate actual duration based on file size (rough approximation)
-      // MP3 at 128kbps ≈ 16KB per second
-      const actualDuration = Math.round(audioBuffer.byteLength / 16000);
-
-      return {
-        chunkIndex: chunk.chunkIndex,
-        totalChunks: chunk.totalChunks,
-        text: chunk.text,
-        audio: base64Audio,
-        characterCount: chunk.characterCount,
-        estimatedDuration: chunk.estimatedDuration,
-        actualDuration: actualDuration
-      };
+      throw lastError || new Error('All OpenAI TTS models failed for chunk generation');
     } catch (error) {
       console.error(`Error generating audio for chunk ${chunk.chunkIndex}:`, error);
       throw new Error(`Failed to generate audio for chunk ${chunk.chunkIndex}: ${error.message}`);

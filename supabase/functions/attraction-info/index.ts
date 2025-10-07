@@ -205,7 +205,7 @@ serve(async (req) => {
       testMode = false,
       existingText,
       useChunkedAudio = false, // New flag for chunked audio generation
-      aiProvider = 'openai' // AI provider type from client (default: openai)
+      aiProvider = preferences.aiProvider || 'openai' // AI provider from preferences or top-level field
     } = requestData;
     
     // Validate required fields
@@ -253,6 +253,7 @@ serve(async (req) => {
     let generatedInfo = existingText;
     let audioResult: any = null;
     let providerUsed = 'unknown';
+    let textModelUsed = 'gpt-4.1-mini';
 
     // Create AI provider based on request
     let provider;
@@ -292,6 +293,7 @@ serve(async (req) => {
           });
 
           generatedInfo = simultaneousResult.content;
+          textModelUsed = simultaneousResult.modelUsed || textModelUsed;
           audioResult = {
             audio: simultaneousResult.audioBase64,
             audioData: simultaneousResult.audioData,
@@ -317,12 +319,13 @@ serve(async (req) => {
           });
 
           generatedInfo = contentResult.content;
+          textModelUsed = contentResult.modelUsed || textModelUsed;
 
           const duration = endTimer(textTimer, 'text_generation', true);
           logInfo('ai', 'Text generation completed successfully', {
             duration,
             textLength: generatedInfo.length,
-            modelUsed: contentResult.modelUsed
+            modelUsed: textModelUsed
           });
         }
 
@@ -469,8 +472,8 @@ serve(async (req) => {
             info: generatedInfo,
             audioChunks: audioChunks,
             metadata: metadata,
-            modelUsed: 'gpt-4o',
-            ttsModel: 'tts-1-hd',
+            modelUsed: textModelUsed,
+            ttsModel: 'gpt-4o-mini-tts',
             voiceUsed: audioOptions.voice
           }), {
             headers: {
@@ -520,6 +523,7 @@ serve(async (req) => {
           audioData: audioGenResult.audioData,
           format: audioGenResult.format,
           voiceUsed: audioGenResult.voiceUsed,
+          modelUsed: audioGenResult.modelUsed || 'gpt-4o-mini-tts',
         };
 
         logInfo('audio', 'Audio generation completed successfully', {
@@ -531,7 +535,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           info: generatedInfo,
           ...audioResult,
-          modelUsed: providerUsed,
+          modelUsed: textModelUsed,
         }), {
           headers: {
             ...corsHeaders,
@@ -566,7 +570,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         info: generatedInfo,
         ...audioResult,
-        modelUsed: providerUsed,
+        modelUsed: audioResult.modelUsed || textModelUsed,
       }), {
         headers: {
           ...corsHeaders,

@@ -6,6 +6,7 @@ export interface UserPreferences {
   voiceStyle: string;
   language: string;
   batteryOptimization: boolean;
+  aiProvider?: string;
 }
 
 export class PreferencesService {
@@ -39,6 +40,7 @@ export class PreferencesService {
         voiceStyle: data.voice_style,
         language: data.language,
         batteryOptimization: data.battery_optimization,
+        aiProvider: data.ai_provider,
       };
     } catch (error) {
       console.error('Error in getUserPreferences:', error);
@@ -63,6 +65,7 @@ export class PreferencesService {
           voice_style: preferences.voiceStyle,
           language: preferences.language,
           battery_optimization: preferences.batteryOptimization,
+          ai_provider: preferences.aiProvider,
         }, { onConflict: 'user_id' });
 
       if (error) {
@@ -101,6 +104,9 @@ export class PreferencesService {
       }
       if (updates.batteryOptimization !== undefined) {
         updateData.battery_optimization = updates.batteryOptimization;
+      }
+      if (updates.aiProvider !== undefined) {
+        updateData.ai_provider = updates.aiProvider;
       }
 
       const { error } = await supabase

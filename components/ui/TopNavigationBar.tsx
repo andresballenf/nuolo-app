@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { MapPreferencesMenu } from '../map/MapPreferencesMenu';
 import { ProfileMenu } from './ProfileMenu';
 import { SubscriptionBadge } from './SubscriptionBadge';
+import { Tooltip } from './Tooltip';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMonetization } from '../../contexts/MonetizationContext';
 
@@ -134,29 +135,31 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
           style={styles.subscriptionBadge}
         />
 
-        {/* Map Preferences Button - Circular */}
-        <Animated.View
-          style={[
-            styles.circularButton,
-            {
-              transform: [{ scale: mapButtonScale }],
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.circularButtonTouchable}
-            onPress={() => animateButtonPress(mapButtonScale, () => {
-              if (onSettingsPress) {
-                onSettingsPress();
-              } else {
-                setShowMapPreferences(true);
-              }
-            })}
-            activeOpacity={1}
+        {/* Map Preferences Button - Circular with Tooltip */}
+        <Tooltip text="Map Preferences" position="bottom">
+          <Animated.View
+            style={[
+              styles.circularButton,
+              {
+                transform: [{ scale: mapButtonScale }],
+              },
+            ]}
           >
-            <MaterialIcons name="layers" size={24} color="#374151" />
-          </TouchableOpacity>
-        </Animated.View>
+            <TouchableOpacity
+              style={styles.circularButtonTouchable}
+              onPress={() => animateButtonPress(mapButtonScale, () => {
+                if (onSettingsPress) {
+                  onSettingsPress();
+                } else {
+                  setShowMapPreferences(true);
+                }
+              })}
+              activeOpacity={1}
+            >
+              <MaterialIcons name="layers" size={24} color="#374151" />
+            </TouchableOpacity>
+          </Animated.View>
+        </Tooltip>
 
         {/* Profile Button - Circular */}
         <Animated.View

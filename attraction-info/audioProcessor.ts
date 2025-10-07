@@ -31,7 +31,7 @@ export async function processAudioGeneration(generatedInfo, preferences, testMod
   });
   // Enhanced TTS API options for Safari
   const audioOptions = {
-    model: 'tts-1-hd',
+    model: 'gpt-4o-mini-tts',
     voice: voice,
     input: textForAudio,
     response_format: 'mp3',

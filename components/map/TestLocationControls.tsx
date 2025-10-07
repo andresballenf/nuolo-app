@@ -11,6 +11,7 @@ import {
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { useMonetization } from '../../contexts/MonetizationContext';
+import { useApp } from '../../contexts/AppContext';
 
 interface PopularLocation {
   name: string;
@@ -59,8 +60,17 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
   onMapTiltChange,
   popularLocations = POPULAR_LOCATIONS,
 }) => {
+  const environment = process.env.EXPO_PUBLIC_ENV?.toLowerCase();
+  // Hide the panel on production builds, including release builds without explicit env
+  const shouldHideDevPanel = environment === 'production' || (!environment && !__DEV__);
+
+  if (shouldHideDevPanel) {
+    return null;
+  }
+
   const [isExpanded, setIsExpanded] = useState(false);
   const monetization = useMonetization();
+  const appContext = useApp();
 
   const validateAndApplyCoordinates = () => {
     const lat = parseFloat(testLatitude);
@@ -282,16 +292,16 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                   <TouchableOpacity
                     style={[
                       styles.aiProviderButton,
-                      (useApp().userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderButtonActive
+                      (appContext.userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderButtonActive
                     ]}
                     onPress={() => {
-                      useApp().setUserPreferences({ aiProvider: 'openai' });
+                      appContext.setUserPreferences({ aiProvider: 'openai' });
                       Alert.alert('AI Provider', 'Switched to OpenAI + ElevenLabs');
                     }}
                   >
                     <Text style={[
                       styles.aiProviderText,
-                      (useApp().userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderTextActive
+                      (appContext.userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderTextActive
                     ]}>
                       OpenAI
                     </Text>
@@ -300,23 +310,23 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                   <TouchableOpacity
                     style={[
                       styles.aiProviderButton,
-                      useApp().userPreferences.aiProvider === 'gemini' && styles.aiProviderButtonActive
+                      appContext.userPreferences.aiProvider === 'gemini' && styles.aiProviderButtonActive
                     ]}
                     onPress={() => {
-                      useApp().setUserPreferences({ aiProvider: 'gemini' });
+                      appContext.setUserPreferences({ aiProvider: 'gemini' });
                       Alert.alert('AI Provider', 'Switched to Gemini Native Audio');
                     }}
                   >
                     <Text style={[
                       styles.aiProviderText,
-                      useApp().userPreferences.aiProvider === 'gemini' && styles.aiProviderTextActive
+                      appContext.userPreferences.aiProvider === 'gemini' && styles.aiProviderTextActive
                     ]}>
                       Gemini
                     </Text>
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.aiProviderHint}>
-                  {(useApp().userPreferences.aiProvider || 'openai') === 'openai'
+                  {(appContext.userPreferences.aiProvider || 'openai') === 'openai'
                     ? 'Two-step: GPT-4 text + TTS audio'
                     : 'Single-step: Gemini generates text + audio simultaneously'}
                 </Text>

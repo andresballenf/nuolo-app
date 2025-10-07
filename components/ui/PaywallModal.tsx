@@ -186,7 +186,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       let successMessage = '';
       
       if (selectedOption === 'unlimited') {
-        success = await purchaseSubscription('unlimited_monthly');
+        success = await purchaseSubscription();
         successMessage = 'Welcome to Nuolo Unlimited! You now have unlimited access to all audio guides.';
       } else {
         const selectedPackage = packages.find(pkg => pkg.id === `${selectedOption}_package`);

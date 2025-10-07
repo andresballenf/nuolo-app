@@ -18,10 +18,10 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
   
   // Adjust word count based on audio length preference
   const wordCount = preferences.audioLength === 'short'
-    ? '100-250 words (30-60 seconds of audio)'
+    ? '180-260 words (about 2 minutes of audio)'
     : preferences.audioLength === 'medium'
-      ? '400-600 words (1-3 minutes of audio)'
-      : '800-1000 words (3-5 minutes of audio)';
+      ? '700-900 words (roughly 4-6 minutes of audio)'
+      : '1200-1500 words (approximately 7-10 minutes of audio)';
 
   // Map theme preferences to content focus
   const themeGuide = {

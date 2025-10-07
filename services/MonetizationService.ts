@@ -15,7 +15,9 @@ export interface Product {
 
 export interface SubscriptionStatus {
   isActive: boolean;
-  type: 'free' | 'premium_monthly' | 'premium_yearly' | 'lifetime' | 'unlimited_monthly' | null;
+  // Current subscription: unlimited_monthly
+  // Legacy types maintained for existing subscribers: premium_monthly, premium_yearly, lifetime
+  type: 'free' | 'unlimited_monthly' | 'premium_monthly' | 'premium_yearly' | 'lifetime' | null;
   expiresAt: Date | null;
   inGracePeriod: boolean;
   inTrial: boolean;
@@ -72,23 +74,7 @@ export class MonetizationService {
 
   // Product IDs - should match store configurations
   private static readonly PRODUCT_IDS = {
-    // Subscriptions
-    PREMIUM_MONTHLY: Platform.select({
-      ios: 'nuolo_premium_monthly',
-      android: 'nuolo_premium_monthly',
-      default: 'nuolo_premium_monthly'
-    }),
-    PREMIUM_YEARLY: Platform.select({
-      ios: 'nuolo_premium_yearly',
-      android: 'nuolo_premium_yearly', 
-      default: 'nuolo_premium_yearly'
-    }),
-    LIFETIME: Platform.select({
-      ios: 'nuolo_lifetime',
-      android: 'nuolo_lifetime',
-      default: 'nuolo_lifetime'
-    }),
-    // New unlimited monthly subscription
+    // Subscription - Unlimited monthly access
     UNLIMITED_MONTHLY: Platform.select({
       ios: 'nuolo_unlimited_monthly',
       android: 'nuolo_unlimited_monthly',
@@ -127,8 +113,16 @@ export class MonetizationService {
       if (!this.isConnected) {
         try {
           // Initialize platform IAP
-          const { responseCode } = await InAppPurchases.connectAsync();
-          this.isConnected = responseCode === InAppPurchases.IAPResponseCode.OK;
+          const connectResponse = await InAppPurchases.connectAsync();
+
+          // Handle undefined response
+          if (!connectResponse) {
+            console.warn('No response from connectAsync, assuming not connected');
+            this.isConnected = false;
+          } else {
+            const { responseCode } = connectResponse;
+            this.isConnected = responseCode === InAppPurchases.IAPResponseCode.OK;
+          }
         } catch (connectError: any) {
           // If already connected, treat it as success
           if (connectError?.message?.includes('Already connected')) {
@@ -185,8 +179,17 @@ export class MonetizationService {
       }
 
       // Fetch product details from platform store
-      const { responseCode, results } = await InAppPurchases.getProductsAsync(productIds);
-      
+      const response = await InAppPurchases.getProductsAsync(productIds);
+
+      // Handle undefined response
+      if (!response) {
+        console.warn('No response from getProductsAsync');
+        this.products = [];
+        return;
+      }
+
+      const { responseCode, results } = response;
+
       if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
         this.products = results.map(product => ({
           productId: product.productId,
@@ -208,11 +211,13 @@ export class MonetizationService {
   }
 
   private getProductType(productId: string): 'subscription' | 'consumable' | 'non_consumable' {
-    if (productId.includes('monthly') || productId.includes('yearly')) {
+    // Subscriptions: unlimited_monthly and legacy subscriptions
+    if (productId.includes('monthly') || productId.includes('yearly') || productId.includes('lifetime')) {
       return 'subscription';
     }
-    if (productId.includes('pack') || productId.includes('attraction')) {
-      return 'non_consumable';
+    // Packages and attractions are consumable (credits that get used up)
+    if (productId.includes('package') || productId.includes('attraction')) {
+      return 'consumable';
     }
     return 'consumable';
   }
@@ -358,17 +363,21 @@ export class MonetizationService {
 
   private mapProductToSubscriptionType(productId: string): string {
     if (productId.includes('unlimited_monthly')) return 'unlimited_monthly';
+    // Legacy subscription types (for existing subscriptions only)
     if (productId.includes('premium_monthly')) return 'premium_monthly';
     if (productId.includes('yearly')) return 'premium_yearly';
     if (productId.includes('lifetime')) return 'lifetime';
-    return 'premium_monthly';
+    // Default to unlimited monthly for new subscriptions
+    return 'unlimited_monthly';
   }
 
   private calculateExpirationDate(subscriptionType: string, purchaseTime: number): string {
     const purchaseDate = new Date(purchaseTime);
-    
+
     switch (subscriptionType) {
       case 'unlimited_monthly':
+        return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
+      // Legacy subscription types (for existing subscriptions only)
       case 'premium_monthly':
         return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
       case 'premium_yearly':
@@ -434,9 +443,16 @@ export class MonetizationService {
   async purchaseSubscription(subscriptionType: string): Promise<boolean> {
     try {
       if (!this.initialized) await this.initialize();
-      
+
       const productId = this.getProductIdForSubscriptionType(subscriptionType);
-      const { responseCode } = await InAppPurchases.purchaseItemAsync(productId);
+      const response = await InAppPurchases.purchaseItemAsync(productId);
+
+      if (!response) {
+        console.error('No response from purchaseItemAsync');
+        return false;
+      }
+
+      const { responseCode } = response;
       return responseCode === InAppPurchases.IAPResponseCode.OK;
     } catch (error) {
       console.error('Subscription purchase failed:', error);
@@ -447,9 +463,16 @@ export class MonetizationService {
   async purchaseSingleAttraction(attractionId: string): Promise<boolean> {
     try {
       if (!this.initialized) await this.initialize();
-      
+
       const productId = `attraction_${attractionId}`;
-      const { responseCode } = await InAppPurchases.purchaseItemAsync(productId);
+      const response = await InAppPurchases.purchaseItemAsync(productId);
+
+      if (!response) {
+        console.error('No response from purchaseItemAsync');
+        return false;
+      }
+
+      const { responseCode } = response;
       return responseCode === InAppPurchases.IAPResponseCode.OK;
     } catch (error) {
       console.error('Attraction purchase failed:', error);
@@ -460,8 +483,15 @@ export class MonetizationService {
   async purchaseAttractionPack(packId: string): Promise<boolean> {
     try {
       if (!this.initialized) await this.initialize();
-      
-      const { responseCode } = await InAppPurchases.purchaseItemAsync(packId);
+
+      const response = await InAppPurchases.purchaseItemAsync(packId);
+
+      if (!response) {
+        console.error('No response from purchaseItemAsync');
+        return false;
+      }
+
+      const { responseCode } = response;
       return responseCode === InAppPurchases.IAPResponseCode.OK;
     } catch (error) {
       console.error('Pack purchase failed:', error);
@@ -472,9 +502,16 @@ export class MonetizationService {
   async restorePurchases(): Promise<void> {
     try {
       if (!this.initialized) await this.initialize();
-      
-      const { responseCode, results } = await InAppPurchases.getPurchaseHistoryAsync();
-      
+
+      const response = await InAppPurchases.getPurchaseHistoryAsync();
+
+      if (!response) {
+        console.warn('No response from getPurchaseHistoryAsync');
+        return;
+      }
+
+      const { responseCode, results } = response;
+
       if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
         // Process each restored purchase
         for (const purchase of results) {
@@ -602,9 +639,15 @@ export class MonetizationService {
         });
       }
 
+      // Check for unlimited access - current subscription or legacy subscriptions
+      const hasUnlimitedAccess = subscription.isActive && (
+        subscription.type === 'unlimited_monthly' ||
+        // Legacy subscriptions (grandfathered)
+        ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '')
+      );
+
       return {
-        hasUnlimitedAccess: subscription.isActive && 
-          ['unlimited_monthly', 'premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || ''),
+        hasUnlimitedAccess,
         totalAttractionLimit: entitlement.total_attraction_limit,
         remainingFreeAttractions: entitlement.remaining_attractions,
         attractionsUsed: entitlement.attractions_used,
@@ -838,18 +881,9 @@ export class MonetizationService {
   }
 
   private getProductIdForSubscriptionType(subscriptionType: string): string {
-    switch (subscriptionType) {
-      case 'unlimited_monthly':
-        return MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY!;
-      case 'premium_monthly':
-        return MonetizationService.PRODUCT_IDS.PREMIUM_MONTHLY!;
-      case 'premium_yearly':
-        return MonetizationService.PRODUCT_IDS.PREMIUM_YEARLY!;
-      case 'lifetime':
-        return MonetizationService.PRODUCT_IDS.LIFETIME!;
-      default:
-        return MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY!;
-    }
+    // Only unlimited_monthly is available for new purchases
+    // Legacy types maintained for backward compatibility only
+    return MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY!;
   }
 
   // New method to purchase attraction packages
@@ -869,11 +903,18 @@ export class MonetizationService {
         return false;
       }
 
-      const productId = Platform.OS === 'ios' 
-        ? packageData.apple_product_id 
+      const productId = Platform.OS === 'ios'
+        ? packageData.apple_product_id
         : packageData.google_product_id;
-      
-      const { responseCode } = await InAppPurchases.purchaseItemAsync(productId);
+
+      const response = await InAppPurchases.purchaseItemAsync(productId);
+
+      if (!response) {
+        console.error('No response from purchaseItemAsync');
+        return false;
+      }
+
+      const { responseCode } = response;
       return responseCode === InAppPurchases.IAPResponseCode.OK;
     } catch (error) {
       console.error('Package purchase failed:', error);

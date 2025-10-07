@@ -82,8 +82,9 @@ export async function generateAttractionInfo(attractionName, attractionAddress, 
   console.log(`Generating content in language: ${language}`);
   
   const fallbackModels = [
-    'gpt-4o',
+    'gpt-4.1-mini',
     'gpt-4o-mini',
+    'gpt-4o',
     'gpt-4-turbo',
     'gpt-4',
     'gpt-3.5-turbo'
@@ -128,14 +129,19 @@ export async function generateAudio(audioOptions, openAiApiKey) {
     return audioResponse.arrayBuffer();
   }
 
-  try {
-    const primary = await callTts(audioOptions.model || 'tts-1-hd');
-    console.log('Received audio buffer (primary). Size:', primary.byteLength);
-    return primary;
-  } catch (primaryErr) {
-    console.warn('Primary TTS failed, falling back to tts-1:', primaryErr?.message || primaryErr);
-    const fallback = await callTts('tts-1');
-    console.log('Received audio buffer (fallback). Size:', fallback.byteLength);
-    return fallback;
+  const models = [audioOptions.model || 'gpt-4o-mini-tts', 'gpt-4o-audio-preview', 'tts-1'];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      const audioBuffer = await callTts(model);
+      console.log(`Received audio buffer (${model}). Size:`, audioBuffer.byteLength);
+      return audioBuffer;
+    } catch (error) {
+      lastError = error;
+      console.warn(`TTS model failed (${model}), trying next fallback:`, error?.message || error);
+    }
   }
+
+  throw new Error(lastError?.message || 'All TTS models failed');
 }

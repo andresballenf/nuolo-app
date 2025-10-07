@@ -44,27 +44,35 @@ async function generateAudioChunk(
   voice: string,
   speed: number = 1.0
 ): Promise<ArrayBuffer> {
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${openAiApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'tts-1-hd',
-      input: text,
-      voice: voice,
-      response_format: 'mp3',
-      speed: speed
-    }),
-  });
+  const candidateModels = ['gpt-4o-mini-tts', 'gpt-4o-audio-preview', 'tts-1'];
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
+  for (const model of candidateModels) {
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openAiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        input: text,
+        voice: voice,
+        response_format: 'mp3',
+        speed: speed
+      }),
+    });
+
+    if (response.ok) {
+      return await response.arrayBuffer();
+    }
+
     const errorText = await response.text();
-    throw new Error(`OpenAI TTS API error: ${response.status} - ${errorText}`);
+    lastError = new Error(`OpenAI TTS API error (${model}): ${response.status} - ${errorText}`);
+    console.warn(`[generate-audio-chunk] TTS model failed (${model}), trying next fallback`, lastError.message);
   }
 
-  return await response.arrayBuffer();
+  throw lastError || new Error('All OpenAI TTS models failed');
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

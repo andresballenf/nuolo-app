@@ -294,7 +294,7 @@ export default function MapScreen() {
       }
 
       console.log(`Generating info for: ${attraction.name}`);
-      
+
       const attractionInfo = await AttractionInfoService.generateTextInfo(
         attraction.name,
         attraction.description || 'Unknown location',
@@ -304,6 +304,7 @@ export default function MapScreen() {
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
           language: userPreferences.language,
+          aiProvider: userPreferences.aiProvider,
         },
         isTestModeEnabled
       );
@@ -388,6 +389,7 @@ export default function MapScreen() {
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
           language: userPreferences.language,
+          aiProvider: userPreferences.aiProvider,
         },
         isTestModeEnabled
       );
@@ -416,6 +418,7 @@ export default function MapScreen() {
           audioLength: userPreferences.audioLength,
           voiceStyle: userPreferences.voiceStyle,
           language: userPreferences.language,
+          aiProvider: userPreferences.aiProvider,
         },
         {
           onText: (receivedText) => {
@@ -538,6 +541,11 @@ export default function MapScreen() {
       if (!audioGenerated) {
         try {
           console.log('Using fallback single-chunk audio generation');
+
+          if (text.length > 3900) {
+            throw new Error('Chunked audio is required for this narration length. Please retry once the chunk generator is available.');
+          }
+
           const audioData = await AttractionInfoService.generateAudio(
             attraction.name,
             attraction.description || 'Unknown location',
@@ -547,6 +555,7 @@ export default function MapScreen() {
               audioLength: userPreferences.audioLength,
               voiceStyle: userPreferences.voiceStyle,
               language: userPreferences.language,
+              aiProvider: userPreferences.aiProvider,
             },
             text,
             isTestModeEnabled
@@ -626,75 +635,12 @@ export default function MapScreen() {
 
   // Legacy function kept for compatibility (will be removed in Phase 4)
   const handleRequestAudio = async () => {
-    if (!selectedAttraction || !attractionInfo) {
-      Alert.alert('Error', 'No attraction or content available for audio generation');
+    if (!selectedAttraction) {
+      Alert.alert('Error', 'No attraction selected for audio generation');
       return;
     }
 
-    try {
-      const currentLocation = testLocation 
-        ? { lat: testLocation.latitude, lng: testLocation.longitude }
-        : (gpsStatus.latitude !== null && gpsStatus.longitude !== null
-            ? { lat: gpsStatus.latitude, lng: gpsStatus.longitude }
-            : null);
-
-      if (!currentLocation) {
-        Alert.alert('Error', 'Location is required for audio generation');
-        return;
-      }
-
-      console.log('Generating audio for:', selectedAttraction.name);
-
-      const audioData = await AttractionInfoService.generateAudio(
-        selectedAttraction.name,
-        selectedAttraction.description || 'Unknown location',
-        currentLocation,
-        {
-          theme: userPreferences.theme,
-          audioLength: userPreferences.audioLength,
-          voiceStyle: userPreferences.voiceStyle,
-          language: userPreferences.language,
-        },
-        attractionInfo,
-        isTestModeEnabled
-      );
-
-      const audioTrack = {
-        id: selectedAttraction.id,
-        title: selectedAttraction.name,
-        subtitle: selectedAttraction.description || 'Audio Guide',
-        description: attractionInfo,
-        location: selectedAttraction.description,
-        category: userPreferences.theme,
-        audioData: audioData,
-        duration: 0,
-        imageUrl: selectedAttraction.photos && selectedAttraction.photos.length > 0 ? selectedAttraction.photos[0] : undefined,
-      };
-
-      audioContext.addTrack(audioTrack);
-      await audioContext.setCurrentTrack(audioTrack);
-      audioContext.minimize();
-      setAttractionAudio(audioData);
-
-      console.log('Audio track created and added to player');
-
-    } catch (error) {
-      console.error('Error generating audio:', error);
-      
-      const errorMessage = AttractionInfoService.getErrorMessage(error);
-      
-      Alert.alert(
-        'Audio Generation Failed',
-        errorMessage,
-        [
-          { text: 'OK' },
-          { 
-            text: 'Retry', 
-            onPress: handleRequestAudio 
-          }
-        ]
-      );
-    }
+    await handlePlayAudio(selectedAttraction);
   };
 
   const handleCloseBottomSheet = () => {
