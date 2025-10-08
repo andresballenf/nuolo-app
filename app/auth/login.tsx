@@ -21,22 +21,25 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
-  const { 
-    signIn, 
-    signInWithOAuth, 
+  const {
+    signIn,
+    signInWithOAuth,
     signInWithBiometric,
     biometricAvailable,
     loginAttempts,
     lockedUntil,
     validateEmail,
   } = useAuth();
-  
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  // Feature flag for OAuth providers
+  const oauthEnabled = process.env.EXPO_PUBLIC_ENABLE_OAUTH_PROVIDERS === 'true';
   
   // Check if account is locked
   const isLocked = lockedUntil && new Date(lockedUntil) > new Date();
@@ -320,35 +323,40 @@ export default function LoginScreen() {
               </TouchableOpacity>
             )}
             
-            {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or continue with</Text>
-              <View style={styles.dividerLine} />
-            </View>
-            
-            {/* OAuth Buttons */}
-            <View style={styles.oauthContainer}>
-              <TouchableOpacity
-                style={styles.oauthButton}
-                onPress={() => handleOAuthLogin('google')}
-                disabled={loading || !!isLocked}
-              >
-                <Icon name="logo-google" size={24} color="#4285f4" />
-                <Text style={styles.oauthText}>Google</Text>
-              </TouchableOpacity>
-              
-              {Platform.OS === 'ios' && (
-                <TouchableOpacity
-                  style={styles.oauthButton}
-                  onPress={() => handleOAuthLogin('apple')}
-                  disabled={loading || !!isLocked}
-                >
-                  <Icon name="logo-apple" size={24} color="#000000" />
-                  <Text style={styles.oauthText}>Apple</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            {/* OAuth Section - Only shown when enabled */}
+            {oauthEnabled && (
+              <>
+                {/* Divider */}
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or continue with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                {/* OAuth Buttons */}
+                <View style={styles.oauthContainer}>
+                  <TouchableOpacity
+                    style={styles.oauthButton}
+                    onPress={() => handleOAuthLogin('google')}
+                    disabled={loading || !!isLocked}
+                  >
+                    <Icon name="logo-google" size={24} color="#4285f4" />
+                    <Text style={styles.oauthText}>Google</Text>
+                  </TouchableOpacity>
+
+                  {Platform.OS === 'ios' && (
+                    <TouchableOpacity
+                      style={styles.oauthButton}
+                      onPress={() => handleOAuthLogin('apple')}
+                      disabled={loading || !!isLocked}
+                    >
+                      <Icon name="logo-apple" size={24} color="#000000" />
+                      <Text style={styles.oauthText}>Apple</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
             
             {/* Sign Up Link */}
             <View style={styles.signupContainer}>

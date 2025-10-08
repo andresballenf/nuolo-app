@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
+import { supabase } from '../lib/supabase';
 import { AppProvider } from '../contexts/AppContext';
 import { AuthProvider } from '../contexts/AuthContext';
 import { OnboardingProvider } from '../contexts/OnboardingContext';
@@ -34,22 +35,54 @@ export default function RootLayout() {
     const handleDeepLink = async (event: { url: string }) => {
       try {
         const { hostname, path, queryParams } = Linking.parse(event.url);
-        console.log('Deep link received:', { hostname, path, queryParams });
+
+        // Parse hash fragment for session tokens (Supabase returns them in URL hash)
+        const hashParams: Record<string, string> = {};
+        if (event.url.includes('#')) {
+          const hashString = event.url.split('#')[1];
+          if (hashString) {
+            hashString.split('&').forEach(param => {
+              const [key, value] = param.split('=');
+              if (key && value) {
+                hashParams[key] = decodeURIComponent(value);
+              }
+            });
+          }
+        }
+
+        console.log('Deep link received:', {
+          hostname,
+          path,
+          queryParams,
+          hashParams,
+          fullUrl: event.url
+        });
+
+        // If we have session tokens in hash, set the session
+        if (hashParams.access_token && hashParams.refresh_token) {
+          console.log('Setting session from URL tokens');
+          const { error } = await supabase.auth.setSession({
+            access_token: hashParams.access_token,
+            refresh_token: hashParams.refresh_token,
+          });
+
+          if (error) {
+            console.error('Error setting session from URL:', error);
+          } else {
+            console.log('Session set successfully from URL');
+          }
+        }
 
         // Handle email confirmation (signup verification)
         if (path === 'auth/confirm') {
-          const { token_hash, type } = queryParams as Record<string, string>;
-          if (token_hash && type === 'email') {
-            router.push(`/auth/confirm?token_hash=${token_hash}&type=${type}`);
-          }
+          // Session should already be set from hash params above
+          router.push('/auth/confirm');
         }
 
         // Handle password reset
         if (path === 'auth/reset-password' || path === 'auth/update-password') {
-          const { token_hash, type } = queryParams as Record<string, string>;
-          if (token_hash && type === 'recovery') {
-            router.push(`/auth/update-password?token_hash=${token_hash}&type=${type}`);
-          }
+          // Session should already be set from hash params above
+          router.push('/auth/update-password');
         }
 
         // Handle OAuth callback

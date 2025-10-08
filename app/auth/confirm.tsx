@@ -13,30 +13,20 @@ export default function ConfirmEmailScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    verifyEmail();
+    checkEmailVerification();
   }, []);
 
-  const verifyEmail = async () => {
+  const checkEmailVerification = async () => {
     try {
-      const { token_hash, type } = params;
+      // Check if user is already authenticated from the deep link
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-      if (!token_hash || !type) {
-        setError('Invalid verification link');
-        setLoading(false);
-        return;
-      }
-
-      // Verify the email token
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        token_hash,
-        type: type as 'email',
-      });
-
-      if (verifyError) {
-        console.error('Email verification error:', verifyError);
-        setError(verifyError.message || 'Failed to verify email');
-      } else if (data.session) {
-        // Email verified successfully and user is now logged in
+      if (sessionError) {
+        console.error('Session check error:', sessionError);
+        setError('Failed to verify email');
+      } else if (session) {
+        // User is authenticated via the email verification link
+        console.log('Email verified successfully, session established');
         setSuccess(true);
 
         // Redirect to map after a short delay
@@ -44,7 +34,8 @@ export default function ConfirmEmailScreen() {
           router.replace('/map');
         }, 2000);
       } else {
-        setError('Email verified but session could not be created');
+        // No session found - link is invalid or expired
+        setError('Invalid verification link');
       }
     } catch (err) {
       console.error('Verification error:', err);

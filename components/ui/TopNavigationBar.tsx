@@ -16,21 +16,26 @@ import { SubscriptionBadge } from './SubscriptionBadge';
 import { Tooltip } from './Tooltip';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMonetization } from '../../contexts/MonetizationContext';
+import { useApp } from '../../contexts/AppContext';
 
 interface TopNavigationBarProps {
   // Search functionality
   isSearching: boolean;
   onSearchThisArea: () => void;
-  
+
   // Map preferences
   mapType: 'satellite' | 'hybrid';
   mapTilt: number;
   onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
   onMapTiltChange: (tilt: number) => void;
-  
+
   // Profile & Settings
   onProfilePress: () => void;
   onSettingsPress?: () => void;
+
+  // GPS Enable
+  onEnableGPS?: () => void;
+  isEnablingGPS?: boolean;
 }
 
 export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
@@ -42,10 +47,13 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   onMapTiltChange,
   onProfilePress,
   onSettingsPress,
+  onEnableGPS,
+  isEnablingGPS = false,
 }) => {
   // Get auth context
   const { user, isAuthenticated } = useAuth();
   const { setShowPaywall } = useMonetization();
+  const { gpsStatus } = useApp();
   
   // State for menus
   const [showMapPreferences, setShowMapPreferences] = useState(false);
@@ -55,6 +63,7 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   const searchButtonScale = useRef(new Animated.Value(1)).current;
   const mapButtonScale = useRef(new Animated.Value(1)).current;
   const profileButtonScale = useRef(new Animated.Value(1)).current;
+  const gpsButtonScale = useRef(new Animated.Value(1)).current;
   
   // Get user initial for profile button
   const getUserInitial = () => {
@@ -130,10 +139,38 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
         </Animated.View>
 
         {/* Subscription Badge */}
-        <SubscriptionBadge 
+        <SubscriptionBadge
           onPress={() => setShowPaywall(true, { trigger: 'manual' })}
           style={styles.subscriptionBadge}
         />
+
+        {/* GPS Enable Button - Show when GPS is not active */}
+        {!gpsStatus.active && onEnableGPS && (
+          <Tooltip text="Enable GPS" position="bottom">
+            <Animated.View
+              style={[
+                styles.circularButton,
+                styles.gpsButton,
+                {
+                  transform: [{ scale: gpsButtonScale }],
+                },
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.circularButtonTouchable}
+                onPress={() => animateButtonPress(gpsButtonScale, onEnableGPS)}
+                activeOpacity={1}
+                disabled={isEnablingGPS}
+              >
+                {isEnablingGPS ? (
+                  <ActivityIndicator size="small" color="#84cc16" />
+                ) : (
+                  <MaterialIcons name="my-location" size={24} color="#84cc16" />
+                )}
+              </TouchableOpacity>
+            </Animated.View>
+          </Tooltip>
+        )}
 
         {/* Map Preferences Button - Circular with Tooltip */}
         <Tooltip text="Map Preferences" position="bottom">
@@ -316,5 +353,10 @@ const styles = StyleSheet.create({
   },
   subscriptionBadge: {
     marginHorizontal: 4,
+  },
+  gpsButton: {
+    borderWidth: 2,
+    borderColor: '#84cc16',
+    backgroundColor: '#F0FDF4',
   },
 });

@@ -36,27 +36,16 @@ export default function UpdatePasswordScreen() {
   const passwordStrength = password ? checkPasswordStrength(password) : { score: 0, feedback: [], isValid: false };
 
   useEffect(() => {
-    verifyResetToken();
+    checkSession();
   }, []);
 
-  const verifyResetToken = async () => {
+  const checkSession = async () => {
     try {
-      const { token_hash, type } = params;
-
-      if (!token_hash || !type) {
-        Alert.alert('Invalid Link', 'This password reset link is invalid.');
-        router.replace('/auth/login');
-        return;
-      }
-
-      // Verify the password reset token
-      const { data, error } = await supabase.auth.verifyOtp({
-        token_hash,
-        type: type as 'recovery',
-      });
+      // Check if user is already authenticated from the deep link
+      const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error) {
-        console.error('Token verification error:', error);
+        console.error('Session check error:', error);
         Alert.alert(
           'Link Expired',
           'This password reset link has expired or is invalid. Please request a new one.',
@@ -67,12 +56,25 @@ export default function UpdatePasswordScreen() {
             },
           ]
         );
-      } else if (data.session) {
-        // Token is valid, user is now authenticated temporarily
+      } else if (session) {
+        // User is authenticated via the email link, show password update form
+        console.log('Session verified for password reset');
         setVerified(true);
+      } else {
+        // No session found
+        Alert.alert(
+          'Invalid Link',
+          'This password reset link is invalid. Please request a new one.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/auth/reset-password'),
+            },
+          ]
+        );
       }
     } catch (err) {
-      console.error('Verification error:', err);
+      console.error('Session check error:', err);
       Alert.alert('Error', 'An unexpected error occurred');
       router.replace('/auth/login');
     } finally {

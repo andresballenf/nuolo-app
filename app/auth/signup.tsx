@@ -77,13 +77,13 @@ const PasswordStrengthIndicator: React.FC<PasswordStrengthIndicatorProps> = ({
 };
 
 export default function SignUpScreen() {
-  const { 
-    signUp, 
+  const {
+    signUp,
     signInWithOAuth,
     checkPasswordStrength,
     validateEmail,
   } = useAuth();
-  
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,6 +94,9 @@ export default function SignUpScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+
+  // Feature flag for OAuth providers
+  const oauthEnabled = process.env.EXPO_PUBLIC_ENABLE_OAUTH_PROVIDERS === 'true';
   
   const passwordStrength = password ? checkPasswordStrength(password) : { score: 0, feedback: [], isValid: false };
   
@@ -390,35 +393,40 @@ export default function SignUpScreen() {
               loading={loading}
             />
             
-            {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or sign up with</Text>
-              <View style={styles.dividerLine} />
-            </View>
-            
-            {/* OAuth Buttons */}
-            <View style={styles.oauthContainer}>
-              <TouchableOpacity
-                style={styles.oauthButton}
-                onPress={() => handleOAuthSignUp('google')}
-                disabled={loading}
-              >
-                <Icon name="logo-google" size={24} color="#4285f4" />
-                <Text style={styles.oauthText}>Google</Text>
-              </TouchableOpacity>
-              
-              {Platform.OS === 'ios' && (
-                <TouchableOpacity
-                  style={styles.oauthButton}
-                  onPress={() => handleOAuthSignUp('apple')}
-                  disabled={loading}
-                >
-                  <Icon name="logo-apple" size={24} color="#000000" />
-                  <Text style={styles.oauthText}>Apple</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            {/* OAuth Section - Only shown when enabled */}
+            {oauthEnabled && (
+              <>
+                {/* Divider */}
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or sign up with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                {/* OAuth Buttons */}
+                <View style={styles.oauthContainer}>
+                  <TouchableOpacity
+                    style={styles.oauthButton}
+                    onPress={() => handleOAuthSignUp('google')}
+                    disabled={loading}
+                  >
+                    <Icon name="logo-google" size={24} color="#4285f4" />
+                    <Text style={styles.oauthText}>Google</Text>
+                  </TouchableOpacity>
+
+                  {Platform.OS === 'ios' && (
+                    <TouchableOpacity
+                      style={styles.oauthButton}
+                      onPress={() => handleOAuthSignUp('apple')}
+                      disabled={loading}
+                    >
+                      <Icon name="logo-apple" size={24} color="#000000" />
+                      <Text style={styles.oauthText}>Apple</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
             
             {/* Login Link */}
             <View style={styles.loginContainer}>

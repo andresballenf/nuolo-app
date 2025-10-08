@@ -336,11 +336,37 @@ export default function MapScreen() {
   // NEW: Chunked audio generation with streaming support
   const handlePlayAudio = async (attraction: PointOfInterest) => {
     let shouldRecordUsage = false;
-    
+
     try {
+      // Contextual GPS prompt if location is not available
+      if (!gpsStatus.active && !testLocation && !isTestModeEnabled) {
+        Alert.alert(
+          'Enable Location',
+          'Enable GPS to get personalized audio guides based on your location, or use test mode to explore.',
+          [
+            {
+              text: 'Use Test Mode',
+              onPress: () => setIsTestModeEnabled(true),
+            },
+            {
+              text: 'Enable GPS',
+              onPress: async () => {
+                await handleEnableGPS();
+                // Retry audio generation after GPS is enabled
+                if (gpsStatus.active) {
+                  handlePlayAudio(attraction);
+                }
+              },
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+
       // Check monetization entitlements first
       const validationResult = await generateAudioGuideWithValidation(attraction.id, attraction.name);
-      
+
       if (!validationResult.canGenerate) {
         // Show paywall if user can't generate
         if (validationResult.shouldShowPaywall) {
@@ -348,7 +374,7 @@ export default function MapScreen() {
         }
         return;
       }
-      
+
       // Store whether we need to record usage after successful generation
       shouldRecordUsage = validationResult.shouldRecordUsage;
 
@@ -656,22 +682,22 @@ export default function MapScreen() {
     try {
       setIsEnablingGPS(true);
       console.log('GPS enable button clicked - starting permission request');
-      
+
       // Request location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       console.log('Permission status:', status);
-      
+
       if (status !== 'granted') {
         Alert.alert(
-          'Location Permission Required',
-          'Please enable location permissions in your device settings to discover nearby attractions.',
+          'Location Permission',
+          'Enable location to discover nearby attractions automatically. You can continue using test mode or search to explore locations.',
           [{ text: 'OK' }]
         );
         return;
       }
 
       console.log('Permission granted, getting current location...');
-      
+
       // Get current location with timeout and fallback
       let location;
       try {
@@ -699,7 +725,7 @@ export default function MapScreen() {
           });
         }
       }
-      
+
       console.log('Got location:', location.coords);
 
       // Update GPS status with actual location data
@@ -715,13 +741,13 @@ export default function MapScreen() {
       console.log('GPS enabled successfully with location data');
     } catch (error) {
       console.error('Error enabling GPS:', error);
-      
+
       // Reset GPS status if there was an error
       setGpsStatus({ active: false, locked: false });
-      
+
       Alert.alert(
         'GPS Error',
-        'Unable to get your current location. Please check your location settings and try again.',
+        'Unable to get your current location. You can continue using test mode or search to explore locations.',
         [{ text: 'OK' }]
       );
     } finally {
@@ -780,40 +806,8 @@ export default function MapScreen() {
     />
   ), [resetOnboarding]);
 
-  if (!gpsStatus.active && !testLocation && !isTestModeEnabled) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#84cc16" />
-        <View style={styles.noGpsContainer}>
-          <View style={styles.noGpsContent}>
-            <Text style={styles.noGpsIcon}>📍</Text>
-            <Text style={styles.noGpsTitle}>Location Access Required</Text>
-            <Text style={styles.noGpsText}>
-              Enable GPS to discover nearby attractions and generate personalized audio guides, or use test mode to explore sample locations.
-            </Text>
-            <View style={styles.buttonContainer}>
-              <Button
-                title={isEnablingGPS ? "Enabling GPS..." : "Enable GPS"}
-                onPress={handleEnableGPS}
-                variant="primary"
-                size="lg"
-                style={styles.gpsButton}
-                disabled={isEnablingGPS}
-                loading={isEnablingGPS}
-              />
-              <Button
-                title="Use Test Mode"
-                onPress={() => setIsTestModeEnabled(true)}
-                variant="outline"
-                size="lg"
-                style={styles.testButton}
-              />
-            </View>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  // Gracefully handle no GPS - show map with manual controls instead of blocking
+  // Users can enable GPS via TopNavigationBar button or test mode controls
 
   return (
     <View style={styles.container}>
@@ -865,6 +859,8 @@ export default function MapScreen() {
         onMapTiltChange={setMapTilt}
         onProfilePress={handleOpenProfile}
         onSettingsPress={handleOpenSettings}
+        onEnableGPS={handleEnableGPS}
+        isEnablingGPS={isEnablingGPS}
       />
 
       {/* Material Design 3 Bottom Sheet */}
@@ -951,45 +947,5 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-  },
-  noGpsContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    padding: 20,
-  },
-  noGpsContent: {
-    alignItems: 'center',
-    maxWidth: 300,
-  },
-  noGpsIcon: {
-    fontSize: 48,
-    marginBottom: 20,
-  },
-  noGpsTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  noGpsText: {
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
-  },
-  buttonContainer: {
-    flexDirection: 'column',
-    gap: 12,
-    width: '100%',
-  },
-  gpsButton: {
-    width: '100%',
-  },
-  testButton: {
-    width: '100%',
   },
 });
