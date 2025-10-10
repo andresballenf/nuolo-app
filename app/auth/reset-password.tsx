@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Alert,
   Keyboard,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -148,10 +149,11 @@ export default function ResetPasswordScreen() {
             </TouchableOpacity>
             
             <View style={styles.logoContainer}>
-              <View style={styles.logo}>
-                <Icon name="headset" size={32} color="#84cc16" />
-              </View>
-              <Text style={styles.appName}>Nuolo</Text>
+              <Image
+                source={require('../../assets/images/nuolo-logo.png')}
+                style={styles.logo}
+                resizeMode="contain"
+              />
             </View>
           </View>
           
@@ -250,18 +252,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#f0fdf4',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  appName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    width: 120,
+    height: 40,
   },
   form: {
     flex: 1,

@@ -1,3 +1,14 @@
+/**
+ * ⚠️ LEGACY CODE - DO NOT USE
+ *
+ * This PurchaseContext is deprecated and not in use.
+ * Use MonetizationContext instead for all in-app purchase functionality.
+ *
+ * This file is kept for reference only and will be removed in a future update.
+ *
+ * Active implementation: contexts/MonetizationContext.tsx
+ */
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
 import { storage } from '../lib/utils';

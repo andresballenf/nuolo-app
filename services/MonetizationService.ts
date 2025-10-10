@@ -106,48 +106,73 @@ export class MonetizationService {
   }
 
   async initialize(): Promise<void> {
-    if (this.initialized) return;
+    if (this.initialized) {
+      console.log('[IAP] Already initialized, skipping');
+      return;
+    }
 
+    console.log('[IAP] Starting initialization...');
     try {
       // Check if already connected before attempting to connect
       if (!this.isConnected) {
+        console.log('[IAP] Attempting to connect to store...');
         try {
           // Initialize platform IAP
           const connectResponse = await InAppPurchases.connectAsync();
 
           // Handle undefined response
           if (!connectResponse) {
-            console.warn('No response from connectAsync, assuming not connected');
+            console.error('[IAP] ❌ No response from connectAsync - IAP plugin may not be configured');
+            console.error('[IAP] Make sure expo-in-app-purchases plugin is in app.json');
+            console.error('[IAP] Run: eas build --profile preview --platform ios');
             this.isConnected = false;
           } else {
             const { responseCode } = connectResponse;
             this.isConnected = responseCode === InAppPurchases.IAPResponseCode.OK;
+            console.log(`[IAP] Connect response code: ${responseCode} (${responseCode === InAppPurchases.IAPResponseCode.OK ? 'SUCCESS' : 'FAILED'})`);
           }
         } catch (connectError: any) {
           // If already connected, treat it as success
           if (connectError?.message?.includes('Already connected')) {
             this.isConnected = true;
-            console.log('IAP service was already connected');
+            console.log('[IAP] ✓ Service was already connected');
           } else {
+            console.error('[IAP] ❌ Connection error:', connectError);
+            console.error('[IAP] Error details:', {
+              message: connectError?.message,
+              code: connectError?.code,
+              stack: connectError?.stack?.substring(0, 200)
+            });
             throw connectError;
           }
         }
 
         if (!this.isConnected) {
-          throw new Error('Failed to connect to in-app purchase service');
+          const errorMsg = 'Failed to connect to in-app purchase service. Ensure you are running on a physical device or TestFlight build, not Expo Go.';
+          console.error('[IAP] ❌', errorMsg);
+          throw new Error(errorMsg);
         }
       }
 
+      console.log('[IAP] ✓ Connected to store');
+
       // Load available products
+      console.log('[IAP] Loading products...');
       await this.loadProducts();
-      
+
       // Set up purchase listener
       this.setupPurchaseListener();
-      
+
       this.initialized = true;
-      console.log('MonetizationService initialized successfully');
+      console.log('[IAP] ✅ Initialization complete');
     } catch (error) {
-      console.error('Failed to initialize MonetizationService:', error);
+      console.error('[IAP] ❌ Failed to initialize:', error);
+      console.error('[IAP] Common causes:');
+      console.error('[IAP] 1. Running in Expo Go (not supported)');
+      console.error('[IAP] 2. Missing expo-in-app-purchases plugin in app.json');
+      console.error('[IAP] 3. Not built with EAS (need: eas build)');
+      console.error('[IAP] 4. iOS: Not signed in with sandbox account');
+      console.error('[IAP] 5. Android: Not in internal test track');
       throw error;
     }
   }
@@ -156,14 +181,16 @@ export class MonetizationService {
     try {
       // Get base product IDs
       const productIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
-      
+      console.log('[IAP] Base product IDs:', productIds);
+
       // Add dynamic pack product IDs from database (legacy packs)
       const { data: packs } = await supabase
         .from('attraction_packs')
         .select('id')
         .eq('is_active', true);
-      
+
       if (packs) {
+        console.log(`[IAP] Found ${packs.length} attraction packs in database`);
         productIds.push(...packs.map(pack => pack.id));
       }
 
@@ -172,23 +199,27 @@ export class MonetizationService {
         .from('attraction_packages')
         .select('apple_product_id, google_product_id')
         .eq('is_active', true);
-      
+
       if (packages) {
         const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
+        console.log(`[IAP] Found ${packages.length} attraction packages for ${Platform.OS}`);
         productIds.push(...packages.map(pkg => pkg[platformKey]));
       }
+
+      console.log(`[IAP] Requesting ${productIds.length} total products from store:`, productIds);
 
       // Fetch product details from platform store
       const response = await InAppPurchases.getProductsAsync(productIds);
 
       // Handle undefined response
       if (!response) {
-        console.warn('No response from getProductsAsync');
+        console.error('[IAP] ❌ No response from getProductsAsync - store connection may have failed');
         this.products = [];
         return;
       }
 
       const { responseCode, results } = response;
+      console.log(`[IAP] getProductsAsync response code: ${responseCode}`);
 
       if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
         this.products = results.map(product => ({
@@ -200,8 +231,23 @@ export class MonetizationService {
           description: product.description,
           type: this.getProductType(product.productId),
         }));
-        
-        console.log(`Loaded ${this.products.length} products from store`);
+
+        console.log(`[IAP] ✅ Successfully loaded ${this.products.length} products:`);
+        this.products.forEach(p => {
+          console.log(`[IAP]   - ${p.productId}: ${p.localizedPrice} (${p.title})`);
+        });
+
+        // Check for missing products
+        const foundIds = this.products.map(p => p.productId);
+        const missingIds = productIds.filter(id => !foundIds.includes(id));
+        if (missingIds.length > 0) {
+          console.warn(`[IAP] ⚠️ ${missingIds.length} products not found in store:`);
+          missingIds.forEach(id => console.warn(`[IAP]   - ${id}`));
+          console.warn('[IAP] Possible causes:');
+          console.warn('[IAP] 1. Product IDs don\'t match App Store Connect/Play Console exactly');
+          console.warn('[IAP] 2. Products not approved or in "Ready to Submit" status');
+          console.warn('[IAP] 3. Running in wrong region/store');
+        }
       } else {
         console.warn('Failed to load products from store');
       }

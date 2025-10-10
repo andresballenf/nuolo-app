@@ -290,7 +290,9 @@ export default function SignUpScreen() {
                 styles.inputWrapper,
                 touched.password && errors.password && styles.inputError
               ]}>
-                <Icon name="lock-closed" size={20} color="#9ca3af" />
+                <View style={styles.iconContainer}>
+                  <Icon name="lock-closed" size={20} color="#9ca3af" />
+                </View>
                 <TextInput
                   style={styles.input}
                   placeholder="Create a password"
@@ -330,7 +332,9 @@ export default function SignUpScreen() {
                 styles.inputWrapper,
                 touched.confirmPassword && errors.confirmPassword && styles.inputError
               ]}>
-                <Icon name="lock-closed" size={20} color="#9ca3af" />
+                <View style={styles.iconContainer}>
+                  <Icon name="lock-closed" size={20} color="#9ca3af" />
+                </View>
                 <TextInput
                   style={styles.input}
                   placeholder="Confirm your password"
@@ -517,6 +521,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#ef4444',
+  },
+  iconContainer: {
+    width: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,

@@ -37,6 +37,11 @@
             ]
           }
         ]
+      },
+      "entitlements": {
+        "com.apple.developer.in-app-payments": [
+          "merchant.com.nuolo.app"
+        ]
       }
     },
     "android": {
