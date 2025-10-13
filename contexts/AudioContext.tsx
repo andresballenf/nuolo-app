@@ -6,6 +6,7 @@ import { AudioService } from '../services/AudioService';
 import { AudioChunkManager, ChunkPlaybackState } from '../services/AudioChunkManager';
 import { AudioStreamHandler } from '../services/AudioStreamHandler';
 import { AudioGenerationService, GenerationProgress } from '../services/AudioGenerationService';
+import type { PointOfInterest } from '../services/GooglePlacesService';
 
 export interface AudioTrack {
   id: string;
@@ -102,7 +103,15 @@ export interface AudioActions {
   clearGenerationState: () => void;
   setGenerationError: (error: string) => void;
   generateAndPlay: (attraction: any) => Promise<void>;
-  
+  generateAudioGuide: (
+    attraction: PointOfInterest,
+    options?: {
+      language?: string;
+      audioLength?: 'short' | 'medium' | 'deep-dive';
+      voiceStyle?: 'casual' | 'formal' | 'energetic' | 'calm';
+    }
+  ) => Promise<boolean>;
+
   // Chunk-based audio
   streamGenerateAndPlay: (attraction: any, text: string, preferences: any) => Promise<void>;
   generateChunkedAudio: (attraction: any, text: string, preferences: any) => Promise<void>;
@@ -660,6 +669,32 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     console.log('Generate and play for attraction:', attraction.name);
   }, []);
 
+  const generateAudioGuide = useCallback(async (
+    attraction: PointOfInterest,
+    options?: {
+      language?: string;
+      audioLength?: 'short' | 'medium' | 'deep-dive';
+      voiceStyle?: 'casual' | 'formal' | 'energetic' | 'calm';
+    }
+  ): Promise<boolean> => {
+    console.log('generateAudioGuide called with options:', options);
+
+    try {
+      await generateAndPlay(attraction);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate audio guide';
+      console.error('Failed to generate audio guide:', error);
+      setState(prev => ({
+        ...prev,
+        isGeneratingAudio: false,
+        generationError: message,
+      }));
+      Alert.alert('Audio Error', message);
+      return false;
+    }
+  }, [generateAndPlay]);
+
   // New chunk-based streaming audio generation
   const streamGenerateAndPlay = useCallback(async (
     attraction: any,
@@ -722,11 +757,15 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       let firstChunkReceived = false;
       
       // Start streaming
-      const { supabase } = await import('../lib/supabase');
       const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-      
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL is not configured');
+      }
+
       await streamHandlerRef.current.streamAudio(
-        `${supabase.supabaseUrl}/functions/v1/attraction-info`,
+        `${supabaseUrl}/functions/v1/attraction-info`,
         {
           attractionName: attraction.name,
           attractionAddress: attraction.address || '',
@@ -1010,6 +1049,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     clearGenerationState,
     setGenerationError,
     generateAndPlay,
+    generateAudioGuide,
     streamGenerateAndPlay,
     generateChunkedAudio,
     cancelStreaming,

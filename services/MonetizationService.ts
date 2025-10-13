@@ -3,6 +3,20 @@ import * as InAppPurchases from 'expo-in-app-purchases';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown error';
+  }
+};
+
 export interface Product {
   productId: string;
   price: string;
@@ -117,33 +131,25 @@ export class MonetizationService {
       if (!this.isConnected) {
         console.log('[IAP] Attempting to connect to store...');
         try {
-          // Initialize platform IAP
-          const connectResponse = await InAppPurchases.connectAsync();
-
-          // Handle undefined response
-          if (!connectResponse) {
-            console.error('[IAP] ❌ No response from connectAsync - IAP plugin may not be configured');
-            console.error('[IAP] Make sure expo-in-app-purchases plugin is in app.json');
-            console.error('[IAP] Run: eas build --profile preview --platform ios');
-            this.isConnected = false;
-          } else {
-            const { responseCode } = connectResponse;
-            this.isConnected = responseCode === InAppPurchases.IAPResponseCode.OK;
-            console.log(`[IAP] Connect response code: ${responseCode} (${responseCode === InAppPurchases.IAPResponseCode.OK ? 'SUCCESS' : 'FAILED'})`);
-          }
-        } catch (connectError: any) {
-          // If already connected, treat it as success
-          if (connectError?.message?.includes('Already connected')) {
+          await InAppPurchases.connectAsync();
+          this.isConnected = true;
+          console.log('[IAP] ✓ Service connected to store');
+        } catch (connectError: unknown) {
+          const connectErrorMessage = connectError instanceof Error ? connectError.message : String(connectError ?? '');
+          if (connectErrorMessage.includes('Already connected')) {
             this.isConnected = true;
             console.log('[IAP] ✓ Service was already connected');
           } else {
             console.error('[IAP] ❌ Connection error:', connectError);
-            console.error('[IAP] Error details:', {
-              message: connectError?.message,
-              code: connectError?.code,
-              stack: connectError?.stack?.substring(0, 200)
-            });
-            throw connectError;
+            if (connectError instanceof Error) {
+              console.error('[IAP] Error details:', {
+                message: connectError.message,
+                code: (connectError as { code?: string }).code,
+                stack: connectError.stack?.substring(0, 200)
+              });
+              throw connectError;
+            }
+            throw new Error('Failed to connect to in-app purchase service');
           }
         }
 
@@ -165,7 +171,7 @@ export class MonetizationService {
 
       this.initialized = true;
       console.log('[IAP] ✅ Initialization complete');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[IAP] ❌ Failed to initialize:', error);
       console.error('[IAP] Common causes:');
       console.error('[IAP] 1. Running in Expo Go (not supported)');
@@ -173,7 +179,7 @@ export class MonetizationService {
       console.error('[IAP] 3. Not built with EAS (need: eas build)');
       console.error('[IAP] 4. iOS: Not signed in with sandbox account');
       console.error('[IAP] 5. Android: Not in internal test track');
-      throw error;
+      throw (error instanceof Error ? error : new Error(getErrorMessage(error)));
     }
   }
 
@@ -225,8 +231,8 @@ export class MonetizationService {
         this.products = results.map(product => ({
           productId: product.productId,
           price: product.price,
-          currency: product.currency || 'USD',
-          localizedPrice: product.localizedPrice,
+          currency: product.priceCurrencyCode || 'USD',
+          localizedPrice: product.price,
           title: product.title,
           description: product.description,
           type: this.getProductType(product.productId),
@@ -251,7 +257,7 @@ export class MonetizationService {
       } else {
         console.warn('Failed to load products from store');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load products:', error);
     }
   }
@@ -308,7 +314,7 @@ export class MonetizationService {
       await this.storeReceiptLocally(purchase);
 
       console.log('Purchase processed successfully:', productId);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to process purchase:', error);
       // Still acknowledge to prevent repeated processing
       await InAppPurchases.finishTransactionAsync(purchase, false);
@@ -444,7 +450,7 @@ export class MonetizationService {
         storedAt: new Date().toISOString(),
       });
       await AsyncStorage.setItem('purchase_receipts', JSON.stringify(parsedReceipts));
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to store receipt locally:', error);
     }
   }
@@ -491,16 +497,9 @@ export class MonetizationService {
       if (!this.initialized) await this.initialize();
 
       const productId = this.getProductIdForSubscriptionType(subscriptionType);
-      const response = await InAppPurchases.purchaseItemAsync(productId);
-
-      if (!response) {
-        console.error('No response from purchaseItemAsync');
-        return false;
-      }
-
-      const { responseCode } = response;
-      return responseCode === InAppPurchases.IAPResponseCode.OK;
-    } catch (error) {
+      await InAppPurchases.purchaseItemAsync(productId);
+      return true;
+    } catch (error: unknown) {
       console.error('Subscription purchase failed:', error);
       return false;
     }
@@ -511,16 +510,9 @@ export class MonetizationService {
       if (!this.initialized) await this.initialize();
 
       const productId = `attraction_${attractionId}`;
-      const response = await InAppPurchases.purchaseItemAsync(productId);
-
-      if (!response) {
-        console.error('No response from purchaseItemAsync');
-        return false;
-      }
-
-      const { responseCode } = response;
-      return responseCode === InAppPurchases.IAPResponseCode.OK;
-    } catch (error) {
+      await InAppPurchases.purchaseItemAsync(productId);
+      return true;
+    } catch (error: unknown) {
       console.error('Attraction purchase failed:', error);
       return false;
     }
@@ -530,16 +522,9 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      const response = await InAppPurchases.purchaseItemAsync(packId);
-
-      if (!response) {
-        console.error('No response from purchaseItemAsync');
-        return false;
-      }
-
-      const { responseCode } = response;
-      return responseCode === InAppPurchases.IAPResponseCode.OK;
-    } catch (error) {
+      await InAppPurchases.purchaseItemAsync(packId);
+      return true;
+    } catch (error: unknown) {
       console.error('Pack purchase failed:', error);
       return false;
     }
@@ -565,7 +550,7 @@ export class MonetizationService {
         }
         console.log(`Restored ${results.length} purchases`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Restore purchases failed:', error);
       throw error;
     }
@@ -609,7 +594,7 @@ export class MonetizationService {
         inTrial: false, // Trial not tracked in current schema
         trialEndsAt: null,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get subscription status:', error);
       return {
         isActive: false,
@@ -643,7 +628,7 @@ export class MonetizationService {
         if (packageEntitlements?.[0]) {
           entitlement = packageEntitlements[0];
         }
-      } catch (rpcError) {
+      } catch (rpcError: unknown) {
         // Fallback to direct query if RPC fails
         console.log('RPC failed, falling back to direct query');
         const { data: userUsage } = await supabase
@@ -701,7 +686,7 @@ export class MonetizationService {
         ownedPacks: Array.from(new Set(ownedPacks)),
         ownedPackages: ownedPackages || [],
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get user entitlements:', error);
       return {
         hasUnlimitedAccess: false,
@@ -804,10 +789,10 @@ export class MonetizationService {
           p_attraction_id: attractionId,
           p_user_id: userId
         });
-      } catch (rpcError: any) {
-        // Ignore RPC errors silently
+      } catch (rpcError: unknown) {
+        console.warn('track_attraction_usage RPC failed:', rpcError);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to record attraction usage:', error);
     }
   }
@@ -862,7 +847,7 @@ export class MonetizationService {
           console.log(`Created new usage record with 0/${userLimit} attractions for user ${userId}`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to reset attraction usage:', error);
     }
   }
@@ -891,7 +876,7 @@ export class MonetizationService {
       }
 
       return legacyData || false;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to check attraction access:', error);
       return false;
     }
@@ -921,7 +906,7 @@ export class MonetizationService {
       this.initialized = false;
       this.products = [];
       console.log('MonetizationService cleaned up successfully');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error during MonetizationService cleanup:', error);
     }
   }
@@ -953,16 +938,9 @@ export class MonetizationService {
         ? packageData.apple_product_id
         : packageData.google_product_id;
 
-      const response = await InAppPurchases.purchaseItemAsync(productId);
-
-      if (!response) {
-        console.error('No response from purchaseItemAsync');
-        return false;
-      }
-
-      const { responseCode } = response;
-      return responseCode === InAppPurchases.IAPResponseCode.OK;
-    } catch (error) {
+      await InAppPurchases.purchaseItemAsync(productId);
+      return true;
+    } catch (error: unknown) {
       console.error('Package purchase failed:', error);
       return false;
     }

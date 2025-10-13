@@ -72,7 +72,8 @@ export class AIProviderFactory {
         const module = await import('../providers/gemini/GeminiProvider.ts');
         GeminiProvider = module.GeminiProvider;
       } catch (error) {
-        throw new Error(`Failed to load Gemini provider: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to load Gemini provider: ${message}`);
       }
     }
 

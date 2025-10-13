@@ -2,6 +2,7 @@
 // Wraps existing openaiService.ts logic into IAIProvider interface
 
 import { generatePrompt } from '../../promptGenerator.ts';
+import type { AttractionPreferences, AttractionTheme, SupportedLanguage } from '../../promptGenerator.ts';
 import {
   IAIProvider,
   AIGenerationOptions,
@@ -23,14 +24,15 @@ export class OpenAIProvider implements IAIProvider {
   }
 
   async generateContent(options: AIGenerationOptions): Promise<AIGenerationResult> {
+    const normalizedPreferences = this.sanitizePreferences(options.preferences);
     const prompt = generatePrompt(
       options.attractionName,
       options.attractionAddress || '',
       options.userLocation,
-      options.preferences
+      normalizedPreferences
     );
 
-    const language = options.preferences?.language || 'en';
+    const language = normalizedPreferences.language || 'en';
     console.log(`[OpenAI] Generating content in language: ${language}`);
 
     const fallbackModels = [
@@ -206,6 +208,41 @@ Immersion rules
     }
 
     return audioResponse.arrayBuffer();
+  }
+
+  private sanitizePreferences(preferences?: AttractionPreferences | {
+    theme?: string;
+    audioLength?: 'short' | 'medium' | 'deep-dive';
+    language?: string;
+    voiceStyle?: string;
+  }): AttractionPreferences {
+    const allowedThemes: AttractionTheme[] = ['history', 'nature', 'architecture', 'culture', 'general'];
+    const allowedAudioLengths = ['short', 'medium', 'deep-dive'] as const;
+    const allowedLanguages: SupportedLanguage[] = ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'];
+
+    const sanitized: AttractionPreferences = {};
+    const themeCandidate = typeof preferences?.theme === 'string' ? preferences.theme : undefined;
+    const audioLengthCandidate = preferences?.audioLength;
+    const voiceStyleCandidate = typeof preferences?.voiceStyle === 'string' ? preferences.voiceStyle : undefined;
+    const languageCandidate = typeof preferences?.language === 'string' ? preferences.language : undefined;
+
+    if (themeCandidate && allowedThemes.includes(themeCandidate as AttractionTheme)) {
+      sanitized.theme = themeCandidate as AttractionTheme;
+    }
+
+    if (audioLengthCandidate && allowedAudioLengths.includes(audioLengthCandidate)) {
+      sanitized.audioLength = audioLengthCandidate;
+    }
+
+    if (voiceStyleCandidate) {
+      sanitized.voiceStyle = voiceStyleCandidate;
+    }
+
+    if (languageCandidate && allowedLanguages.includes(languageCandidate as SupportedLanguage)) {
+      sanitized.language = languageCandidate as SupportedLanguage;
+    }
+
+    return sanitized;
   }
 
   private mapVoiceStyle(voiceStyle: string): string {

@@ -13,6 +13,28 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 // OAuth features are enabled in development build
 const isExpoGo = false;
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown error';
+  }
+};
+
+const getErrorCode = (error: unknown): string | undefined => {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+};
+
 interface User {
   id: string;
   email: string;
@@ -580,16 +602,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const { data, error } = await supabase.auth.signInWithIdToken({
             provider: 'apple',
             token: identityToken,
-            options: {
-              data: {
-                // Include user metadata if available (only on first sign-in)
-                full_name: fullName ? `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : undefined,
-                email: email,
-              }
-            }
           });
 
           if (!error && data.user) {
+            const fullNameString = fullName ? `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : undefined;
+
+            if (fullNameString || email) {
+              try {
+                await supabase.auth.updateUser({
+                  data: {
+                    full_name: fullNameString,
+                    email: email || undefined,
+                    apple_user_id: appleUserId,
+                  },
+                });
+              } catch (metadataError) {
+                console.warn('Failed to update user metadata after Apple sign-in:', metadataError);
+              }
+            }
+
             // Check if profile exists, create if not
             const { data: profile } = await supabase
               .from('profiles')
@@ -599,7 +630,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (!profile) {
               // Create profile for Apple user
-              const fullNameString = fullName ? `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : null;
               await supabase.from('profiles').insert({
                 id: data.user.id,
                 email: email || data.user.email,
@@ -610,9 +640,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           return { error };
-        } catch (appleError: any) {
+        } catch (appleError: unknown) {
           // Handle Apple-specific errors
-          if (appleError.code === 'ERR_CANCELED') {
+          const errorCode = getErrorCode(appleError);
+          if (errorCode === 'ERR_CANCELED') {
             return {
               error: {
                 message: 'Sign in with Apple was cancelled',
@@ -620,7 +651,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } as AuthError
             };
           }
-          throw appleError;
+          const fallbackError = appleError instanceof Error ? appleError : new Error(getErrorMessage(appleError));
+          throw fallbackError;
         }
       }
 
@@ -641,7 +673,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The OAuth flow will handle the redirect back to the app
       // Supabase will automatically manage the session
       return { error: null };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('OAuth error:', error);
       return {
         error: error as AuthError,
@@ -665,7 +697,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       
       return { error };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         error: error as AuthError,
       };
