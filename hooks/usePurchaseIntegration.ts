@@ -4,6 +4,15 @@ import { usePurchase } from '../contexts/PurchaseContext';
 import { useAudio } from '../contexts/AudioContext';
 import type { PointOfInterest } from '../services/GooglePlacesService';
 
+type AttractionAction = 'play' | 'generate' | 'upgrade';
+
+interface AttractionCTA {
+  text: string;
+  action: AttractionAction;
+  variant: 'primary' | 'outline';
+  disabled: boolean;
+}
+
 /**
  * Hook that integrates purchase entitlements with the audio guide generation flow
  */
@@ -92,9 +101,9 @@ export const usePurchaseIntegration = () => {
   /**
    * Gets the appropriate call-to-action for an attraction
    */
-  const getAttractionCTA = useCallback((attractionId: string) => {
+  const getAttractionCTA = useCallback((attractionId: string): AttractionCTA => {
     const access = checkAttractionAccess(attractionId);
-    
+
     if (access.hasAccess) {
       return {
         text: 'Play Audio Guide',
@@ -103,7 +112,7 @@ export const usePurchaseIntegration = () => {
         disabled: false,
       };
     }
-    
+
     if (access.canGenerate) {
       return {
         text: 'Generate Audio Guide',
@@ -112,7 +121,7 @@ export const usePurchaseIntegration = () => {
         disabled: isGeneratingAudio,
       };
     }
-    
+
     return {
       text: 'Upgrade to Access',
       action: 'upgrade',

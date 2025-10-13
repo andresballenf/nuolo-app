@@ -4,6 +4,7 @@ import { generateAttractionInfo } from './openaiService.ts';
 import { processAudioGeneration } from './audioProcessor.ts';
 import { applyRateLimit, recordRequestCompletion, getUserIdFromRequest } from './rateLimiter.ts';
 import { AIProviderFactory } from './factory/AIProviderFactory.ts';
+import type { AudioGenerationOptions as AudioGenerationOptionsType } from './audioStreamGenerator.ts';
 import { 
   withRequestTimeout, 
   timeoutOpenAITextGeneration, 
@@ -29,13 +30,11 @@ import {
 // Import new chunking services with error handling
 let AudioStreamGenerator: any;
 let TTSChunkService: any;
-let AudioGenerationOptions: any;
 
 try {
   const audioStreamModule = await import('./audioStreamGenerator.ts');
   AudioStreamGenerator = audioStreamModule.AudioStreamGenerator;
-  AudioGenerationOptions = audioStreamModule.AudioGenerationOptions;
-  
+
   const ttsChunkModule = await import('./ttsChunkService.ts');
   TTSChunkService = ttsChunkModule.TTSChunkService;
 } catch (error) {
@@ -149,7 +148,8 @@ serve(async (req) => {
   }
 
   let requestSuccessful = false;
-  const userId = getUserIdFromRequest(req);
+  const rawUserId = getUserIdFromRequest(req);
+  const userId: string | undefined = rawUserId ?? undefined;
   const requestId = generateRequestId();
   const requestTimer = startTimer('total_request');
   
@@ -275,7 +275,11 @@ serve(async (req) => {
 
       try {
         // Check if provider supports simultaneous generation and audio is requested
-        if (generateAudio && provider.supportsSimultaneousGeneration && provider.generateSimultaneous) {
+        if (
+          generateAudio &&
+          provider.supportsSimultaneousGeneration() &&
+          typeof provider.generateSimultaneous === 'function'
+        ) {
           logInfo('ai', 'Using simultaneous content + audio generation');
 
           const simultaneousResult = await timeoutOpenAITextGeneration(async () => {
@@ -354,7 +358,7 @@ serve(async (req) => {
       logInfo('audio', 'Starting chunked audio generation with streaming');
       
       // Prepare audio generation options
-      const audioOptions: AudioGenerationOptions = {
+      const audioOptions: AudioGenerationOptionsType = {
         text: generatedInfo,
         voice: preferences.voiceStyle || 'casual',
         speed: 1.0,
@@ -484,9 +488,9 @@ serve(async (req) => {
           });
         } catch (audioError) {
           const secureError = createSecureError(
-            audioError as Error, 
-            'openai_audio_generation', 
-            userId
+            audioError as Error,
+            'openai_audio_generation',
+            userId ?? undefined
           );
           console.error('Audio generation error:', secureError);
           return new Response(JSON.stringify({
@@ -547,7 +551,7 @@ serve(async (req) => {
         const secureError = createSecureError(
           audioError as Error,
           'audio_generation',
-          userId
+          userId ?? undefined
         );
         console.error('Audio generation error:', secureError);
         return new Response(JSON.stringify({
@@ -604,9 +608,9 @@ serve(async (req) => {
   } catch (error) {
     const totalDuration = endTimer(requestTimer, 'total_request', false);
     const secureError = createSecureError(
-      error as Error, 
-      'server_error', 
-      userId
+      error as Error,
+      'server_error',
+      userId ?? undefined
     );
     
     logError('server', 'Request failed with unhandled error', {

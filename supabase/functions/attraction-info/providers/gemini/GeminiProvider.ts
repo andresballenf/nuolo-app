@@ -2,6 +2,7 @@
 // Uses Gemini 2.5 Flash Native Audio Preview for simultaneous text + audio generation
 
 import { generatePrompt } from '../../promptGenerator.ts';
+import type { AttractionPreferences, AttractionTheme, SupportedLanguage } from '../../promptGenerator.ts';
 import {
   IAIProvider,
   AIGenerationOptions,
@@ -15,6 +16,24 @@ import { GeminiLiveClient } from './GeminiLiveClient.ts';
 
 export class GeminiProvider implements IAIProvider {
   constructor(private apiKey: string) {}
+
+  private static readonly allowedThemes: AttractionTheme[] = ['history', 'nature', 'architecture', 'culture', 'general'];
+  private static readonly allowedAudioLengths = ['short', 'medium', 'deep-dive'] as const;
+  private static readonly allowedLanguages: SupportedLanguage[] = ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'];
+
+  private static getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Unknown error';
+    }
+  }
 
   getProviderName(): string {
     return 'Gemini';
@@ -30,12 +49,13 @@ export class GeminiProvider implements IAIProvider {
   async generateContent(options: AIGenerationOptions): Promise<AIGenerationResult> {
     console.log('[Gemini] Generating text-only content');
 
-    const systemPrompt = this.buildSystemPrompt(options.preferences);
+    const normalizedPreferences = this.sanitizePreferences(options.preferences);
+    const systemPrompt = this.buildSystemPrompt(normalizedPreferences);
     const userPrompt = generatePrompt(
       options.attractionName,
       options.attractionAddress || '',
       options.userLocation,
-      options.preferences
+      normalizedPreferences
     );
 
     try {
@@ -46,9 +66,9 @@ export class GeminiProvider implements IAIProvider {
         content,
         modelUsed: 'gemini-2.5-flash-preview',
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[Gemini] Text generation failed:', error);
-      throw new Error(`Gemini text generation failed: ${error.message}`);
+      throw new Error(`Gemini text generation failed: ${GeminiProvider.getErrorMessage(error)}`);
     }
   }
 
@@ -89,9 +109,9 @@ export class GeminiProvider implements IAIProvider {
         voiceUsed: 'Puck',
         modelUsed: 'gemini-2.5-flash-preview-native-audio',
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[Gemini] Audio generation failed:', error);
-      throw new Error(`Gemini audio generation failed: ${error.message}`);
+      throw new Error(`Gemini audio generation failed: ${GeminiProvider.getErrorMessage(error)}`);
     }
   }
 
@@ -103,12 +123,13 @@ export class GeminiProvider implements IAIProvider {
   ): Promise<SimultaneousGenerationResult> {
     console.log('[Gemini] Generating content and audio simultaneously');
 
-    const systemPrompt = this.buildSystemPrompt(options.preferences);
+    const normalizedPreferences = this.sanitizePreferences(options.preferences);
+    const systemPrompt = this.buildSystemPrompt(normalizedPreferences);
     const userPrompt = generatePrompt(
       options.attractionName,
       options.attractionAddress || '',
       options.userLocation,
-      options.preferences
+      normalizedPreferences
     );
 
     try {
@@ -145,9 +166,9 @@ export class GeminiProvider implements IAIProvider {
         modelUsed: 'gemini-2.5-flash-preview-native-audio',
         voiceUsed: 'Puck',
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[Gemini] Simultaneous generation failed:', error);
-      throw new Error(`Gemini simultaneous generation failed: ${error.message}`);
+      throw new Error(`Gemini simultaneous generation failed: ${GeminiProvider.getErrorMessage(error)}`);
     }
   }
 
@@ -156,7 +177,8 @@ export class GeminiProvider implements IAIProvider {
   /**
    * Build system prompt for Gemini (reuses tour guide prompt from OpenAI)
    */
-  private buildSystemPrompt(preferences: any): string {
+  private buildSystemPrompt(preferences?: AttractionPreferences): string {
+    const sanitized = this.sanitizePreferences(preferences);
     const languageNames: Record<string, string> = {
       en: 'English',
       es: 'Spanish',
@@ -170,7 +192,7 @@ export class GeminiProvider implements IAIProvider {
       zh: 'Chinese (Simplified)',
     };
 
-    const language = preferences?.language || 'en';
+    const language = sanitized.language || 'en';
     const targetLanguage = languageNames[language] || 'English';
     const languageInstruction =
       language && language !== 'en'
@@ -261,5 +283,37 @@ Immersion rules
     }
 
     return candidate.content.parts[0].text;
+  }
+
+  private sanitizePreferences(preferences?: AttractionPreferences | {
+    theme?: string;
+    audioLength?: 'short' | 'medium' | 'deep-dive';
+    language?: string;
+    voiceStyle?: string;
+  }): AttractionPreferences {
+    const sanitized: AttractionPreferences = {};
+
+    const themeCandidate = typeof preferences?.theme === 'string' ? preferences.theme : undefined;
+    const audioLengthCandidate = preferences?.audioLength;
+    const voiceStyleCandidate = typeof preferences?.voiceStyle === 'string' ? preferences.voiceStyle : undefined;
+    const languageCandidate = typeof preferences?.language === 'string' ? preferences.language : undefined;
+
+    if (themeCandidate && GeminiProvider.allowedThemes.includes(themeCandidate as AttractionTheme)) {
+      sanitized.theme = themeCandidate as AttractionTheme;
+    }
+
+    if (audioLengthCandidate && GeminiProvider.allowedAudioLengths.includes(audioLengthCandidate)) {
+      sanitized.audioLength = audioLengthCandidate;
+    }
+
+    if (voiceStyleCandidate) {
+      sanitized.voiceStyle = voiceStyleCandidate;
+    }
+
+    if (languageCandidate && GeminiProvider.allowedLanguages.includes(languageCandidate as SupportedLanguage)) {
+      sanitized.language = languageCandidate as SupportedLanguage;
+    }
+
+    return sanitized;
   }
 }

@@ -235,7 +235,7 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
           {(!subscription.isActive || subscription.type === 'free') && (
             <Button
               title="Upgrade to Premium"
-              onPress={() => setShowPaywall(true, { trigger: 'profile' })}
+              onPress={() => setShowPaywall(true, { trigger: 'manual' })}
               variant="primary"
               size="md"
               style={styles.upgradeButton}
