@@ -45,8 +45,8 @@ This guide will help you properly test in-app purchases in the Nuolo app. IAP te
 
 #### Step 1: Build for TestFlight
 ```bash
-# Make sure app.json includes "expo-in-app-purchases" plugin
-# Already added in this project
+# Ensure app.config.js includes both "expo-iap" and "expo-build-properties" plugins
+# Install the build produced after enabling StoreKit capability
 
 # Build for iOS
 eas build --profile preview --platform ios
@@ -122,12 +122,11 @@ eas build --profile preview --platform android
 ```
 [IAP] Starting initialization...
 [IAP] Attempting to connect to store...
-[IAP] Connect response code: 0 (SUCCESS)
+[IAP] initConnection returned: CONNECTED
 [IAP] ✓ Connected to store
 [IAP] Loading products...
 [IAP] Base product IDs: ["nuolo_unlimited_monthly", "nuolo_basic_package", "nuolo_standard_package", "nuolo_premium_package"]
 [IAP] Requesting 4 total products from store: [...]
-[IAP] getProductsAsync response code: 0
 [IAP] ✅ Successfully loaded 4 products:
 [IAP]   - nuolo_unlimited_monthly: $9.99 (Nuolo Unlimited Monthly)
 [IAP]   - nuolo_basic_package: $4.99 (Basic Package)
@@ -138,8 +137,8 @@ eas build --profile preview --platform android
 
 ### Missing Plugin Error:
 ```
-[IAP] ❌ No response from connectAsync - IAP plugin may not be configured
-[IAP] Make sure expo-in-app-purchases plugin is in app.json
+[IAP] ❌ Failed to initialize: Error: Failed to connect to in-app purchase service...
+[IAP] 2. Missing expo-iap plugin or build properties configuration
 [IAP] Run: eas build --profile preview --platform ios
 ```
 
@@ -159,12 +158,13 @@ eas build --profile preview --platform android
 
 ## Common Issues & Solutions
 
-### Issue: "No response from connectAsync"
-**Cause:** App not built with IAP plugin
+### Issue: "Failed to connect to in-app purchase service"
+**Cause:** Build missing StoreKit entitlement / expo-iap plugin / sandbox login
 **Solution:**
-1. Verify `expo-in-app-purchases` is in `app.json` plugins array
-2. Run `eas build --profile preview --platform ios`
-3. Install fresh build from TestFlight
+1. Verify `expo-iap` and `expo-build-properties` exist in `app.config.js`
+2. Regenerate the provisioning profile with `com.apple.developer.in-app-purchase`
+3. Run `eas build --profile preview --platform ios`
+4. Sign into the device with a sandbox tester before retrying
 
 ### Issue: "Products not found"
 **Cause:** Product IDs don't match or not approved
@@ -210,7 +210,7 @@ private static readonly PRODUCT_IDS = {
 ## Testing Checklist
 
 ### Before Building:
-- [ ] `expo-in-app-purchases` plugin in `app.json`
+- [ ] `expo-iap` and `expo-build-properties` plugins in `app.config.js`
 - [ ] Product IDs match App Store Connect exactly
 - [ ] Products approved in App Store Connect
 - [ ] Sandbox tester created

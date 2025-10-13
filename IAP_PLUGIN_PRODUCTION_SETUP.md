@@ -1,74 +1,69 @@
-# Expo In-App Purchases - Production Setup Guide
+# Expo IAP - Production Setup Guide
 
 ## Overview
-The `expo-in-app-purchases` package uses React Native's autolinking system and **does not require** a config plugin. The package just needs to be installed as a dependency.
+Nuolo now uses [`expo-iap`](https://hyochan.github.io/expo-iap/docs/intro), the community-maintained successor to `expo-in-app-purchases`. This module ships with its own config plugin, requires Kotlin 2.x on Android, and expects the StoreKit entitlement to be present in the iOS provisioning profile.
 
 ## Current Status
-- ✅ **Package Installed**: `expo-in-app-purchases@^14.5.0` in package.json
-- ✅ **MonetizationService**: Can import and use IAP functionality
-- ✅ **Plugin Configuration**: NOT needed - uses autolinking
-- ✅ **Development Server**: Running normally
-- ✅ **Production Builds**: Native modules linked automatically via autolinking
+- ✅ **Package Installed**: `expo-iap` (plus `expo-build-properties` for Kotlin override)
+- ✅ **MonetizationService**: Migrated to the new API (initConnection, purchaseUpdatedListener, etc.)
+- ✅ **Expo Plugins**: `expo-iap` and `expo-build-properties` declared in `app.config.js`
+- ⚠️ **Provisioning Profile**: Regenerate after enabling `com.apple.developer.in-app-purchase`
 
 ## How It Works
 
-### Autolinking
-React Native (and Expo) automatically links native modules during the build process. You only need:
-1. Package installed in `package.json` dependencies
-2. Native permissions configured in app.config.js (iOS entitlements, Android permissions)
-
-### No Plugin Required
-Unlike some Expo packages, `expo-in-app-purchases` does NOT have a config plugin. Do not add it to the `plugins` array in app.config.js - it will cause errors.
+### Config Plugin & Native Dependencies
+- `expo-iap` injects the Google Play Billing dependency and `com.android.vending.BILLING` permission automatically.
+- `expo-build-properties` pins Kotlin ≥ 2.1.20 so Android builds satisfy Billing v8 requirements.
+- On iOS, autolinking works once the StoreKit capability is enabled and the updated provisioning profile is used for EAS builds.
 
 ## Configuration
 
-### 1. Package Installation (Already Done)
+### 1. Install Dependencies
 ```bash
-npm install expo-in-app-purchases
+npm install expo-iap expo-build-properties
 ```
 
-### 2. iOS Configuration (Already Done)
-**app.config.js - iOS section:**
+### 2. Update `app.config.js`
 ```javascript
-ios: {
-  bundleIdentifier: "com.nuolo.app",
-  entitlements: {
-    "com.apple.developer.in-app-payments": [
-      "merchant.com.nuolo.app"
-    ]
-  },
-  infoPlist: {
-    // ... other permissions
-  }
-}
-```
-
-**App Store Connect Setup:**
-1. Create IAP products in App Store Connect
-2. Configure subscription groups
-3. Set up promotional offers (if needed)
-4. Submit products for review
-5. Configure payment processing and banking info
-
-### 3. Android Configuration (Already Done)
-**app.config.js - Android section:**
-```javascript
-android: {
-  package: "com.nuolo.app",
-  permissions: [
-    "com.android.vending.BILLING",
-    // ... other permissions
+plugins: [
+  'expo-router',
+  ['expo-location', { /* ... */ }],
+  ['expo-av', { /* ... */ }],
+  'expo-audio',
+  'expo-secure-store',
+  'expo-font',
+  'expo-web-browser',
+  'expo-iap',
+  [
+    'expo-build-properties',
+    {
+      android: {
+        kotlinVersion: '2.1.20'
+      }
+    }
   ]
+],
+
+ios: {
+  bundleIdentifier: 'com.nuolo.app',
+  entitlements: {
+    'com.apple.developer.in-app-payments': ['merchant.com.nuolo.app'],
+    'com.apple.developer.in-app-purchase': true
+  },
+  // ...
+},
+
+android: {
+  package: 'com.nuolo.app',
+  // Billing permission is injected by the plugin but keeping it explicit is fine.
+  permissions: ['com.android.vending.BILLING', /* ... */],
+  // ...
 }
 ```
 
-**Google Play Console Setup:**
-1. Enable Google Play Billing API
-2. Create subscription products
-3. Create in-app products
-4. Configure real-time developer notifications
-5. Set up licensing
-6. Configure payment profile
+### 3. App Store & Play Console
+- App Store Connect: enable In-App Purchase capability on `com.nuolo.app`, regenerate the distribution profile, and ensure all products are approved.
+- Google Play Console: products must be active in an internal track; no additional manifest edits are required beyond the plugin.
 
 ### 4. Testing Strategy
 
@@ -78,7 +73,7 @@ android: {
 nvm use 18
 npm run start
 
-# Note: IAP.connectAsync() will fail in Expo Go/simulator
+# Note: initConnection will fail in Expo Go/simulator
 # This is expected - use mock data for development
 ```
 
@@ -87,8 +82,8 @@ npm run start
 # Build for TestFlight
 eas build --profile production --platform ios
 
-# Native modules are automatically included
-# No plugin configuration needed
+# Native modules are packaged via expo-iap plugin
+# Ensure you install the build produced after enabling the StoreKit entitlement
 ```
 
 #### Testing IAP Functionality
@@ -142,9 +137,9 @@ eas submit --platform android
 - Verify app is signed with correct provisioning profile
 - Check that billing permissions are included
 
-#### "Package does not contain a valid config plugin"
-**Cause**: Attempting to add expo-in-app-purchases to plugins array
-**Solution**: Remove it from plugins array - it uses autolinking, not a config plugin
+#### "expo-iap plugin not configured"
+**Cause**: `expo-iap`/`expo-build-properties` missing from `app.config.js`
+**Solution**: Add both plugins, re-run `npm install`, and rebuild with EAS
 
 #### IAP Not Working on Device
 1. **iOS**:
@@ -222,7 +217,7 @@ Always validate receipts server-side:
 
 ## Support Resources
 
-- [Expo In-App Purchases Documentation](https://docs.expo.dev/versions/latest/sdk/in-app-purchases/)
+- [Expo IAP Documentation](https://hyochan.github.io/expo-iap/docs/intro)
 - [EAS Build Documentation](https://docs.expo.dev/build/introduction/)
 - [Apple In-App Purchase Programming Guide](https://developer.apple.com/in-app-purchase/)
 - [Google Play Billing Integration](https://developer.android.com/google/play/billing/integrate)
@@ -231,4 +226,4 @@ Always validate receipts server-side:
 
 ---
 
-**Note**: The monetization system implementation is complete and functional. No plugin configuration is needed - the native modules are automatically linked during the build process. IAP functionality will work in TestFlight/production builds once products are configured in the respective stores.
+**Note**: The monetization system now depends on the `expo-iap` config plugin, updated StoreKit entitlements, and Kotlin 2.x. Always rebuild with EAS after changing these settings to ensure the native binaries include the proper capabilities.

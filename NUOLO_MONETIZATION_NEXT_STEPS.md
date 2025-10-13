@@ -8,7 +8,7 @@ Your monetization system has been successfully implemented and integrated with t
 ### Step 1: Local Testing Setup
 ```bash
 # 1. Install dependencies (already done)
-npm install expo-in-app-purchases date-fns
+npm install expo-iap expo-build-properties date-fns
 
 # 2. Start development server
 npx expo start
@@ -141,7 +141,17 @@ Already completed - verify these settings exist:
 ```json
 {
   "expo": {
-    "plugins": ["expo-in-app-purchases"],
+    "plugins": [
+      "expo-iap",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "2.1.20"
+          }
+        }
+      ]
+    ],
     "ios": {
       "infoPlist": {
         "SKAdNetworkItems": [{"SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"}]

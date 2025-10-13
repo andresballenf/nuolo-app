@@ -15,28 +15,21 @@ import { storage } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
-// Safely import IAP module with fallback
-let InAppPurchases: any = null;
-try {
-  InAppPurchases = require('expo-in-app-purchases');
-} catch (error) {
-  console.log('In-App Purchases module not available - using mock implementation');
-  // Mock implementation for when module is not available
-  InAppPurchases = {
-    connectAsync: async () => Promise.resolve(),
-    disconnectAsync: async () => Promise.resolve(),
-    getProductsAsync: async () => ({ responseCode: 0, results: [] }),
-    purchaseItemAsync: async () => ({ responseCode: 1, results: [] }),
-    getPurchaseHistoryAsync: async () => ({ responseCode: 0, results: [] }),
-    finishTransactionAsync: async () => Promise.resolve(),
-    IAPResponseCode: {
-      OK: 0,
-      USER_CANCELED: 1,
-      ERROR: 2,
-      DEFERRED: 3
-    }
-  };
-}
+// Legacy shim to avoid bundling the deprecated expo-in-app-purchases module.
+const InAppPurchases: any = {
+  connectAsync: async () => Promise.resolve({ responseCode: 0 }),
+  disconnectAsync: async () => Promise.resolve(),
+  getProductsAsync: async () => ({ responseCode: 0, results: [] }),
+  purchaseItemAsync: async () => ({ responseCode: 1, results: [] }),
+  getPurchaseHistoryAsync: async () => ({ responseCode: 0, results: [] }),
+  finishTransactionAsync: async () => Promise.resolve(),
+  IAPResponseCode: {
+    OK: 0,
+    USER_CANCELED: 1,
+    ERROR: 2,
+    DEFERRED: 3,
+  },
+};
 
 export type EntitlementStatus = 'free' | 'premium' | 'unlimited';
 

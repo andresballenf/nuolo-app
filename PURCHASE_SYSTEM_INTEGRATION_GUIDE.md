@@ -38,7 +38,7 @@ QueryClientProvider
 ### 1. Install Dependencies
 
 ```bash
-npm install expo-in-app-purchases date-fns expo-linear-gradient react-native-reanimated
+npm install expo-iap expo-build-properties date-fns expo-linear-gradient react-native-reanimated
 ```
 
 ### 2. Configure App Store Products

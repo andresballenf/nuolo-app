@@ -98,7 +98,16 @@ module.exports = {
       "expo-audio",
       "expo-secure-store",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-iap",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            kotlinVersion: "2.1.20"
+          }
+        }
+      ]
     ],
     extra: {
       router: {},
