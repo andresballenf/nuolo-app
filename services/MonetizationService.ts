@@ -186,32 +186,61 @@ export class MonetizationService {
   private async loadProducts(): Promise<void> {
     try {
       // Get base product IDs
-      const productIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
-      console.log('[IAP] Base product IDs:', productIds);
+      const baseProductIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
+      const productIdSet = new Set<string>(baseProductIds);
+      console.log('[IAP] Base product IDs:', baseProductIds);
 
-      // Add dynamic pack product IDs from database (legacy packs)
-      const { data: packs } = await supabase
+      const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+      const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
+
+      // Load legacy attraction pack SKUs via iap_products mapping
+      const { data: legacyPacks, error: legacyPacksError } = await supabase
         .from('attraction_packs')
         .select('id')
-        .eq('is_active', true);
+        .eq('active', true);
 
-      if (packs) {
-        console.log(`[IAP] Found ${packs.length} attraction packs in database`);
-        productIds.push(...packs.map(pack => pack.id));
+      if (legacyPacksError) {
+        console.error('[IAP] Failed to load legacy attraction packs:', legacyPacksError);
+      } else if (legacyPacks && legacyPacks.length > 0) {
+        const legacyPackIds = legacyPacks.map(pack => pack.id);
+        const { data: legacyPackProducts, error: legacyPackProductsError } = await supabase
+          .from('iap_products')
+          .select('id, internal_id')
+          .eq('platform', platform)
+          .eq('active', true)
+          .in('internal_id', legacyPackIds);
+
+        if (legacyPackProductsError) {
+          console.error('[IAP] Failed to load legacy pack product IDs:', legacyPackProductsError);
+        } else if (legacyPackProducts) {
+          legacyPackProducts.forEach(product => {
+            if (product?.id) {
+              productIdSet.add(product.id);
+            }
+          });
+          console.log(`[IAP] Added ${legacyPackProducts.length} legacy pack SKUs from iap_products`);
+        }
       }
 
       // Add new attraction package product IDs
-      const { data: packages } = await supabase
+      const { data: packages, error: packagesError } = await supabase
         .from('attraction_packages')
         .select('apple_product_id, google_product_id')
         .eq('is_active', true);
 
-      if (packages) {
-        const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
+      if (packagesError) {
+        console.error('[IAP] Failed to load attraction packages:', packagesError);
+      } else if (packages) {
         console.log(`[IAP] Found ${packages.length} attraction packages for ${Platform.OS}`);
-        productIds.push(...packages.map(pkg => pkg[platformKey]));
+        packages.forEach(pkg => {
+          const productId = pkg?.[platformKey as 'apple_product_id' | 'google_product_id'];
+          if (productId) {
+            productIdSet.add(productId);
+          }
+        });
       }
 
+      const productIds = Array.from(productIdSet);
       console.log(`[IAP] Requesting ${productIds.length} total products from store:`, productIds);
 
       // Fetch product details from platform store
@@ -522,7 +551,28 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      await InAppPurchases.purchaseItemAsync(packId);
+      const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+
+      const { data: packProducts, error } = await supabase
+        .from('iap_products')
+        .select('id')
+        .eq('internal_id', packId)
+        .eq('platform', platform)
+        .eq('active', true)
+        .limit(1);
+
+      if (error) {
+        console.error('Failed to load product ID for attraction pack:', error);
+        return false;
+      }
+
+      const productId = packProducts?.[0]?.id;
+      if (!productId) {
+        console.error(`No active IAP product found for pack ${packId} on platform ${platform}`);
+        return false;
+      }
+
+      await InAppPurchases.purchaseItemAsync(productId);
       return true;
     } catch (error: unknown) {
       console.error('Pack purchase failed:', error);
