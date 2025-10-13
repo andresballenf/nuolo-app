@@ -16,6 +16,20 @@ import {
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown error';
+  }
+};
+
 export interface Product {
   productId: string;
   price: string;
@@ -163,7 +177,7 @@ export class MonetizationService {
 
       this.initialized = true;
       console.log('[IAP] ✅ Initialization complete');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[IAP] ❌ Failed to initialize:', error);
       console.error('[IAP] Common causes:');
       console.error('[IAP] 1. Running in Expo Go (not supported)');
@@ -171,39 +185,68 @@ export class MonetizationService {
       console.error('[IAP] 3. App not rebuilt with updated provisioning profile (EAS build required)');
       console.error('[IAP] 4. iOS: Not signed in with sandbox account');
       console.error('[IAP] 5. Android: Not in internal test track');
-      throw error;
+      throw (error instanceof Error ? error : new Error(getErrorMessage(error)));
     }
   }
 
   private async loadProducts(): Promise<void> {
     try {
       // Get base product IDs
-      const productIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
-      console.log('[IAP] Base product IDs:', productIds);
+      const baseProductIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
+      const productIdSet = new Set<string>(baseProductIds);
+      console.log('[IAP] Base product IDs:', baseProductIds);
 
-      // Add dynamic pack product IDs from database (legacy packs)
-      const { data: packs } = await supabase
+      const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+      const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
+
+      // Load legacy attraction pack SKUs via iap_products mapping
+      const { data: legacyPacks, error: legacyPacksError } = await supabase
         .from('attraction_packs')
         .select('id')
-        .eq('is_active', true);
+        .eq('active', true);
 
-      if (packs) {
-        console.log(`[IAP] Found ${packs.length} attraction packs in database`);
-        productIds.push(...packs.map(pack => pack.id));
+      if (legacyPacksError) {
+        console.error('[IAP] Failed to load legacy attraction packs:', legacyPacksError);
+      } else if (legacyPacks && legacyPacks.length > 0) {
+        const legacyPackIds = legacyPacks.map(pack => pack.id);
+        const { data: legacyPackProducts, error: legacyPackProductsError } = await supabase
+          .from('iap_products')
+          .select('id, internal_id')
+          .eq('platform', platform)
+          .eq('active', true)
+          .in('internal_id', legacyPackIds);
+
+        if (legacyPackProductsError) {
+          console.error('[IAP] Failed to load legacy pack product IDs:', legacyPackProductsError);
+        } else if (legacyPackProducts) {
+          legacyPackProducts.forEach(product => {
+            if (product?.id) {
+              productIdSet.add(product.id);
+            }
+          });
+          console.log(`[IAP] Added ${legacyPackProducts.length} legacy pack SKUs from iap_products`);
+        }
       }
 
       // Add new attraction package product IDs
-      const { data: packages } = await supabase
+      const { data: packages, error: packagesError } = await supabase
         .from('attraction_packages')
         .select('apple_product_id, google_product_id')
         .eq('is_active', true);
 
-      if (packages) {
-        const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
+      if (packagesError) {
+        console.error('[IAP] Failed to load attraction packages:', packagesError);
+      } else if (packages) {
         console.log(`[IAP] Found ${packages.length} attraction packages for ${Platform.OS}`);
-        productIds.push(...packages.map(pkg => pkg[platformKey]));
+        packages.forEach(pkg => {
+          const productId = pkg?.[platformKey as 'apple_product_id' | 'google_product_id'];
+          if (productId) {
+            productIdSet.add(productId);
+          }
+        });
       }
 
+      const productIds = Array.from(productIdSet);
       console.log(`[IAP] Requesting ${productIds.length} total products from store:`, productIds);
 
       // Fetch product details from platform store
@@ -239,7 +282,7 @@ export class MonetizationService {
         console.warn('[IAP] 2. Products not approved or in "Ready to Submit" status');
         console.warn('[IAP] 3. Running in wrong region/store');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load products:', error);
     }
   }
@@ -320,7 +363,7 @@ export class MonetizationService {
       await this.storeReceiptLocally(purchase);
 
       console.log('Purchase processed successfully:', productId);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to process purchase:', error);
       // Still acknowledge to prevent repeated processing
       try {
@@ -498,7 +541,7 @@ export class MonetizationService {
         storedAt: new Date().toISOString(),
       });
       await AsyncStorage.setItem('purchase_receipts', JSON.stringify(parsedReceipts));
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to store receipt locally:', error);
     }
   }
@@ -639,7 +682,7 @@ export class MonetizationService {
         inTrial: false, // Trial not tracked in current schema
         trialEndsAt: null,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get subscription status:', error);
       return {
         isActive: false,
@@ -673,7 +716,7 @@ export class MonetizationService {
         if (packageEntitlements?.[0]) {
           entitlement = packageEntitlements[0];
         }
-      } catch (rpcError) {
+      } catch (rpcError: unknown) {
         // Fallback to direct query if RPC fails
         console.log('RPC failed, falling back to direct query');
         const { data: userUsage } = await supabase
@@ -731,7 +774,7 @@ export class MonetizationService {
         ownedPacks: Array.from(new Set(ownedPacks)),
         ownedPackages: ownedPackages || [],
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get user entitlements:', error);
       return {
         hasUnlimitedAccess: false,
@@ -834,10 +877,10 @@ export class MonetizationService {
           p_attraction_id: attractionId,
           p_user_id: userId
         });
-      } catch (rpcError: any) {
-        // Ignore RPC errors silently
+      } catch (rpcError: unknown) {
+        console.warn('track_attraction_usage RPC failed:', rpcError);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to record attraction usage:', error);
     }
   }
@@ -892,7 +935,7 @@ export class MonetizationService {
           console.log(`Created new usage record with 0/${userLimit} attractions for user ${userId}`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to reset attraction usage:', error);
     }
   }
@@ -921,7 +964,7 @@ export class MonetizationService {
       }
 
       return legacyData || false;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to check attraction access:', error);
       return false;
     }
@@ -955,7 +998,7 @@ export class MonetizationService {
       this.initialized = false;
       this.products = [];
       console.log('MonetizationService cleaned up successfully');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error during MonetizationService cleanup:', error);
     }
   }
