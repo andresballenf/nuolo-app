@@ -14,7 +14,7 @@ import {
   ErrorCode,
 } from 'expo-iap';
 import { supabase } from '../lib/supabase';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../lib/logger';
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -135,56 +135,46 @@ export class MonetizationService {
 
   async initialize(): Promise<void> {
     if (this.initialized) {
-      console.log('[IAP] Already initialized, skipping');
+      logger.info('IAP already initialized, skipping');
       return;
     }
 
-    console.log('[IAP] Starting initialization...');
+    logger.info('IAP starting initialization');
     try {
       // Check if already connected before attempting to connect
       if (!this.isConnected) {
-        console.log('[IAP] Attempting to connect to store...');
+        logger.info('IAP attempting to connect to store');
         try {
           const connected = await initConnection();
           this.isConnected = connected;
-          console.log(`[IAP] initConnection returned: ${connected ? 'CONNECTED' : 'DISCONNECTED'}`);
+          logger.info('IAP initConnection result', { connected });
         } catch (connectError: any) {
           this.isConnected = false;
-          console.error('[IAP] ❌ Connection error:', connectError);
-          console.error('[IAP] Error details:', {
-            message: connectError?.message,
-            code: connectError?.code,
-            stack: connectError?.stack?.substring(0, 200),
-          });
+          logger.error('IAP connection error', connectError);
           throw connectError;
         }
 
         if (!this.isConnected) {
           const errorMsg = 'Failed to connect to in-app purchase service. Ensure you are running on a physical device or TestFlight build, not Expo Go.';
-          console.error('[IAP] ❌', errorMsg);
+          logger.error('IAP connection failed', { message: errorMsg });
           throw new Error(errorMsg);
         }
       }
 
-      console.log('[IAP] ✓ Connected to store');
+      logger.info('IAP connected to store successfully');
 
       // Load available products
-      console.log('[IAP] Loading products...');
+      logger.info('IAP loading products');
       await this.loadProducts();
 
       // Set up purchase listener
       this.setupPurchaseListener();
 
       this.initialized = true;
-      console.log('[IAP] ✅ Initialization complete');
+      logger.info('IAP initialization complete');
     } catch (error: unknown) {
-      console.error('[IAP] ❌ Failed to initialize:', error);
-      console.error('[IAP] Common causes:');
-      console.error('[IAP] 1. Running in Expo Go (not supported)');
-      console.error('[IAP] 2. Missing expo-iap plugin or build properties configuration');
-      console.error('[IAP] 3. App not rebuilt with updated provisioning profile (EAS build required)');
-      console.error('[IAP] 4. iOS: Not signed in with sandbox account');
-      console.error('[IAP] 5. Android: Not in internal test track');
+      logger.error('IAP initialization failed', error);
+      logger.error('IAP common causes: Running in Expo Go, missing plugins, or incorrect configuration');
       throw (error instanceof Error ? error : new Error(getErrorMessage(error)));
     }
   }
@@ -317,20 +307,20 @@ export class MonetizationService {
 
       if (purchase.purchaseState === 'purchased' || purchase.purchaseState === 'restored') {
         this.processPurchase(purchase).catch(error => {
-          console.error('Failed to process purchase:', error);
+          logger.error('Failed to process purchase', error);
         });
       } else if (purchase.purchaseState === 'pending') {
-        console.log('[IAP] Purchase pending confirmation:', purchase.productId);
+        logger.info('IAP purchase pending confirmation', { productId: purchase.productId });
       }
     });
 
     this.purchaseErrorSubscription = purchaseErrorListener(error => {
       if (error?.code === ErrorCode.UserCancelled) {
-        console.log('[IAP] User canceled purchase');
+        logger.info('IAP user canceled purchase');
         return;
       }
 
-      console.error('[IAP] Purchase error:', error);
+      logger.error('IAP purchase error', error);
     });
   }
 
@@ -346,6 +336,40 @@ export class MonetizationService {
       const productId = purchase.productId;
       const productType = this.getProductType(productId);
 
+      // SECURITY: Verify receipt server-side before processing
+      logger.security('Verifying receipt with server', { productId });
+
+      // Get receipt data - iOS uses transactionReceipt, Android uses purchaseToken
+      // Note: transactionReceipt may not be in expo-iap types but exists at runtime on iOS
+      const receiptData = (purchase as any).transactionReceipt || purchase.purchaseToken || '';
+      const transactionId = purchase.transactionId || purchase.id;
+
+      const { data: verificationResult, error: verificationError } = await supabase.functions.invoke(
+        'verify-receipt',
+        {
+          body: {
+            receipt: receiptData,
+            platform: Platform.OS,
+            productId: productId,
+            transactionId: transactionId,
+          },
+        }
+      );
+
+      if (verificationError || !verificationResult?.valid) {
+        logger.security('Receipt verification failed', {
+          productId,
+          error: verificationResult?.error,
+          hasVerificationError: !!verificationError
+        });
+        throw new Error(`Invalid purchase receipt: ${verificationResult?.error || 'Verification failed'}`);
+      }
+
+      logger.security('Receipt verified successfully', {
+        transactionId: verificationResult.transactionId,
+        productId: productId,
+      });
+
       // Determine purchase type and process accordingly
       if (this.isSubscription(productId)) {
         await this.processSubscriptionPurchase(user.id, productId, purchase);
@@ -358,13 +382,10 @@ export class MonetizationService {
         purchase,
         isConsumable: productType === 'consumable',
       });
-      
-      // Store receipt locally for offline verification
-      await this.storeReceiptLocally(purchase);
 
-      console.log('Purchase processed successfully:', productId);
+      logger.info('Purchase processed successfully', { productId });
     } catch (error: unknown) {
-      console.error('Failed to process purchase:', error);
+      logger.error('Failed to process purchase', error);
       // Still acknowledge to prevent repeated processing
       try {
         await finishTransaction({
@@ -372,7 +393,7 @@ export class MonetizationService {
           isConsumable: false,
         });
       } catch (finishError) {
-        console.error('Failed to finish transaction after error:', finishError);
+        logger.error('Failed to finish transaction after error', finishError);
       }
     }
   }
@@ -529,20 +550,6 @@ export class MonetizationService {
         return new Date('2099-12-31').toISOString(); // Far future date
       default:
         return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
-    }
-  }
-
-  private async storeReceiptLocally(purchase: any): Promise<void> {
-    try {
-      const receipts = await AsyncStorage.getItem('purchase_receipts');
-      const parsedReceipts = receipts ? JSON.parse(receipts) : [];
-      parsedReceipts.push({
-        ...purchase,
-        storedAt: new Date().toISOString(),
-      });
-      await AsyncStorage.setItem('purchase_receipts', JSON.stringify(parsedReceipts));
-    } catch (error: unknown) {
-      console.error('Failed to store receipt locally:', error);
     }
   }
 

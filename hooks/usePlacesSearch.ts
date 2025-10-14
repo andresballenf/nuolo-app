@@ -39,17 +39,11 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
 
   // Initialize Google Places service
   useEffect(() => {
-    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-    
-    if (apiKey) {
-      googlePlacesService.current = new GooglePlacesService(apiKey);
-    } else {
-      console.error('Google Maps API key not found in environment variables');
-      Alert.alert(
-        'Configuration Error',
-        'Google Maps API key must be set in environment variables as EXPO_PUBLIC_GOOGLE_MAPS_API_KEY'
-      );
-    }
+    // SECURITY NOTE: API key parameter kept for backward compatibility with photo URLs
+    // All API calls now go through server-side proxy in supabase/functions/maps-proxy
+    // Photo URLs still embed the key - consider implementing photo proxy for complete security
+    const placeholderKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'PROXIED';
+    googlePlacesService.current = new GooglePlacesService(placeholderKey);
   }, []);
 
   /**

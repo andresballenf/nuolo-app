@@ -1,3 +1,5 @@
+import { supabase } from '../lib/supabase';
+
 interface PlaceResult {
   place_id: string;
   name: string;
@@ -40,29 +42,53 @@ export interface PointOfInterest {
 }
 
 class GooglePlacesService {
-  private apiKey: string;
-  private baseUrl = 'https://maps.googleapis.com/maps/api/place';
+  private apiKey: string; // Kept for backward compatibility with photo URLs
+  private useProxy: boolean = true; // Toggle for proxy usage
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
   }
 
   /**
+   * Make a proxied request to Google Maps API via Supabase Edge Function
+   * SECURITY: API key never exposed to client
+   */
+  private async proxyRequest(endpoint: string, params: string): Promise<any> {
+    try {
+      const { data, error } = await supabase.functions.invoke('maps-proxy', {
+        body: {
+          endpoint,
+          params,
+        },
+      });
+
+      if (error) {
+        console.error('[SECURITY] Maps proxy error:', error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('[SECURITY] Failed to proxy request:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Search for nearby tourist attractions
+   * SECURITY: Uses server-side proxy to protect API key
    */
   async searchNearbyAttractions(
     location: { lat: number; lng: number },
     radius: number = 1500
   ): Promise<PointOfInterest[]> {
     try {
-      const url = `${this.baseUrl}/nearbysearch/json?` +
-        `location=${location.lat},${location.lng}&` +
-        `radius=${radius}&` +
-        `type=tourist_attraction&` +
-        `key=${this.apiKey}`;
+      const params = `location=${location.lat},${location.lng}&radius=${radius}&type=tourist_attraction`;
 
-      const response = await fetch(url);
-      const data: PlacesSearchResponse = await response.json();
+      const data: PlacesSearchResponse = await this.proxyRequest(
+        'place/nearbysearch/json',
+        params
+      );
 
       if (data.status !== 'OK') {
         console.warn('Google Places API error:', data.status);
@@ -78,6 +104,7 @@ class GooglePlacesService {
 
   /**
    * Search for places with custom query
+   * SECURITY: Uses server-side proxy to protect API key
    */
   async searchPlaces(
     query: string,
@@ -85,14 +112,12 @@ class GooglePlacesService {
     radius: number = 5000
   ): Promise<PointOfInterest[]> {
     try {
-      const url = `${this.baseUrl}/textsearch/json?` +
-        `query=${encodeURIComponent(query)}&` +
-        `location=${location.lat},${location.lng}&` +
-        `radius=${radius}&` +
-        `key=${this.apiKey}`;
+      const params = `query=${encodeURIComponent(query)}&location=${location.lat},${location.lng}&radius=${radius}`;
 
-      const response = await fetch(url);
-      const data: PlacesSearchResponse = await response.json();
+      const data: PlacesSearchResponse = await this.proxyRequest(
+        'place/textsearch/json',
+        params
+      );
 
       if (data.status !== 'OK') {
         console.warn('Google Places API error:', data.status);
@@ -108,16 +133,13 @@ class GooglePlacesService {
 
   /**
    * Get place details by place_id
+   * SECURITY: Uses server-side proxy to protect API key
    */
   async getPlaceDetails(placeId: string): Promise<any> {
     try {
-      const url = `${this.baseUrl}/details/json?` +
-        `place_id=${placeId}&` +
-        `fields=name,formatted_address,geometry,rating,user_ratings_total,photos,reviews&` +
-        `key=${this.apiKey}`;
+      const params = `place_id=${placeId}&fields=name,formatted_address,geometry,rating,user_ratings_total,photos,reviews`;
 
-      const response = await fetch(url);
-      const data = await response.json();
+      const data = await this.proxyRequest('place/details/json', params);
 
       if (data.status !== 'OK') {
         console.warn('Google Places API error:', data.status);

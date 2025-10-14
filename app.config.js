@@ -18,7 +18,8 @@ module.exports = {
       bundleIdentifier: "com.nuolo.app",
       usesAppleSignIn: true,
       config: {
-        googleMapsApiKey: "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+        // SECURITY: Google Maps API key now handled server-side via Edge Function proxy
+        // Client no longer needs direct API access
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "Nuolo uses your location to discover nearby attractions and provide location-based audio tours.",
@@ -41,8 +42,7 @@ module.exports = {
       entitlements: {
         "com.apple.developer.in-app-payments": [
           "merchant.com.nuolo.app"
-        ],
-        "com.apple.developer.in-app-purchase": true
+        ]
       }
     },
     android: {
