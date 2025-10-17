@@ -111,6 +111,7 @@ const SECURE_STORE_KEYS = {
 
 // Token expiration time (7 days)
 const TOKEN_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000;
+const PROFILE_FETCH_TIMEOUT = 5000;
 
 // Secure storage utilities
 const secureStorage = {
@@ -153,6 +154,31 @@ const secureStorage = {
     }
   }
 };
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+const buildUserFromSession = (sessionUser: Session['user']): User => ({
+  id: sessionUser.id,
+  email: sessionUser.email || '',
+  emailVerified: !!sessionUser.email_confirmed_at,
+});
 
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -211,17 +237,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       
       if (session) {
-        // Load user profile
-        const user = await loadUserProfile(session.user.id);
-        
+        const baseUser = buildUserFromSession(session.user);
+
         setAuthState(prev => ({
           ...prev,
-          user,
+          user: baseUser,
           session,
           loading: false,
           isAuthenticated: true,
           requiresVerification: !session.user.email_confirmed_at,
         }));
+
+        loadUserProfile(session.user.id, session.user)
+          .then(userWithProfile => {
+            setAuthState(prev => {
+              if (!prev.session || prev.session.user.id !== session.user.id) {
+                return prev;
+              }
+
+              return {
+                ...prev,
+                user: userWithProfile,
+              };
+            });
+          })
+          .catch(profileError => {
+            console.error('Error loading user profile after session set:', profileError);
+          });
       } else {
         // No session - not authenticated
         setAuthState(prev => ({
@@ -290,16 +332,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         
         if (session) {
-          const user = await loadUserProfile(session.user.id);
-          
+          const baseUser = buildUserFromSession(session.user);
+
           setAuthState(prev => ({
             ...prev,
-            user,
+            user: baseUser,
             session,
             isAuthenticated: true,
             requiresVerification: !session.user.email_confirmed_at,
             loading: false,
           }));
+
+          loadUserProfile(session.user.id, session.user)
+            .then(userWithProfile => {
+              setAuthState(prev => {
+                if (!prev.session || prev.session.user.id !== session.user.id) {
+                  return prev;
+                }
+
+                return {
+                  ...prev,
+                  user: userWithProfile,
+                };
+              });
+            })
+            .catch(profileError => {
+              console.error('Error refreshing user profile after auth event:', profileError);
+            });
         } else {
           setAuthState(prev => ({
             ...prev,
@@ -328,8 +387,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             break;
           case 'USER_UPDATED':
             if (session) {
-              const user = await loadUserProfile(session.user.id);
-              setAuthState(prev => ({ ...prev, user }));
+              loadUserProfile(session.user.id, session.user)
+                .then(updatedUser => {
+                  setAuthState(prev => {
+                    if (!prev.session || prev.session.user.id !== session.user.id) {
+                      return prev;
+                    }
+                    return { ...prev, user: updatedUser };
+                  });
+                })
+                .catch(profileError => {
+                  console.error('Error updating user profile after USER_UPDATED event:', profileError);
+                });
             }
             break;
         }
@@ -354,39 +423,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(checkSessionTimeout);
   }, [authState.isAuthenticated, lastActivity]);
   
-  const loadUserProfile = async (userId: string): Promise<User> => {
+  const loadUserProfile = async (userId: string, sessionUser?: Session['user']): Promise<User> => {
+    const userData: User = {
+      id: userId,
+      email: sessionUser?.email || '',
+      emailVerified: !!sessionUser?.email_confirmed_at,
+    };
+
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      
-      if (error && error.code !== 'PGRST116') { // PGRST116 = row not found
+      const { data, error } = await withTimeout(
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single(),
+        PROFILE_FETCH_TIMEOUT,
+        'Profile fetch timed out'
+      );
+
+      if (error && error.code !== 'PGRST116') {
         console.error('Error loading profile:', error);
       }
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      return {
-        id: userId,
-        email: user?.email || '',
-        emailVerified: !!user?.email_confirmed_at,
-        profile: data ? {
+
+      if (data) {
+        userData.profile = {
           fullName: data.full_name,
           avatar: data.avatar_url,
           preferences: data.preferences,
-        } : undefined,
-      };
+        };
+      }
     } catch (error) {
       console.error('Error loading user profile:', error);
-      const { data: { user } } = await supabase.auth.getUser();
-      return {
-        id: userId,
-        email: user?.email || '',
-        emailVerified: !!user?.email_confirmed_at,
-      };
     }
+
+    if (!userData.email) {
+      try {
+        const { data: authData, error: authError } = await withTimeout(
+          supabase.auth.getUser(),
+          PROFILE_FETCH_TIMEOUT,
+          'Auth user fetch timed out'
+        );
+
+        if (authError) {
+          console.error('Error loading user from auth:', authError);
+        }
+
+        if (authData?.user) {
+          userData.email = authData.user.email || '';
+          userData.emailVerified = !!authData.user.email_confirmed_at;
+        }
+      } catch (fallbackError) {
+        console.error('Error loading auth user fallback:', fallbackError);
+      }
+    }
+
+    return userData;
   };
 
   const validateEmail = (email: string): boolean => {
