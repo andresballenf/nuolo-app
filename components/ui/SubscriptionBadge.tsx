@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,8 +19,15 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
   onPress,
   style 
 }) => {
-  const { subscription, entitlements, loading } = useMonetization();
+  const { subscription, entitlements, loading, initialized, refreshEntitlements } = useMonetization();
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!initialized) return;
+    refreshEntitlements().catch(error => {
+      console.error('Failed to refresh entitlements for SubscriptionBadge:', error);
+    });
+  }, [initialized, refreshEntitlements]);
 
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -47,6 +54,16 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
   }
 
   const getDisplayInfo = () => {
+    if (entitlements.hasUnlimitedAccess) {
+      return {
+        displayValue: '∞',
+        isInfinity: true,
+        isPaidPackage: false,
+        showFreeBadge: false,
+        isEmpty: false,
+      };
+    }
+
     // Unlimited monthly subscription
     if (subscription.isActive && subscription.type === 'unlimited_monthly') {
       return {
@@ -71,11 +88,14 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
     }
 
     // Package users (have purchased attraction packages)
-    const hasPaidPackages = entitlements.ownedPacks && entitlements.ownedPacks.length > 0;
+    const baseFreeAllowance = 2;
+    const hasPaidPackages =
+      (entitlements.ownedPacks && entitlements.ownedPacks.length > 0) ||
+      entitlements.totalAttractionLimit > baseFreeAllowance;
 
     // The database function already calculates remaining credits correctly:
     // remainingFreeAttractions = total_attraction_limit - attractions_used
-    const remainingCredits = entitlements.remainingFreeAttractions ?? 0;
+    const remainingCredits = Math.max(0, entitlements.remainingFreeAttractions ?? 0);
 
     if (hasPaidPackages) {
       // User has purchased packages - show remaining paid credits with diamond badge

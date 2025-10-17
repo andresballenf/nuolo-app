@@ -578,8 +578,8 @@ export class MonetizationService {
           .eq('user_id', userId)
           .single();
 
-        let totalAttractionLimit = usage?.package_limit || 2;
-        let attractionsUsed = usage?.usage_count || 0;
+        let totalAttractionLimit = this.parseNumber(usage?.package_limit, 2);
+        let attractionsUsed = this.parseNumber(usage?.usage_count, 0);
         let ownedPackages: string[] = [];
         let packageDetails: AttractionPackage[] = [];
 
@@ -591,12 +591,14 @@ export class MonetizationService {
 
           if (packageEntitlements && packageEntitlements.length > 0) {
             const entitlementsRow = packageEntitlements[0];
-            if (typeof entitlementsRow.total_attraction_limit === 'number') {
-              totalAttractionLimit = entitlementsRow.total_attraction_limit;
-            }
-            if (typeof entitlementsRow.attractions_used === 'number') {
-              attractionsUsed = entitlementsRow.attractions_used;
-            }
+            totalAttractionLimit = this.parseNumber(
+              entitlementsRow.total_attraction_limit,
+              totalAttractionLimit
+            );
+            attractionsUsed = this.parseNumber(
+              entitlementsRow.attractions_used,
+              attractionsUsed
+            );
             if (Array.isArray(entitlementsRow.owned_packages)) {
               ownedPackages = entitlementsRow.owned_packages.filter(
                 (pkg: unknown): pkg is string => typeof pkg === 'string'
@@ -666,12 +668,14 @@ export class MonetizationService {
           logger.error('Failed to load package entitlements', packageEntitlementsError);
         } else if (packageEntitlements && packageEntitlements.length > 0) {
           const entitlementsRow = packageEntitlements[0];
-          if (typeof entitlementsRow.total_attraction_limit === 'number') {
-            totalAttractionLimit = entitlementsRow.total_attraction_limit;
-          }
-          if (typeof entitlementsRow.attractions_used === 'number') {
-            attractionsUsed = entitlementsRow.attractions_used;
-          }
+          totalAttractionLimit = this.parseNumber(
+            entitlementsRow.total_attraction_limit,
+            totalAttractionLimit
+          );
+          attractionsUsed = this.parseNumber(
+            entitlementsRow.attractions_used,
+            attractionsUsed
+          );
           if (Array.isArray(entitlementsRow.owned_packages)) {
             ownedPackages = entitlementsRow.owned_packages.filter(
               (pkg: unknown): pkg is string => typeof pkg === 'string'
@@ -749,8 +753,8 @@ export class MonetizationService {
         console.error('Failed to fetch user_usage:', fetchError);
       }
 
-      const currentCount = currentUsage?.usage_count || 0;
-      const packageLimit = currentUsage?.package_limit || 2;
+      const currentCount = this.parseNumber(currentUsage?.usage_count, 0);
+      const packageLimit = this.parseNumber(currentUsage?.package_limit, 2);
       const newCount = currentCount + 1;
 
       if (newCount > packageLimit) {
@@ -976,6 +980,25 @@ export class MonetizationService {
 
   private isPackage(productId: string): boolean {
     return productId.includes('package');
+  }
+
+  private parseNumber(value: unknown, fallback = 0): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    if (value instanceof Number) {
+      const primitive = value.valueOf();
+      if (Number.isFinite(primitive)) {
+        return primitive;
+      }
+    }
+    return fallback;
   }
 
   private async syncCustomerInfo(customerInfo: CustomerInfo): Promise<void> {

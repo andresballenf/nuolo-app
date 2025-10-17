@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -43,7 +43,13 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
   const { resetOnboarding } = useOnboarding();
   const { user, signOut, isAuthenticated } = useAuth();
   const monetization = useMonetization();
-  const { subscription, entitlements, setShowPaywall } = monetization;
+  const {
+    subscription,
+    entitlements,
+    setShowPaywall,
+    refreshEntitlements,
+    initialized,
+  } = monetization;
   
   // Modal states for editing preferences
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -143,6 +149,30 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     onClose?.();
     router.push('/auth/login');
   };
+
+  useEffect(() => {
+    if (!initialized) return;
+    refreshEntitlements().catch(error => {
+      console.error('Failed to refresh entitlements for profile view:', error);
+    });
+  }, [initialized, refreshEntitlements]);
+
+  const baseFreeCredits = 2;
+  const totalCredits = Math.max(0, entitlements.totalAttractionLimit ?? 0);
+  const remainingCredits = Math.max(0, entitlements.remainingFreeAttractions ?? 0);
+  const usedCredits = Math.max(0, totalCredits - remainingCredits);
+  const hasUnlimitedSubscription = subscription.isActive && subscription.type !== 'free';
+  const hasCreditPack = !hasUnlimitedSubscription &&
+    ((entitlements.ownedPacks && entitlements.ownedPacks.length > 0) || totalCredits > baseFreeCredits);
+  const creditUsagePercent = totalCredits > 0 ? Math.min(100, (usedCredits / totalCredits) * 100) : 0;
+  const isOutOfCredits = !hasUnlimitedSubscription && totalCredits > 0 && remainingCredits === 0;
+  const lowCreditThreshold = Math.max(1, totalCredits > baseFreeCredits ? Math.ceil(totalCredits * 0.1) : 1);
+  const isLowCredits = !hasUnlimitedSubscription && !isOutOfCredits && remainingCredits <= lowCreditThreshold;
+  const creditPlanLabel = hasUnlimitedSubscription
+    ? 'Premium Membership'
+    : hasCreditPack
+      ? 'Credit Pack'
+      : 'Free Tier';
   
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -178,28 +208,35 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
           <View style={styles.subscriptionHeader}>
             <View style={styles.subscriptionInfo}>
               <Text style={styles.subscriptionPlan}>
-                {subscription.isActive && subscription.type !== 'free' ? 'Premium' : 'Free Tier'}
+                {creditPlanLabel}
               </Text>
-              {subscription.isActive && subscription.type !== 'free' ? (
+              {hasUnlimitedSubscription ? (
                 <View style={styles.subscriptionBadge}>
                   <MaterialIcons name="check-circle" size={16} color="#FFFFFF" />
                   <Text style={styles.subscriptionBadgeText}>Active</Text>
                 </View>
+              ) : hasCreditPack ? (
+                <View style={styles.subscriptionBadgeCredits}>
+                  <MaterialIcons name="diamond" size={16} color="#FFFFFF" />
+                  <Text style={styles.subscriptionBadgeCreditsText}>
+                    {remainingCredits} credits available
+                  </Text>
+                </View>
               ) : (
                 <View style={styles.subscriptionBadgeFree}>
                   <Text style={styles.subscriptionBadgeFreeText}>
-                    {entitlements.remainingFreeAttractions} of {entitlements.totalAttractionLimit} credits remaining
+                    {remainingCredits} of {totalCredits || baseFreeCredits} credits remaining
                   </Text>
                 </View>
               )}
             </View>
-            {subscription.isActive && subscription.type !== 'free' && (
+            {hasUnlimitedSubscription && (
               <MaterialIcons name="star" size={24} color="#84cc16" />
             )}
           </View>
           
           <View style={styles.subscriptionFeatures}>
-            {subscription.isActive && subscription.type !== 'free' ? (
+            {hasUnlimitedSubscription ? (
               <>
                 <View style={styles.subscriptionFeature}>
                   <MaterialIcons name="check" size={16} color="#84cc16" />
@@ -218,11 +255,30 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
                   <Text style={styles.subscriptionFeatureText}>Offline download support</Text>
                 </View>
               </>
+            ) : hasCreditPack ? (
+              <>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="diamond" size={16} color="#F59E0B" />
+                  <Text style={styles.subscriptionFeatureText}>
+                    {remainingCredits} credits ready to use
+                  </Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="map" size={16} color="#6B7280" />
+                  <Text style={styles.subscriptionFeatureText}>Works on any attraction worldwide</Text>
+                </View>
+                <View style={styles.subscriptionFeature}>
+                  <MaterialIcons name="history" size={16} color="#6B7280" />
+                  <Text style={styles.subscriptionFeatureText}>Unused credits roll over automatically</Text>
+                </View>
+              </>
             ) : (
               <>
                 <View style={styles.subscriptionFeature}>
                   <MaterialIcons name="info-outline" size={16} color="#6B7280" />
-                  <Text style={styles.subscriptionFeatureText}>2 free audio guides included</Text>
+                  <Text style={styles.subscriptionFeatureText}>
+                    {baseFreeCredits} free audio guides included
+                  </Text>
                 </View>
                 <View style={styles.subscriptionFeature}>
                   <MaterialIcons name="lock-outline" size={16} color="#6B7280" />
@@ -231,8 +287,55 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
               </>
             )}
           </View>
+
+          {!hasUnlimitedSubscription && (
+            <View style={styles.creditSummary}>
+              <View style={styles.creditSummaryRow}>
+                <Text style={styles.creditSummaryLabel}>Available</Text>
+                <Text style={styles.creditSummaryValue}>{remainingCredits}</Text>
+              </View>
+              <View style={styles.creditSummaryRow}>
+                <Text style={styles.creditSummaryLabel}>Used</Text>
+                <Text style={styles.creditSummaryValue}>{usedCredits}</Text>
+              </View>
+              <View style={styles.creditSummaryRow}>
+                <Text style={styles.creditSummaryLabel}>Total</Text>
+                <Text style={styles.creditSummaryValue}>{totalCredits || baseFreeCredits}</Text>
+              </View>
+              <View style={styles.creditUsageBar}>
+                <View 
+                  style={[
+                    styles.creditUsageProgress,
+                    { 
+                      width: `${creditUsagePercent}%`,
+                      backgroundColor: isOutOfCredits ? '#EF4444' : '#84cc16',
+                    }
+                  ]}
+                />
+              </View>
+              <Text style={styles.creditUsageCaption}>
+                {remainingCredits} credits remaining
+              </Text>
+              {isOutOfCredits && (
+                <View style={styles.creditAlert}>
+                  <MaterialIcons name="lock" size={18} color="#EF4444" />
+                  <Text style={styles.creditAlertText}>
+                    You've used all credits. Purchase a pack or upgrade for unlimited access.
+                  </Text>
+                </View>
+              )}
+              {!isOutOfCredits && isLowCredits && (
+                <View style={styles.creditAlertLow}>
+                  <MaterialIcons name="info" size={18} color="#F59E0B" />
+                  <Text style={styles.creditAlertLowText}>
+                    {remainingCredits} credits left — top up before your next adventure.
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
           
-          {(!subscription.isActive || subscription.type === 'free') && (
+          {!hasUnlimitedSubscription && (
             <Button
               title="Upgrade to Premium"
               onPress={() => setShowPaywall(true, { trigger: 'manual' })}
@@ -242,7 +345,7 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
             />
           )}
           
-          {subscription.isActive && subscription.type !== 'free' && subscription.expiresAt && (
+          {hasUnlimitedSubscription && subscription.expiresAt && (
             <Text style={styles.subscriptionExpiry}>
               Renews on {new Date(subscription.expiresAt).toLocaleDateString()}
             </Text>
@@ -717,6 +820,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  subscriptionBadgeCredits: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  subscriptionBadgeCreditsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   subscriptionBadgeFree: {
     paddingVertical: 4,
   },
@@ -737,6 +855,77 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4B5563',
     flex: 1,
+  },
+  creditSummary: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 8,
+  },
+  creditSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  creditSummaryLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  creditSummaryValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  creditUsageBar: {
+    height: 6,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  creditUsageProgress: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  creditUsageCaption: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#4B5563',
+    textAlign: 'center',
+  },
+  creditAlert: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 10,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  creditAlertText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#B91C1C',
+  },
+  creditAlertLow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 10,
+    backgroundColor: '#FFFBEB',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  creditAlertLowText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#92400E',
   },
   upgradeButton: {
     marginTop: 8,

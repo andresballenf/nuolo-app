@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { monetizationService, SubscriptionStatus, UserEntitlements, AttractionPack, AttractionPackage } from '../services/MonetizationService';
 import { useAuth } from './AuthContext';
 
@@ -174,6 +175,31 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       console.error('Failed to refresh entitlements:', errorMessage);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!initialized || !user) return;
+
+    refreshEntitlements().catch(error => {
+      console.error('Failed to refresh entitlements after initialization:', error);
+    });
+  }, [initialized, user?.id, refreshEntitlements]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refreshEntitlements().catch(error => {
+          console.error('Failed to refresh entitlements on app resume:', error);
+        });
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [user?.id, refreshEntitlements]);
 
   const resetToFreeState = () => {
     setSubscription({
