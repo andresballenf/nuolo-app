@@ -526,15 +526,17 @@ export default function MapScreen() {
           
         } catch (chunkError) {
           console.error('App-orchestrated chunked audio failed:', chunkError);
+
+          const errorMessage = chunkError instanceof Error ? chunkError.message : String(chunkError);
           
           // Show helpful error messages
-          if (chunkError.message?.includes('not deployed')) {
+          if (errorMessage.includes('not deployed')) {
             Alert.alert(
               'Setup Required',
               'The chunked audio feature requires deploying a Supabase function. Using standard audio generation instead.',
               [{ text: 'OK' }]
             );
-          } else if (chunkError.message?.includes('quota exceeded')) {
+          } else if (errorMessage.includes('quota exceeded')) {
             Alert.alert(
               'OpenAI Quota Exceeded',
               'The OpenAI API has reached its usage limit. Please add credits to your OpenAI account at platform.openai.com',
@@ -549,14 +551,14 @@ export default function MapScreen() {
             // Don't fall through - quota issue affects all methods
             audioContext.setGenerationError('OpenAI quota exceeded');
             return;
-          } else if (chunkError.message?.includes('API key')) {
+          } else if (errorMessage.includes('API key')) {
             Alert.alert(
               'API Key Issue',
-              chunkError.message,
+              errorMessage,
               [{ text: 'OK' }]
             );
             // Don't fall through - API key issue affects all methods
-            audioContext.setGenerationError(chunkError.message);
+            audioContext.setGenerationError(errorMessage);
             return;
           }
           // Will fall through to old method as backup for other errors

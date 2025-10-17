@@ -77,7 +77,7 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   const scrollViewRef = useRef<ScrollView>(null);
   const phraseRefs = useRef<{ [key: number]: View | null }>({});
   const isUserScrollingRef = useRef(false);
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrolledPhraseRef = useRef(-1);
 
   // Split text into phrases with realistic TTS timing

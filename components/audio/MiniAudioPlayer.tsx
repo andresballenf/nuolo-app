@@ -54,7 +54,7 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
 
   // Only show loading when actually generating audio, not when audio is playing
   // Also check if we have a track but it's still being generated (empty audioData with chunks)
-  const shouldShowLoading = isLoading || (track && !track.audioData && isLoading);
+  const shouldShowLoading = isLoading || (!!track && !track.audioData && isLoading);
 
   useEffect(() => {
     if (isVisible) {
@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     bottom: 0, // Flush with screen bottom
     left: 0,
     right: 0,
-    height: 64 + Platform.select({ ios: 34, android: 0 }), // Add safe area to height instead of positioning
+    height: 64 + (Platform.select({ ios: 34, android: 0, default: 0 }) ?? 0), // Add safe area to height instead of positioning
     backgroundColor: Platform.select({
       ios: 'rgba(132, 204, 22, 0.85)', // More transparent for better blur effect
       android: 'rgba(132, 204, 22, 0.96)', // Slightly more opaque for Android
