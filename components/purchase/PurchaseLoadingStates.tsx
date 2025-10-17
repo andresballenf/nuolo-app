@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
-  useEffect,
 } from 'react-native-reanimated';
 
 interface PurchaseLoadingStateProps {

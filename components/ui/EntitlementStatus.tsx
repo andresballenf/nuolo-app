@@ -157,7 +157,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
           </View>
         </View>
 
-        {showUpgradeButton && statusInfo.type !== 'premium' && (
+        {showUpgradeButton && (
           <TouchableOpacity
             onPress={handleUpgradePress}
             style={[styles.upgradeButton, { borderColor: statusInfo.color }]}

@@ -239,13 +239,12 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
               variant="primary"
               size="md"
               style={styles.upgradeButton}
-              icon="star"
             />
           )}
           
-          {subscription.isActive && subscription.type !== 'free' && subscription.expirationDate && (
+          {subscription.isActive && subscription.type !== 'free' && subscription.expiresAt && (
             <Text style={styles.subscriptionExpiry}>
-              Renews on {new Date(subscription.expirationDate).toLocaleDateString()}
+              Renews on {new Date(subscription.expiresAt).toLocaleDateString()}
             </Text>
           )}
         </View>
