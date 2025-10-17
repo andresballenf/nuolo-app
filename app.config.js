@@ -18,8 +18,7 @@ module.exports = {
       bundleIdentifier: "com.nuolo.app",
       usesAppleSignIn: true,
       config: {
-        // SECURITY: Google Maps API key now handled server-side via Edge Function proxy
-        // Client no longer needs direct API access
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "Nuolo uses your location to discover nearby attractions and provide location-based audio tours.",
@@ -37,11 +36,6 @@ module.exports = {
               "nuolo"
             ]
           }
-        ]
-      },
-      entitlements: {
-        "com.apple.developer.in-app-payments": [
-          "merchant.com.nuolo.app"
         ]
       }
     },
@@ -99,7 +93,6 @@ module.exports = {
       "expo-secure-store",
       "expo-font",
       "expo-web-browser",
-      "expo-iap",
       [
         "expo-build-properties",
         {
@@ -108,12 +101,16 @@ module.exports = {
           }
         }
       ]
+      // RevenueCat (react-native-purchases) does not require a config plugin
+      // It works through Expo development builds without plugin configuration
     ],
     extra: {
       router: {},
       eas: {
         projectId: "02e81b2a-f890-4c6e-8607-e4893ec8f63f"
-      }
+      },
+      EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
+      EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
     },
     owner: "andresballen"
   }

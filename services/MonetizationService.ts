@@ -1,18 +1,11 @@
 import { Platform } from 'react-native';
-import {
-  initConnection,
-  endConnection,
-  fetchProducts,
-  requestPurchase,
-  purchaseUpdatedListener,
-  purchaseErrorListener,
-  finishTransaction,
-  restorePurchases as restoreNativePurchases,
-  getAvailablePurchases,
-  type Purchase,
-  type PurchaseError,
-  ErrorCode,
-} from 'expo-iap';
+import Purchases, {
+  PurchasesOfferings,
+  PurchasesPackage,
+  CustomerInfo,
+  PurchasesStoreProduct,
+  LOG_LEVEL,
+} from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
@@ -95,36 +88,51 @@ export interface PurchaseResult {
 export class MonetizationService {
   private static instance: MonetizationService | null = null;
   private initialized = false;
-  private products: Product[] = [];
-  private isConnected = false;
-  private purchaseUpdateSubscription: { remove: () => void } | null = null;
-  private purchaseErrorSubscription: { remove: () => void } | null = null;
+  private revenueCatConfigured = false;
+  private currentOfferings: PurchasesOfferings | null = null;
 
-  // Product IDs - should match store configurations
-  private static readonly PRODUCT_IDS = {
-    // Subscription - Unlimited monthly access
-    UNLIMITED_MONTHLY: Platform.select({
-      ios: 'nuolo_unlimited_monthly',
-      android: 'nuolo_unlimited_monthly',
-      default: 'nuolo_unlimited_monthly'
-    }),
-    // Attraction packages
-    BASIC_PACKAGE: Platform.select({
-      ios: 'nuolo_basic_package',
-      android: 'nuolo_basic_package',
-      default: 'nuolo_basic_package'
-    }),
-    STANDARD_PACKAGE: Platform.select({
-      ios: 'nuolo_standard_package',
-      android: 'nuolo_standard_package',
-      default: 'nuolo_standard_package'
-    }),
-    PREMIUM_PACKAGE: Platform.select({
-      ios: 'nuolo_premium_package',
-      android: 'nuolo_premium_package',
-      default: 'nuolo_premium_package'
-    }),
+  // Entitlement identifiers / internal package IDs
+  private static readonly ENTITLEMENTS = {
+    UNLIMITED: 'unlimited', // For unlimited monthly subscription
+    BASIC_PACKAGE: 'basic_package', // For basic package (5 guides)
+    STANDARD_PACKAGE: 'standard_package', // For standard package (20 guides)
+    PREMIUM_PACKAGE: 'premium_package', // For premium package (50 guides)
   };
+
+  private static readonly PRODUCT_IDS = {
+    UNLIMITED_MONTHLY: 'nuolo_unlimited_monthly',
+    BASIC_PACKAGE: 'nuolo_basic_package',
+    STANDARD_PACKAGE: 'nuolo_standard_package',
+    PREMIUM_PACKAGE: 'nuolo_premium_package',
+  } as const;
+
+  private static readonly PACKAGE_CONFIGS: Array<{
+    id: string;
+    productId: string;
+    attractionLimit: number;
+    entitlementId?: string;
+  }> = [
+    {
+      id: MonetizationService.ENTITLEMENTS.BASIC_PACKAGE,
+      productId: MonetizationService.PRODUCT_IDS.BASIC_PACKAGE,
+      attractionLimit: 5,
+      entitlementId: MonetizationService.ENTITLEMENTS.BASIC_PACKAGE,
+    },
+    {
+      id: MonetizationService.ENTITLEMENTS.STANDARD_PACKAGE,
+      productId: MonetizationService.PRODUCT_IDS.STANDARD_PACKAGE,
+      attractionLimit: 20,
+      entitlementId: MonetizationService.ENTITLEMENTS.STANDARD_PACKAGE,
+    },
+    {
+      id: MonetizationService.ENTITLEMENTS.PREMIUM_PACKAGE,
+      productId: MonetizationService.PRODUCT_IDS.PREMIUM_PACKAGE,
+      attractionLimit: 50,
+      entitlementId: MonetizationService.ENTITLEMENTS.PREMIUM_PACKAGE,
+    },
+  ] as const;
+
+  private static readonly UNLIMITED_USAGE_LIMIT = 1000000;
 
   static getInstance(): MonetizationService {
     if (!MonetizationService.instance) {
@@ -135,421 +143,98 @@ export class MonetizationService {
 
   async initialize(): Promise<void> {
     if (this.initialized) {
-      logger.info('IAP already initialized, skipping');
+      logger.info('RevenueCat already initialized, skipping');
       return;
     }
 
-    logger.info('IAP starting initialization');
+    logger.info('RevenueCat starting initialization');
     try {
-      // Check if already connected before attempting to connect
-      if (!this.isConnected) {
-        logger.info('IAP attempting to connect to store');
-        try {
-          const connected = await initConnection();
-          this.isConnected = connected;
-          logger.info('IAP initConnection result', { connected });
-        } catch (connectError: any) {
-          this.isConnected = false;
-          logger.error('IAP connection error', connectError);
-          throw connectError;
-        }
+      // Check if we're running in Expo Go (can't use native modules)
+      const constantsModule = await import('expo-constants');
+      const Constants = constantsModule.default ?? constantsModule;
+      const appOwnership = Constants?.appOwnership ?? null;
+      const executionEnvironment = Constants?.executionEnvironment ?? null;
+      const isExpoGo = appOwnership === 'expo' && executionEnvironment === 'storeClient';
 
-        if (!this.isConnected) {
-          const errorMsg = 'Failed to connect to in-app purchase service. Ensure you are running on a physical device or TestFlight build, not Expo Go.';
-          logger.error('IAP connection failed', { message: errorMsg });
-          throw new Error(errorMsg);
-        }
+      if (isExpoGo) {
+        logger.warn('Running in Expo Go - RevenueCat not available. Use development build or production build.');
+        this.initialized = true;
+        return;
       }
 
-      logger.info('IAP connected to store successfully');
+      const apiKey = Platform.select({
+        ios: Constants.expoConfig?.extra?.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ||
+             process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ||
+             'YOUR_IOS_API_KEY_HERE',
+        android: Constants.expoConfig?.extra?.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ||
+                 process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ||
+                 'YOUR_ANDROID_API_KEY_HERE',
+        default: '',
+      });
 
-      // Load available products
-      logger.info('IAP loading products');
-      await this.loadProducts();
+      logger.info('RevenueCat API key check', {
+        platform: Platform.OS,
+        hasKey: apiKey && !apiKey.includes('YOUR_'),
+        keyPrefix: apiKey ? apiKey.substring(0, 5) : 'none'
+      });
 
-      // Set up purchase listener
-      this.setupPurchaseListener();
+      if (!apiKey || apiKey.includes('YOUR_')) {
+        // For development: allow running without API keys to test UI
+        if (__DEV__) {
+          logger.warn('RevenueCat API key not configured - running in mock mode');
+          this.initialized = true;
+          return;
+        }
+        throw new Error('RevenueCat API key not configured. Please set up your API keys in app.config.js');
+      }
+
+      // Enable debug logging in development
+      if (__DEV__) {
+        Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+      }
+
+      // Configure Purchases
+      Purchases.configure({ apiKey });
+      this.revenueCatConfigured = true;
+
+      // Load offerings
+      await this.loadOfferings();
 
       this.initialized = true;
-      logger.info('IAP initialization complete');
+      logger.info('RevenueCat initialization complete');
     } catch (error: unknown) {
-      logger.error('IAP initialization failed', error);
-      logger.error('IAP common causes: Running in Expo Go, missing plugins, or incorrect configuration');
-      throw (error instanceof Error ? error : new Error(getErrorMessage(error)));
-    }
-  }
-
-  private async loadProducts(): Promise<void> {
-    try {
-      // Get base product IDs
-      const baseProductIds = Object.values(MonetizationService.PRODUCT_IDS).filter(Boolean) as string[];
-      const productIdSet = new Set<string>(baseProductIds);
-      console.log('[IAP] Base product IDs:', baseProductIds);
-
-      const platform = Platform.OS === 'ios' ? 'ios' : 'android';
-      const platformKey = Platform.OS === 'ios' ? 'apple_product_id' : 'google_product_id';
-
-      // Load legacy attraction pack SKUs via iap_products mapping
-      const { data: legacyPacks, error: legacyPacksError } = await supabase
-        .from('attraction_packs')
-        .select('id')
-        .eq('active', true);
-
-      if (legacyPacksError) {
-        console.error('[IAP] Failed to load legacy attraction packs:', legacyPacksError);
-      } else if (legacyPacks && legacyPacks.length > 0) {
-        const legacyPackIds = legacyPacks.map(pack => pack.id);
-        const { data: legacyPackProducts, error: legacyPackProductsError } = await supabase
-          .from('iap_products')
-          .select('id, internal_id')
-          .eq('platform', platform)
-          .eq('active', true)
-          .in('internal_id', legacyPackIds);
-
-        if (legacyPackProductsError) {
-          console.error('[IAP] Failed to load legacy pack product IDs:', legacyPackProductsError);
-        } else if (legacyPackProducts) {
-          legacyPackProducts.forEach(product => {
-            if (product?.id) {
-              productIdSet.add(product.id);
-            }
-          });
-          console.log(`[IAP] Added ${legacyPackProducts.length} legacy pack SKUs from iap_products`);
-        }
-      }
-
-      // Add new attraction package product IDs
-      const { data: packages, error: packagesError } = await supabase
-        .from('attraction_packages')
-        .select('apple_product_id, google_product_id')
-        .eq('is_active', true);
-
-      if (packagesError) {
-        console.error('[IAP] Failed to load attraction packages:', packagesError);
-      } else if (packages) {
-        console.log(`[IAP] Found ${packages.length} attraction packages for ${Platform.OS}`);
-        packages.forEach(pkg => {
-          const productId = pkg?.[platformKey as 'apple_product_id' | 'google_product_id'];
-          if (productId) {
-            productIdSet.add(productId);
-          }
-        });
-      }
-
-      const productIds = Array.from(productIdSet);
-      console.log(`[IAP] Requesting ${productIds.length} total products from store:`, productIds);
-
-      // Fetch product details from platform store
-      const results = (await fetchProducts({
-        skus: productIds,
-        type: 'all',
-      })) ?? [];
-
-      const fetchedProducts = Array.isArray(results) ? results : [];
-
-      this.products = fetchedProducts.map(item => ({
-        productId: item.id,
-        price: item.displayPrice || `${item.price ?? ''}`,
-        currency: item.currency || 'USD',
-        localizedPrice: item.displayPrice || `${item.price ?? ''}`,
-        title: item.title,
-        description: item.description,
-        type: item.type === 'subs' ? 'subscription' : this.getProductType(item.id),
-      }));
-
-      console.log(`[IAP] ✅ Successfully loaded ${this.products.length} products:`);
-      this.products.forEach(p => {
-        console.log(`[IAP]   - ${p.productId}: ${p.localizedPrice} (${p.title})`);
-      });
-
-      const foundIds = this.products.map(p => p.productId);
-      const missingIds = productIds.filter(id => !foundIds.includes(id));
-      if (missingIds.length > 0) {
-        console.warn(`[IAP] ⚠️ ${missingIds.length} products not found in store:`);
-        missingIds.forEach(id => console.warn(`[IAP]   - ${id}`));
-        console.warn('[IAP] Possible causes:');
-        console.warn('[IAP] 1. Product IDs don\'t match App Store Connect/Play Console exactly');
-        console.warn('[IAP] 2. Products not approved or in "Ready to Submit" status');
-        console.warn('[IAP] 3. Running in wrong region/store');
-      }
-    } catch (error: unknown) {
-      console.error('Failed to load products:', error);
-    }
-  }
-
-  private getProductType(productId: string): 'subscription' | 'consumable' | 'non_consumable' {
-    // Subscriptions: unlimited_monthly and legacy subscriptions
-    if (productId.includes('monthly') || productId.includes('yearly') || productId.includes('lifetime')) {
-      return 'subscription';
-    }
-    // Packages and attractions are consumable (credits that get used up)
-    if (productId.includes('package') || productId.includes('attraction')) {
-      return 'consumable';
-    }
-    return 'consumable';
-  }
-
-  private setupPurchaseListener(): void {
-    // Clean up any existing subscriptions to avoid duplicate handlers
-    if (this.purchaseUpdateSubscription) {
-      this.purchaseUpdateSubscription.remove();
-      this.purchaseUpdateSubscription = null;
-    }
-    if (this.purchaseErrorSubscription) {
-      this.purchaseErrorSubscription.remove();
-      this.purchaseErrorSubscription = null;
-    }
-
-    this.purchaseUpdateSubscription = purchaseUpdatedListener(purchase => {
-      if (!purchase) {
+      // In development, allow the app to continue even if RevenueCat fails
+      if (__DEV__) {
+        logger.warn('RevenueCat initialization failed - continuing in mock mode', error);
+        this.initialized = true;
         return;
       }
-
-      if (purchase.purchaseState === 'purchased' || purchase.purchaseState === 'restored') {
-        this.processPurchase(purchase).catch(error => {
-          logger.error('Failed to process purchase', error);
-        });
-      } else if (purchase.purchaseState === 'pending') {
-        logger.info('IAP purchase pending confirmation', { productId: purchase.productId });
-      }
-    });
-
-    this.purchaseErrorSubscription = purchaseErrorListener(error => {
-      if (error?.code === ErrorCode.UserCancelled) {
-        logger.info('IAP user canceled purchase');
-        return;
-      }
-
-      logger.error('IAP purchase error', error);
-    });
-  }
-
-  private async processPurchase(purchase: Purchase): Promise<void> {
-    try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.error('No authenticated user for purchase processing');
-        return;
-      }
-
-      const productId = purchase.productId;
-      const productType = this.getProductType(productId);
-
-      // SECURITY: Verify receipt server-side before processing
-      logger.security('Verifying receipt with server', { productId });
-
-      // Get receipt data - iOS uses transactionReceipt, Android uses purchaseToken
-      // Note: transactionReceipt may not be in expo-iap types but exists at runtime on iOS
-      const receiptData = (purchase as any).transactionReceipt || purchase.purchaseToken || '';
-      const transactionId = purchase.transactionId || purchase.id;
-
-      const { data: verificationResult, error: verificationError } = await supabase.functions.invoke(
-        'verify-receipt',
-        {
-          body: {
-            receipt: receiptData,
-            platform: Platform.OS,
-            productId: productId,
-            transactionId: transactionId,
-          },
-        }
-      );
-
-      if (verificationError || !verificationResult?.valid) {
-        logger.security('Receipt verification failed', {
-          productId,
-          error: verificationResult?.error,
-          hasVerificationError: !!verificationError
-        });
-        throw new Error(`Invalid purchase receipt: ${verificationResult?.error || 'Verification failed'}`);
-      }
-
-      logger.security('Receipt verified successfully', {
-        transactionId: verificationResult.transactionId,
-        productId: productId,
-      });
-
-      // Determine purchase type and process accordingly
-      if (this.isSubscription(productId)) {
-        await this.processSubscriptionPurchase(user.id, productId, purchase);
-      } else {
-        await this.processOneTimePurchase(user.id, productId, purchase);
-      }
-
-      // Acknowledge purchase (subscriptions and non-consumables should not be consumed)
-      await finishTransaction({
-        purchase,
-        isConsumable: productType === 'consumable',
-      });
-
-      logger.info('Purchase processed successfully', { productId });
-    } catch (error: unknown) {
-      logger.error('Failed to process purchase', error);
-      // Still acknowledge to prevent repeated processing
-      try {
-        await finishTransaction({
-          purchase,
-          isConsumable: false,
-        });
-      } catch (finishError) {
-        logger.error('Failed to finish transaction after error', finishError);
-      }
+      logger.error('RevenueCat initialization failed', error);
+      throw error instanceof Error ? error : new Error(getErrorMessage(error));
     }
   }
 
-  private isSubscription(productId: string): boolean {
-    return productId.includes('monthly') || productId.includes('yearly') || productId.includes('lifetime');
-  }
-
-  private async initiatePurchase(productId: string, type: 'in-app' | 'subs'): Promise<boolean> {
-    try {
-      const result = await requestPurchase({
-        request: {
-          ios: { sku: productId },
-          android: { skus: [productId] },
-        },
-        type,
-      });
-
-      if (Array.isArray(result)) {
-        return result.length > 0;
-      }
-
-      return result != null;
-    } catch (error) {
-      const purchaseError = error as PurchaseError;
-      if (purchaseError?.code === ErrorCode.UserCancelled) {
-        console.log(`[IAP] User canceled purchase: ${productId}`);
-      } else if (purchaseError?.code === ErrorCode.AlreadyOwned) {
-        console.warn(`[IAP] Product already owned: ${productId}`);
-        return true;
-      } else {
-        console.error(`[IAP] Purchase request failed for ${productId}:`, error);
-      }
-      return false;
-    }
-  }
-
-  private async processSubscriptionPurchase(
-    userId: string,
-    productId: string,
-    purchase: Purchase
-  ): Promise<void> {
-    const subscriptionType = this.mapProductToSubscriptionType(productId);
-    const purchaseTimestamp = purchase.transactionDate;
-    const expiresAt = this.calculateExpirationDate(subscriptionType, purchaseTimestamp);
-
-    const originalTransactionId =
-      'originalTransactionIdentifierIOS' in purchase && purchase.originalTransactionIdentifierIOS
-        ? purchase.originalTransactionIdentifierIOS
-        : purchase.transactionId ?? purchase.id;
-
-    const { error } = await supabase.from('user_subscriptions').upsert({
-      user_id: userId,
-      subscription_type: subscriptionType,
-      is_active: true,
-      platform: Platform.OS === 'ios' ? 'apple' : 'google',
-      original_transaction_id: originalTransactionId,
-      product_id: productId,
-      purchase_token: purchase.purchaseToken || '',
-      purchase_date: new Date(purchaseTimestamp).toISOString(),
-      expiration_date: expiresAt,
-      auto_renew: true,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      throw error;
-    }
-  }
-
-  private async processOneTimePurchase(
-    userId: string,
-    productId: string,
-    purchase: Purchase
-  ): Promise<void> {
-    // Check if it's a new attraction package
-    const { data: attractionPackage } = await supabase
-      .from('attraction_packages')
-      .select('*')
-      .or(`apple_product_id.eq.${productId},google_product_id.eq.${productId}`)
-      .single();
-
-    if (attractionPackage) {
-      // Handle new attraction package purchase
-      const { error } = await supabase.from('user_package_purchases').insert({
-        user_id: userId,
-        package_id: attractionPackage.id,
-        platform_transaction_id: purchase.transactionId ?? purchase.id,
-        purchased_at: new Date(purchase.transactionDate).toISOString(),
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      // Update user's attraction limit
-      await this.updateUserAttractionLimit(userId);
+  private async loadOfferings(): Promise<void> {
+    if (!this.revenueCatConfigured) {
+      logger.warn('RevenueCat not configured, skipping offerings load');
       return;
     }
 
-    // Handle legacy attraction packs and single attractions
-    const purchaseType = productId.startsWith('pack_') ? 'attraction_pack' : 'single_attraction';
-    
-    // Get item data (attraction IDs for packs)
-    let itemData: any = { productId };
-    if (purchaseType === 'attraction_pack') {
-      const { data: pack } = await supabase
-        .from('attraction_packs')
-        .select('attraction_ids')
-        .eq('id', productId)
-        .single();
-      
-      if (pack) {
-        itemData = { ...itemData, attractionIds: pack.attraction_ids };
+    try {
+      const offerings = await Purchases.getOfferings();
+      this.currentOfferings = offerings;
+
+      if (offerings.current) {
+        logger.info('RevenueCat offerings loaded', {
+          offeringId: offerings.current.identifier,
+          packageCount: offerings.current.availablePackages.length,
+        });
+      } else {
+        logger.warn('No current offering found in RevenueCat');
       }
-    }
-
-    const { error } = await supabase.from('user_purchases').insert({
-      user_id: userId,
-      product_id: productId,
-      platform_transaction_id: purchase.transactionId ?? purchase.id,
-      purchase_type: purchaseType,
-      item_data: itemData,
-      purchased_at: new Date(purchase.transactionDate).toISOString(),
-    });
-
-    if (error) {
+    } catch (error: unknown) {
+      logger.error('Failed to load offerings', error);
       throw error;
-    }
-  }
-
-  private mapProductToSubscriptionType(productId: string): string {
-    if (productId.includes('unlimited_monthly')) return 'unlimited_monthly';
-    // Legacy subscription types (for existing subscriptions only)
-    if (productId.includes('premium_monthly')) return 'premium_monthly';
-    if (productId.includes('yearly')) return 'premium_yearly';
-    if (productId.includes('lifetime')) return 'lifetime';
-    // Default to unlimited monthly for new subscriptions
-    return 'unlimited_monthly';
-  }
-
-  private calculateExpirationDate(subscriptionType: string, purchaseTime: number): string {
-    const purchaseDate = new Date(purchaseTime);
-
-    switch (subscriptionType) {
-      case 'unlimited_monthly':
-        return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
-      // Legacy subscription types (for existing subscriptions only)
-      case 'premium_monthly':
-        return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
-      case 'premium_yearly':
-        return new Date(purchaseDate.setFullYear(purchaseDate.getFullYear() + 1)).toISOString();
-      case 'lifetime':
-        return new Date('2099-12-31').toISOString(); // Far future date
-      default:
-        return new Date(purchaseDate.setMonth(purchaseDate.getMonth() + 1)).toISOString();
     }
   }
 
@@ -557,7 +242,37 @@ export class MonetizationService {
 
   async getAvailableProducts(): Promise<Product[]> {
     if (!this.initialized) await this.initialize();
-    return this.products;
+
+    if (!this.revenueCatConfigured || !this.currentOfferings?.current) {
+      return [];
+    }
+
+    const products: Product[] = [];
+
+    for (const pkg of this.currentOfferings.current.availablePackages) {
+      const product = pkg.product;
+      products.push({
+        productId: product.identifier,
+        price: product.priceString,
+        currency: product.currencyCode,
+        localizedPrice: product.priceString,
+        title: product.title,
+        description: product.description,
+        type: this.getProductType(product.identifier),
+      });
+    }
+
+    return products;
+  }
+
+  private getProductType(productId: string): 'subscription' | 'consumable' | 'non_consumable' {
+    if (productId.includes('monthly') || productId.includes('yearly') || productId.includes('lifetime')) {
+      return 'subscription';
+    }
+    if (productId.includes('package') || productId.includes('attraction')) {
+      return 'consumable';
+    }
+    return 'consumable';
   }
 
   async getAttractionPacks(): Promise<AttractionPack[]> {
@@ -594,10 +309,29 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      const productId = this.getProductIdForSubscriptionType(subscriptionType);
-      return await this.initiatePurchase(productId, 'subs');
-    } catch (error) {
-      console.error('Subscription purchase failed:', error);
+      if (!this.revenueCatConfigured) {
+        logger.error('RevenueCat not configured - cannot purchase subscription');
+        return false;
+      }
+
+      const pkg = this.findPackageByType('subscription');
+      if (!pkg) {
+        throw new Error('Subscription package not found');
+      }
+
+      const { customerInfo } = await Purchases.purchasePackage(pkg);
+
+      // Sync with Supabase
+      await this.syncCustomerInfo(customerInfo);
+
+      logger.info('Subscription purchased successfully');
+      return true;
+    } catch (error: any) {
+      if (error.userCancelled) {
+        logger.info('User cancelled subscription purchase');
+        return false;
+      }
+      logger.error('Subscription purchase failed', error);
       return false;
     }
   }
@@ -606,10 +340,12 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      const productId = `attraction_${attractionId}`;
-      return await this.initiatePurchase(productId, 'in-app');
+      // Single attractions not supported with RevenueCat packages
+      // Consider using consumables or directing users to packages
+      logger.warn('Single attraction purchases not implemented with RevenueCat');
+      return false;
     } catch (error) {
-      console.error('Attraction purchase failed:', error);
+      logger.error('Attraction purchase failed', error);
       return false;
     }
   }
@@ -618,9 +354,60 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      return await this.initiatePurchase(packId, 'in-app');
-    } catch (error) {
-      console.error('Pack purchase failed:', error);
+      if (!this.revenueCatConfigured) {
+        logger.error('RevenueCat not configured - cannot purchase pack');
+        return false;
+      }
+
+      const pkg = this.findPackageById(packId);
+      if (!pkg) {
+        throw new Error(`Package not found: ${packId}`);
+      }
+
+      const { customerInfo } = await Purchases.purchasePackage(pkg);
+
+      // Sync with Supabase
+      await this.syncCustomerInfo(customerInfo);
+
+      logger.info('Package purchased successfully', { packId });
+      return true;
+    } catch (error: any) {
+      if (error.userCancelled) {
+        logger.info('User cancelled package purchase');
+        return false;
+      }
+      logger.error('Package purchase failed', error);
+      return false;
+    }
+  }
+
+  async purchaseAttractionPackage(packageId: string): Promise<boolean> {
+    try {
+      if (!this.initialized) await this.initialize();
+
+      if (!this.revenueCatConfigured) {
+        logger.error('RevenueCat not configured - cannot purchase package');
+        return false;
+      }
+
+      const pkg = this.findPackageByEntitlement(packageId);
+      if (!pkg) {
+        throw new Error(`Package not found: ${packageId}`);
+      }
+
+      const { customerInfo } = await Purchases.purchasePackage(pkg);
+
+      // Sync with Supabase
+      await this.syncCustomerInfo(customerInfo);
+
+      logger.info('Attraction package purchased successfully', { packageId });
+      return true;
+    } catch (error: any) {
+      if (error.userCancelled) {
+        logger.info('User cancelled attraction package purchase');
+        return false;
+      }
+      logger.error('Attraction package purchase failed', error);
       return false;
     }
   }
@@ -629,43 +416,51 @@ export class MonetizationService {
     try {
       if (!this.initialized) await this.initialize();
 
-      await restoreNativePurchases();
-      const purchases = await getAvailablePurchases({
-        alsoPublishToEventListenerIOS: false,
-        onlyIncludeActiveItemsIOS: true,
-      });
-
-      if (!purchases || purchases.length === 0) {
-        console.log('[IAP] No purchases available to restore');
-        return;
+      if (!this.revenueCatConfigured) {
+        logger.error('RevenueCat not configured - cannot restore purchases');
+        throw new Error('RevenueCat not configured');
       }
 
-      for (const purchase of purchases) {
-        await this.processPurchase(purchase);
-      }
+      const { customerInfo } = await Purchases.restorePurchases();
 
-      console.log(`[IAP] Restored ${purchases.length} purchases`);
+      // Sync restored purchases with Supabase
+      await this.syncCustomerInfo(customerInfo);
+
+      logger.info('Purchases restored successfully');
     } catch (error) {
-      console.error('Restore purchases failed:', error);
+      logger.error('Restore purchases failed', error);
       throw error;
     }
   }
 
   async getSubscriptionStatus(userId: string): Promise<SubscriptionStatus> {
     try {
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .order('expiration_date', { ascending: false })
-        .limit(1);
+      if (!this.revenueCatConfigured) {
+        logger.warn('RevenueCat not configured, returning free tier status');
+        // Return default free tier status without making RevenueCat calls
+        const { data, error } = await supabase
+          .from('user_subscriptions')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('is_active', true)
+          .order('expiration_date', { ascending: false })
+          .limit(1);
 
-      if (error) {
-        console.error('Failed to get subscription status:', error);
-      }
+        if (!error && data && data.length > 0) {
+          const subscription = data[0];
+          const expiresAt = subscription.expiration_date ? new Date(subscription.expiration_date) : null;
+          const isActive = subscription.is_active && (!expiresAt || expiresAt > new Date());
 
-      if (!data || data.length === 0) {
+          return {
+            isActive,
+            type: subscription.subscription_type,
+            expiresAt,
+            inGracePeriod: false,
+            inTrial: false,
+            trialEndsAt: null,
+          };
+        }
+
         return {
           isActive: false,
           type: 'free',
@@ -676,21 +471,91 @@ export class MonetizationService {
         };
       }
 
-      const subscription = data[0];
-      const now = new Date();
-      const expiresAt = subscription.expiration_date ? new Date(subscription.expiration_date) : null;
-      const isActive = subscription.is_active && (!expiresAt || expiresAt > now);
+      const { customerInfo } = await Purchases.getCustomerInfo();
+      await this.syncCustomerInfo(customerInfo);
+
+      const activeEntitlements = customerInfo.entitlements?.active ?? {};
+      const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
+
+      const unlimitedEntitlement =
+        activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
+        Object.values(activeEntitlements).find(
+          entitlement => entitlement.productIdentifier === MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY
+        );
+
+      const hasUnlimited =
+        Boolean(unlimitedEntitlement) ||
+        activeSubscriptions.has(MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY);
+
+      if (hasUnlimited) {
+        const subscriptionInfo =
+          customerInfo.subscriptionsByProductIdentifier?.[MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY] ?? null;
+
+        const expirationIso =
+          unlimitedEntitlement?.expirationDate ??
+          subscriptionInfo?.expiresDate ??
+          customerInfo.allExpirationDates?.[MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY] ??
+          null;
+
+        const periodType = subscriptionInfo?.periodType ?? unlimitedEntitlement?.periodType ?? null;
+
+        const gracePeriodExpires = subscriptionInfo?.gracePeriodExpiresDate
+          ? new Date(subscriptionInfo.gracePeriodExpiresDate)
+          : null;
+
+        const trialEndsAtIso =
+          periodType && (periodType === 'TRIAL' || periodType === 'INTRO')
+            ? subscriptionInfo?.expiresDate ?? unlimitedEntitlement?.expirationDate ?? null
+            : null;
+
+        return {
+          isActive: true,
+          type: 'unlimited_monthly',
+          expiresAt: expirationIso ? new Date(expirationIso) : null,
+          inGracePeriod: gracePeriodExpires ? gracePeriodExpires > new Date() : false,
+          inTrial: periodType === 'TRIAL' || periodType === 'INTRO',
+          trialEndsAt: trialEndsAtIso ? new Date(trialEndsAtIso) : null,
+        };
+      }
+
+      // Check Supabase for legacy subscriptions
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_active', true)
+        .order('expiration_date', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        logger.error('Failed to get subscription status from Supabase', error);
+      }
+
+      if (data && data.length > 0) {
+        const subscription = data[0];
+        const expiresAt = subscription.expiration_date ? new Date(subscription.expiration_date) : null;
+        const isActive = subscription.is_active && (!expiresAt || expiresAt > new Date());
+
+        return {
+          isActive,
+          type: subscription.subscription_type,
+          expiresAt,
+          inGracePeriod: false,
+          inTrial: false,
+          trialEndsAt: null,
+        };
+      }
 
       return {
-        isActive,
-        type: subscription.subscription_type,
-        expiresAt,
-        inGracePeriod: false, // Grace period not tracked in current schema
-        inTrial: false, // Trial not tracked in current schema
+        isActive: false,
+        type: 'free',
+        expiresAt: null,
+        inGracePeriod: false,
+        inTrial: false,
         trialEndsAt: null,
       };
     } catch (error: unknown) {
-      console.error('Failed to get subscription status:', error);
+      logger.error('Failed to get subscription status', error);
       return {
         isActive: false,
         type: 'free',
@@ -704,85 +569,125 @@ export class MonetizationService {
 
   async getUserEntitlements(userId: string): Promise<UserEntitlements> {
     try {
-      // Get subscription status
-      const subscription = await this.getSubscriptionStatus(userId);
-      
-      // Try to get package entitlements using RPC function first
-      let entitlement = {
-        total_attraction_limit: 2,
-        attractions_used: 0,
-        remaining_attractions: 2,
-        owned_packages: [] as string[]
-      };
-
-      try {
-        const { data: packageEntitlements } = await supabase.rpc('get_user_package_entitlements', {
-          user_uuid: userId
-        });
-        
-        if (packageEntitlements?.[0]) {
-          entitlement = packageEntitlements[0];
-        }
-      } catch (rpcError: unknown) {
-        // Fallback to direct query if RPC fails
-        console.log('RPC failed, falling back to direct query');
-        const { data: userUsage } = await supabase
+      if (!this.revenueCatConfigured) {
+        logger.warn('RevenueCat not configured, returning default entitlements');
+        // Get usage from Supabase only
+        const { data: usage } = await supabase
           .from('user_usage')
           .select('usage_count, package_limit')
           .eq('user_id', userId)
           .single();
-        
-        if (userUsage) {
-          entitlement.attractions_used = userUsage.usage_count || 0;
-          entitlement.total_attraction_limit = userUsage.package_limit || 2;
-          entitlement.remaining_attractions = Math.max(0, entitlement.total_attraction_limit - entitlement.attractions_used);
+
+        const totalAttractionLimit = usage?.package_limit || 2;
+        const attractionsUsed = usage?.usage_count || 0;
+        const remainingFreeAttractions = Math.max(0, totalAttractionLimit - attractionsUsed);
+
+        return {
+          hasUnlimitedAccess: false,
+          totalAttractionLimit,
+          remainingFreeAttractions,
+          attractionsUsed,
+          ownedAttractions: [],
+          ownedPacks: [],
+          ownedPackages: [],
+        };
+      }
+
+      const { customerInfo } = await Purchases.getCustomerInfo();
+      await this.syncCustomerInfo(customerInfo);
+
+      const activeEntitlements = customerInfo.entitlements?.active ?? {};
+      const activeEntitlementValues = Object.values(activeEntitlements);
+      const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
+      const purchasedProductIds = new Set(customerInfo.allPurchasedProductIdentifiers ?? []);
+      const nonSubscriptionTransactions = customerInfo.nonSubscriptionTransactions ?? [];
+
+      const unlimitedEntitlement =
+        activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
+        activeEntitlementValues.find(
+          entitlement => entitlement.productIdentifier === MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY
+        );
+
+      const hasUnlimitedAccess =
+        Boolean(unlimitedEntitlement) ||
+        activeSubscriptions.has(MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY);
+
+      let computedAttractionLimit = 2; // Default free tier
+      const ownedPackages: string[] = [];
+
+      for (const config of MonetizationService.PACKAGE_CONFIGS) {
+        const entitlementMatch = config.entitlementId
+          ? activeEntitlements[config.entitlementId]
+          : undefined;
+
+        const entitlementProductMatch = activeEntitlementValues.some(
+          entitlement => entitlement.productIdentifier === config.productId
+        );
+
+        const productMatch =
+          purchasedProductIds.has(config.productId) ||
+          nonSubscriptionTransactions.some(tx => tx.productIdentifier === config.productId);
+
+        if (entitlementMatch || entitlementProductMatch || productMatch) {
+          computedAttractionLimit = Math.max(computedAttractionLimit, config.attractionLimit);
+          if (!ownedPackages.includes(config.id)) {
+            ownedPackages.push(config.id);
+          }
         }
       }
 
-      // Get owned packages details
-      const { data: ownedPackages } = await supabase
-        .from('attraction_packages')
-        .select('*')
-        .in('id', entitlement.owned_packages || [])
-        .eq('is_active', true);
-
-      // Get individual purchases (legacy)
-      const { data: purchases } = await supabase
-        .from('user_purchases')
-        .select('*')
-        .eq('user_id', userId);
-
-      const ownedAttractions: string[] = [];
-      const ownedPacks: string[] = [];
-
-      if (purchases) {
-        purchases.forEach(purchase => {
-          if (purchase.purchase_type === 'attraction_pack') {
-            ownedPacks.push(purchase.product_id);
-          } else if (purchase.product_id.startsWith('attraction_')) {
-            ownedAttractions.push(purchase.product_id.replace('attraction_', ''));
-          }
-        });
+      if (hasUnlimitedAccess) {
+        computedAttractionLimit = MonetizationService.UNLIMITED_USAGE_LIMIT;
       }
 
-      // Check for unlimited access - current subscription or legacy subscriptions
-      const hasUnlimitedAccess = subscription.isActive && (
-        subscription.type === 'unlimited_monthly' ||
-        // Legacy subscriptions (grandfathered)
-        ['premium_monthly', 'premium_yearly', 'lifetime'].includes(subscription.type || '')
-      );
+      const { data: usage, error: usageError } = await supabase
+        .from('user_usage')
+        .select('usage_count, package_limit')
+        .eq('user_id', userId)
+        .single();
+
+      if (usageError && usageError.code !== 'PGRST116') {
+        logger.error('Failed to fetch user usage for entitlements', usageError);
+      }
+
+      const attractionsUsed = usage?.usage_count || 0;
+      const storedLimit = usage?.package_limit ?? 2;
+      const targetUsageLimit = computedAttractionLimit;
+
+      if (storedLimit !== targetUsageLimit) {
+        await this.syncUsageLimit(userId, targetUsageLimit, usage ?? null);
+      }
+
+      const remainingFreeAttractions = hasUnlimitedAccess
+        ? MonetizationService.UNLIMITED_USAGE_LIMIT
+        : Math.max(0, targetUsageLimit - attractionsUsed);
+
+      let packageDetails: AttractionPackage[] = [];
+      if (ownedPackages.length > 0) {
+        const { data: packagesData, error: packagesError } = await supabase
+          .from('attraction_packages')
+          .select('*')
+          .in('id', ownedPackages)
+          .eq('is_active', true);
+
+        if (packagesError) {
+          logger.error('Failed to fetch owned attraction packages', packagesError);
+        } else if (packagesData) {
+          packageDetails = packagesData;
+        }
+      }
 
       return {
         hasUnlimitedAccess,
-        totalAttractionLimit: entitlement.total_attraction_limit,
-        remainingFreeAttractions: entitlement.remaining_attractions,
-        attractionsUsed: entitlement.attractions_used,
-        ownedAttractions: Array.from(new Set(ownedAttractions)),
-        ownedPacks: Array.from(new Set(ownedPacks)),
-        ownedPackages: ownedPackages || [],
+        totalAttractionLimit: targetUsageLimit,
+        remainingFreeAttractions,
+        attractionsUsed,
+        ownedAttractions: [],
+        ownedPacks: ownedPackages,
+        ownedPackages: packageDetails,
       };
     } catch (error: unknown) {
-      console.error('Failed to get user entitlements:', error);
+      logger.error('Failed to get user entitlements', error);
       return {
         hasUnlimitedAccess: false,
         totalAttractionLimit: 2,
@@ -795,151 +700,158 @@ export class MonetizationService {
     }
   }
 
+  private async syncUsageLimit(
+    userId: string,
+    targetLimit: number,
+    existingUsage: { package_limit?: number | null; usage_count?: number | null } | null
+  ): Promise<void> {
+    try {
+      if (existingUsage) {
+        if ((existingUsage.package_limit ?? 2) === targetLimit) {
+          return;
+        }
+
+        const { error: updateError } = await supabase
+          .from('user_usage')
+          .update({
+            package_limit: targetLimit,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId);
+
+        if (updateError) {
+          logger.error('Failed to update user usage limit', updateError);
+        }
+        return;
+      }
+
+      const { error: insertError } = await supabase
+        .from('user_usage')
+        .insert({
+          user_id: userId,
+          usage_count: 0,
+          package_usage_count: 0,
+          package_limit: targetLimit,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (insertError) {
+        logger.error('Failed to create user usage record with limit', insertError);
+      }
+    } catch (error: unknown) {
+      logger.error('Error syncing user usage limit', error);
+    }
+  }
+
   async recordAttractionUsage(userId: string, attractionId: string): Promise<void> {
     try {
-      // Skip if no userId or attractionId
       if (!userId || !attractionId) {
         console.log('Skipping attraction usage recording - missing userId or attractionId');
         return;
       }
 
-      // First check if user has an active subscription
+      // Check if user has unlimited access
       const subscription = await this.getSubscriptionStatus(userId);
-      const accessType = (subscription && subscription.isActive && subscription.type !== 'free') 
-        ? 'premium' 
-        : 'free';
-      
-      // Skip recording for premium/unlimited users
-      if (accessType === 'premium') {
-        return;
+      if (subscription.isActive && subscription.type !== 'free') {
+        return; // Skip recording for premium users
       }
 
-      // Get current usage and package limits
+      // Get current usage
       const { data: currentUsage, error: fetchError } = await supabase
         .from('user_usage')
         .select('usage_count, package_limit')
         .eq('user_id', userId)
         .single();
-      
+
       if (fetchError && fetchError.code !== 'PGRST116') {
-        // PGRST116 means no rows found, which is ok for first time users
         console.error('Failed to fetch user_usage:', fetchError);
       }
-      
+
       const currentCount = currentUsage?.usage_count || 0;
-      const packageLimit = currentUsage?.package_limit || 2; // Default to free tier
+      const packageLimit = currentUsage?.package_limit || 2;
       const newCount = currentCount + 1;
-      
-      // Don't exceed the user's package limit
+
       if (newCount > packageLimit) {
         console.log(`Usage would exceed package limit (${packageLimit}) for user ${userId}`);
         return;
       }
-      
-      // Try to update existing record first
+
+      // Update or insert usage record
       if (currentUsage) {
         const { error: updateError } = await supabase
           .from('user_usage')
           .update({
             usage_count: newCount,
-            package_usage_count: newCount, // Track package usage separately
-            updated_at: new Date().toISOString()
+            package_usage_count: newCount,
+            updated_at: new Date().toISOString(),
           })
           .eq('user_id', userId);
-        
+
         if (updateError) {
           console.error('Failed to update user_usage:', updateError);
         } else {
           console.log(`Updated attraction usage count: ${newCount}/${packageLimit} for user ${userId}`);
         }
       } else {
-        // Get user's package entitlements to set correct limit
-        const { data: entitlements } = await supabase.rpc('get_user_package_entitlements', {
-          user_uuid: userId
-        });
-        const userLimit = entitlements?.[0]?.total_attraction_limit || 2;
-        
-        // Insert new record for first-time users
         const { error: insertError } = await supabase
           .from('user_usage')
           .insert({
             user_id: userId,
             usage_count: newCount,
-            package_limit: userLimit,
+            package_limit: packageLimit,
             package_usage_count: newCount,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           });
-        
+
         if (insertError) {
           console.error('Failed to insert user_usage:', insertError);
         } else {
-          console.log(`Created new usage record with count: ${newCount}/${userLimit} for user ${userId}`);
+          console.log(`Created new usage record with count: ${newCount}/${packageLimit} for user ${userId}`);
         }
-      }
-
-      // Also try to call the RPC function if it exists (for compatibility)
-      try {
-        await supabase.rpc('track_attraction_usage', {
-          p_access_type: accessType,
-          p_attraction_id: attractionId,
-          p_user_id: userId
-        });
-      } catch (rpcError: unknown) {
-        console.warn('track_attraction_usage RPC failed:', rpcError);
       }
     } catch (error: unknown) {
       console.error('Failed to record attraction usage:', error);
     }
   }
 
-  // Development helper - reset user's free attraction counter
   async resetUserAttractionUsage(userId: string): Promise<void> {
     try {
-      // First check if a record exists
       const { data: existingUsage } = await supabase
         .from('user_usage')
         .select('usage_count, package_limit')
         .eq('user_id', userId)
         .single();
-      
+
       if (existingUsage) {
-        // Update existing record to 0
         const { error: updateError } = await supabase
           .from('user_usage')
           .update({
             usage_count: 0,
             package_usage_count: 0,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           })
           .eq('user_id', userId);
-        
+
         if (updateError) {
           console.error('Failed to reset user attraction usage:', updateError);
         } else {
           console.log(`Reset attraction usage from ${existingUsage.usage_count} to 0 for user ${userId}`);
         }
       } else {
-        // Get user's package entitlements to set correct limit
-        const { data: entitlements } = await supabase.rpc('get_user_package_entitlements', {
-          user_uuid: userId
-        });
-        const userLimit = entitlements?.[0]?.total_attraction_limit || 2;
-        
-        // No record exists, create one with 0 usage
         const { error: insertError } = await supabase
           .from('user_usage')
           .insert({
             user_id: userId,
             usage_count: 0,
             package_usage_count: 0,
-            package_limit: userLimit,
-            updated_at: new Date().toISOString()
+            package_limit: 2,
+            updated_at: new Date().toISOString(),
           });
-        
+
         if (insertError) {
           console.error('Failed to create user usage record:', insertError);
         } else {
-          console.log(`Created new usage record with 0/${userLimit} attractions for user ${userId}`);
+          console.log(`Created new usage record with 0/2 attractions for user ${userId}`);
         }
       }
     } catch (error: unknown) {
@@ -949,20 +861,19 @@ export class MonetizationService {
 
   async canUserAccessAttraction(userId: string, attractionId: string): Promise<boolean> {
     try {
-      // Try the new package-aware function first
       const { data, error } = await supabase.rpc('can_user_access_attraction_with_packages', {
         user_uuid: userId,
-        attraction_id: attractionId
+        attraction_id: attractionId,
       });
 
       if (!error && data !== null) {
         return data || false;
       }
 
-      // Fallback to legacy function if new one doesn't exist
+      // Fallback to legacy function
       const { data: legacyData, error: legacyError } = await supabase.rpc('can_user_access_attraction', {
         user_uuid: userId,
-        attraction_id: attractionId
+        attraction_id: attractionId,
       });
 
       if (legacyError) {
@@ -978,116 +889,163 @@ export class MonetizationService {
   }
 
   isAttractionInPack(attractionId: string, packId: string): boolean {
-    // This would be cached/memoized in a real implementation
-    // For now, return false - actual implementation would check pack data
-    // TODO: Implement proper pack checking logic with caching
     return false;
   }
 
-  // Cleanup method to disconnect from IAP service
+  // Cleanup method
   async cleanup(): Promise<void> {
     try {
-      if (this.purchaseUpdateSubscription) {
-        this.purchaseUpdateSubscription.remove();
-        this.purchaseUpdateSubscription = null;
-      }
-      if (this.purchaseErrorSubscription) {
-        this.purchaseErrorSubscription.remove();
-        this.purchaseErrorSubscription = null;
-      }
-
-      if (this.isConnected) {
-        // Disconnect from IAP service
-        await endConnection();
-        this.isConnected = false;
-      }
-      
       this.initialized = false;
-      this.products = [];
+      this.revenueCatConfigured = false;
+      this.currentOfferings = null;
       console.log('MonetizationService cleaned up successfully');
     } catch (error: unknown) {
       console.error('Error during MonetizationService cleanup:', error);
     }
   }
 
-  private getProductIdForSubscriptionType(subscriptionType: string): string {
-    // Only unlimited_monthly is available for new purchases
-    // Legacy types maintained for backward compatibility only
-    return MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY!;
-  }
-
-  // New method to purchase attraction packages
-  async purchaseAttractionPackage(packageId: string): Promise<boolean> {
-    try {
-      if (!this.initialized) await this.initialize();
-      
-      // Get the package details to find the correct product ID for the platform
-      const { data: packageData, error } = await supabase
-        .from('attraction_packages')
-        .select('apple_product_id, google_product_id')
-        .eq('id', packageId)
-        .single();
-
-      if (error || !packageData) {
-        console.error('Package not found:', packageId);
-        return false;
-      }
-
-      const productId = Platform.OS === 'ios'
-        ? packageData.apple_product_id
-        : packageData.google_product_id;
-
-      if (!productId) {
-        console.error('No product ID configured for package:', packageId);
-        return false;
-      }
-
-      return await this.initiatePurchase(productId, 'in-app');
-    } catch (error) {
-      console.error('Package purchase failed:', error);
-      return false;
-    }
-  }
-
-  // Helper method to update user's attraction limit after package purchase
-  private async updateUserAttractionLimit(userId: string): Promise<void> {
-    try {
-      // Get user's highest package limit
-      const { data: entitlements } = await supabase.rpc('get_user_package_entitlements', {
-        user_uuid: userId
-      });
-
-      if (entitlements && entitlements.length > 0) {
-        const { total_attraction_limit } = entitlements[0];
-        
-        // Update or insert user usage with new limit
-        await supabase
-          .from('user_usage')
-          .upsert({
-            user_id: userId,
-            package_limit: total_attraction_limit,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'user_id'
-          });
-      }
-    } catch (error) {
-      console.error('Failed to update user attraction limit:', error);
-    }
-  }
-
-  // Clean up resources
   dispose(): void {
-    if (this.purchaseUpdateSubscription) {
-      this.purchaseUpdateSubscription.remove();
-      this.purchaseUpdateSubscription = null;
-    }
-    if (this.purchaseErrorSubscription) {
-      this.purchaseErrorSubscription.remove();
-      this.purchaseErrorSubscription = null;
-    }
     this.initialized = false;
-    this.isConnected = false;
+    this.revenueCatConfigured = false;
+    this.currentOfferings = null;
+  }
+
+  // Helper methods
+
+  private findPackageByType(type: 'subscription' | 'package'): PurchasesPackage | null {
+    if (!this.currentOfferings?.current) return null;
+
+    for (const pkg of this.currentOfferings.current.availablePackages) {
+      if (type === 'subscription' && this.isSubscription(pkg.product.identifier)) {
+        return pkg;
+      }
+      if (type === 'package' && this.isPackage(pkg.product.identifier)) {
+        return pkg;
+      }
+    }
+
+    return null;
+  }
+
+  private findPackageById(packId: string): PurchasesPackage | null {
+    if (!this.currentOfferings?.current) return null;
+
+    return this.currentOfferings.current.availablePackages.find(
+      pkg => pkg.identifier === packId || pkg.product.identifier === packId
+    ) || null;
+  }
+
+  private findPackageByEntitlement(identifier: string): PurchasesPackage | null {
+    if (!this.currentOfferings?.current) return null;
+
+    const normalizedIdentifier = identifier.toLowerCase();
+    const config = MonetizationService.PACKAGE_CONFIGS.find(cfg => {
+      const candidates = [cfg.id, cfg.entitlementId, cfg.productId]
+        .filter((value): value is string => Boolean(value))
+        .map(value => value.toLowerCase());
+      return candidates.includes(normalizedIdentifier);
+    });
+
+    const matchTargets = new Set<string>(
+      [
+        normalizedIdentifier,
+        identifier,
+        config?.id,
+        config?.entitlementId,
+        config?.productId,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .map(value => value.toLowerCase())
+    );
+
+    for (const pkg of this.currentOfferings.current.availablePackages) {
+      const packageIdentifier = pkg.identifier?.toLowerCase?.() ?? '';
+      const productIdentifier = pkg.product?.identifier?.toLowerCase?.() ?? '';
+      const entitlementIdentifier = pkg.product?.entitlementIdentifier?.toLowerCase?.() ?? '';
+
+      if (
+        (packageIdentifier && matchTargets.has(packageIdentifier)) ||
+        (productIdentifier && matchTargets.has(productIdentifier)) ||
+        (entitlementIdentifier && matchTargets.has(entitlementIdentifier))
+      ) {
+        return pkg;
+      }
+    }
+
+    logger.warn('No RevenueCat package matched identifier', {
+      identifier,
+      candidates: Array.from(matchTargets),
+      availablePackages: this.currentOfferings.current.availablePackages.map(pkg => ({
+        identifier: pkg.identifier,
+        productIdentifier: pkg.product?.identifier,
+        entitlementIdentifier: pkg.product?.entitlementIdentifier,
+      })),
+    });
+
+    return null;
+  }
+
+  private isSubscription(productId: string): boolean {
+    return productId.includes('unlimited_monthly') ||
+           productId.includes('premium_monthly') ||
+           productId.includes('yearly') ||
+           productId.includes('lifetime');
+  }
+
+  private isPackage(productId: string): boolean {
+    return productId.includes('package');
+  }
+
+  private async syncCustomerInfo(customerInfo: CustomerInfo): Promise<void> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Sync RevenueCat customer ID to Supabase
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          revenuecat_customer_id: customerInfo.originalAppUserId,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'id',
+        });
+
+      if (error) {
+        logger.error('Failed to sync RevenueCat customer ID', error);
+      }
+    } catch (error) {
+      logger.error('Failed to sync customer info', error);
+    }
+  }
+
+  // Set user ID for RevenueCat
+  async setUserId(userId: string): Promise<void> {
+    try {
+      if (!this.revenueCatConfigured) {
+        logger.warn('RevenueCat not configured, skipping setUserId');
+        return;
+      }
+      await Purchases.logIn(userId);
+      logger.info('RevenueCat user ID set', { userId });
+    } catch (error) {
+      logger.error('Failed to set RevenueCat user ID', error);
+    }
+  }
+
+  // Log out user from RevenueCat
+  async logoutUser(): Promise<void> {
+    try {
+      if (!this.revenueCatConfigured) {
+        logger.warn('RevenueCat not configured, skipping logoutUser');
+        return;
+      }
+      await Purchases.logOut();
+      logger.info('RevenueCat user logged out');
+    } catch (error) {
+      logger.error('Failed to logout RevenueCat user', error);
+    }
   }
 }
 

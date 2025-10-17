@@ -1,0 +1,133 @@
+{
+  "identifier" : "nuolo",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "3.99",
+      "familyShareable" : false,
+      "internalID" : "basic_package",
+      "localizations" : [
+        {
+          "description" : "5 audio guide credits",
+          "displayName" : "Basic Package",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "nuolo_basic_package",
+      "referenceName" : "Basic Package",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "standard_package",
+      "localizations" : [
+        {
+          "description" : "20 audio guide credits",
+          "displayName" : "Standard Package",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "nuolo_standard_package",
+      "referenceName" : "Standard Package",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "19.99",
+      "familyShareable" : false,
+      "internalID" : "premium_package",
+      "localizations" : [
+        {
+          "description" : "50 audio guide credits",
+          "displayName" : "Premium Package",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "nuolo_premium_package",
+      "referenceName" : "Premium Package",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "02e81b2a-f890-4c6e-8607-e4893ec8f63f",
+    "_developerTeamID" : "YOUR_TEAM_ID",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 746668800.0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptions" : [
+    {
+      "adHocOffers" : [],
+      "codeOffers" : [],
+      "displayPrice" : "29.99",
+      "familyShareable" : false,
+      "groupNumber" : 1,
+      "internalID" : "unlimited_monthly",
+      "introductoryOffer" : null,
+      "localizations" : [
+        {
+          "description" : "Unlimited access to all audio guides",
+          "displayName" : "Unlimited Monthly",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "nuolo_unlimited_monthly",
+      "recurringSubscriptionPeriod" : "P1M",
+      "referenceName" : "Unlimited Monthly",
+      "subscriptionGroupID" : "nuolo_subscriptions",
+      "type" : "RecurringSubscription"
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

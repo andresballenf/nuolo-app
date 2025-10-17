@@ -8,7 +8,7 @@ import { SettingsContent } from '../components/ui/SettingsContent';
 import { FullScreenAudioMode } from '../components/audio/FullScreenAudioMode';
 import { MiniAudioPlayer } from '../components/audio/MiniAudioPlayer';
 import { TopNavigationBar } from '../components/ui/TopNavigationBar';
-import { PaywallModal } from '../components/ui/PaywallModal';
+import { RevenueCatPaywallModal } from '../components/ui/RevenueCatPaywallModal';
 import { useApp } from '../contexts/AppContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAudio } from '../contexts/AudioContext';
@@ -370,7 +370,7 @@ export default function MapScreen() {
       if (!validationResult.canGenerate) {
         // Show paywall if user can't generate
         if (validationResult.shouldShowPaywall) {
-          setShowPaywall(true);
+          setShowPaywall(true, validationResult.paywallContext);
         }
         return;
       }
@@ -923,8 +923,8 @@ export default function MapScreen() {
         transcriptSegments={transcriptSegments}
       />
 
-      {/* Paywall Modal */}
-      <PaywallModal
+      {/* RevenueCat Native Paywall Modal */}
+      <RevenueCatPaywallModal
         visible={showPaywall}
         onClose={() => setShowPaywall(false)}
         trigger={paywallContext?.trigger}

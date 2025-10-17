@@ -74,9 +74,21 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   // Initialize monetization service when user authenticates
   useEffect(() => {
     if (isAuthenticated && user) {
-      initializeMonetization();
+      // Initialize first, then set user ID after initialization completes
+      initializeMonetization().then(() => {
+        // Only set user ID AFTER initialization completes
+        monetizationService.setUserId(user.id).catch(error => {
+          console.error('Failed to set RevenueCat user ID:', error);
+        });
+      }).catch(error => {
+        console.error('Monetization initialization failed:', error);
+      });
     } else {
       resetToFreeState();
+      // Only log out if RevenueCat is initialized
+      monetizationService.logoutUser().catch(error => {
+        console.error('Failed to logout RevenueCat user:', error);
+      });
     }
   }, [isAuthenticated, user]);
 
@@ -92,19 +104,27 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
 
   const initializeMonetization = async () => {
     if (initialized) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
+      // Initialize RevenueCat first
       await monetizationService.initialize();
+
+      // Load product data (doesn't require RevenueCat to be fully ready)
       await Promise.all([
-        refreshEntitlements(),
         loadAttractionPacks(),
         loadAttractionPackages(),
       ]);
+
       setInitialized(true);
       console.log('MonetizationProvider initialized successfully');
+
+      // Refresh entitlements AFTER initialization is complete
+      if (user) {
+        await refreshEntitlements();
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to initialize monetization';
       setError(errorMessage);
