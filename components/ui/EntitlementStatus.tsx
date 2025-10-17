@@ -41,13 +41,13 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
     if (subscription.isActive && subscription.type !== 'free') {
       return {
         type: 'premium' as const,
-        icon: 'star' as const,
-        title: subscription.type === 'lifetime' ? 'Lifetime Premium' : 'Premium Active',
-        subtitle: subscription.type === 'lifetime' 
-          ? 'Unlimited access forever'
-          : subscription.expiresAt 
-            ? `Expires ${formatDistanceToNow(subscription.expiresAt, { addSuffix: true })}`
-            : 'Unlimited access',
+        icon: 'all-inclusive' as const, // Infinity symbol
+        title: subscription.type === 'lifetime' ? 'Lifetime Premium' : 'Unlimited Premium',
+        subtitle: subscription.type === 'lifetime'
+          ? '∞ Unlimited forever'
+          : subscription.expiresAt
+            ? `∞ Unlimited · Renews ${formatDistanceToNow(subscription.expiresAt, { addSuffix: true })}`
+            : '∞ Unlimited access',
         color: '#84cc16',
         backgroundColor: '#F7FEE7',
         borderColor: '#84cc16',
@@ -56,12 +56,11 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
 
     if (entitlements.ownedPacks.length > 0) {
       const remainingCredits = entitlements.remainingFreeAttractions;
-      const totalCredits = entitlements.totalAttractionLimit;
       return {
         type: 'partial' as const,
-        icon: 'collections' as const,
-        title: 'Credit Pack Active',
-        subtitle: `${remainingCredits}/${totalCredits} credits remaining`,
+        icon: 'diamond' as const, // Diamond icon for paid credits
+        title: 'Paid Credits',
+        subtitle: `${remainingCredits} credits left`,
         color: '#F59E0B',
         backgroundColor: '#FFFBEB',
         borderColor: '#F59E0B',
@@ -89,16 +88,16 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
   if (variant === 'compact') {
     return (
       <View style={[styles.container, styles.compact, style]}>
-        <View 
+        <View
           style={[
-            styles.statusIndicator, 
+            styles.statusIndicator,
             { backgroundColor: statusInfo.backgroundColor, borderColor: statusInfo.borderColor }
           ]}
         >
           <MaterialIcons name={statusInfo.icon} size={16} color={statusInfo.color} />
           <Text style={[styles.compactText, { color: statusInfo.color }]}>
-            {statusInfo.type === 'premium' ? 'Premium' : 
-             statusInfo.type === 'partial' ? 'Partial' : 
+            {statusInfo.type === 'premium' ? '∞' :
+             statusInfo.type === 'partial' ? `💎 ${entitlements.remainingFreeAttractions}` :
              `${entitlements.remainingFreeAttractions}/${entitlements.totalAttractionLimit}`}
           </Text>
         </View>
@@ -207,7 +206,9 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Credits</Text>
           <Text style={styles.statValue}>
-            {entitlements.remainingFreeAttractions}/{entitlements.totalAttractionLimit} remaining
+            {statusInfo.type === 'premium'
+              ? '∞ Unlimited'
+              : `${entitlements.remainingFreeAttractions} remaining`}
           </Text>
         </View>
 

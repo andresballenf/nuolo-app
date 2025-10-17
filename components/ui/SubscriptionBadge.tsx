@@ -52,6 +52,7 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       return {
         displayValue: '∞',
         isInfinity: true,
+        isPaidPackage: false,
         showFreeBadge: false,
         isEmpty: false,
       };
@@ -63,33 +64,37 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       return {
         displayValue: '∞',
         isInfinity: true,
+        isPaidPackage: false,
         showFreeBadge: false,
         isEmpty: false,
       };
     }
 
     // Package users (have purchased attraction packages)
-    const totalLimit = entitlements.totalAttractionLimit ?? 2;
-    if (totalLimit > 2) {
-      // User has packages - calculate remaining from package balance
-      const used = entitlements.attractionsUsed ?? 0;
-      const remainingFromPackages = Math.max(0, totalLimit - used);
-      
+    const hasPaidPackages = entitlements.ownedPacks && entitlements.ownedPacks.length > 0;
+
+    // The database function already calculates remaining credits correctly:
+    // remainingFreeAttractions = total_attraction_limit - attractions_used
+    const remainingCredits = entitlements.remainingFreeAttractions ?? 0;
+
+    if (hasPaidPackages) {
+      // User has purchased packages - show remaining paid credits with diamond badge
       return {
-        displayValue: remainingFromPackages.toString(),
+        displayValue: remainingCredits.toString(),
         isInfinity: false,
+        isPaidPackage: true,
         showFreeBadge: false,
-        isEmpty: remainingFromPackages === 0,
+        isEmpty: remainingCredits === 0,
       };
     }
 
     // Free tier (default 2 free attractions)
-    const freeRemaining = entitlements.remainingFreeAttractions ?? 0;
     return {
-      displayValue: freeRemaining.toString(),
+      displayValue: remainingCredits.toString(),
       isInfinity: false,
+      isPaidPackage: false,
       showFreeBadge: true,
-      isEmpty: freeRemaining === 0,
+      isEmpty: remainingCredits === 0,
     };
   };
 
@@ -111,20 +116,20 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
         {/* Main counter display */}
         <View style={styles.counterContainer}>
           {displayInfo.isInfinity ? (
-            <MaterialIcons 
-              name="all-inclusive" 
-              size={24} 
-              color="#374151" 
+            <MaterialIcons
+              name="all-inclusive"
+              size={24}
+              color="#374151"
             />
           ) : (
             <Text style={[
-              styles.counterText, 
+              styles.counterText,
               displayInfo.isEmpty && styles.counterTextEmpty
             ]}>
               {displayInfo.displayValue}
             </Text>
           )}
-          
+
           {/* Lock icon for empty state */}
           {displayInfo.isEmpty && (
             <View style={styles.lockOverlay}>
@@ -132,6 +137,13 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
             </View>
           )}
         </View>
+
+        {/* Diamond badge for paid packages */}
+        {displayInfo.isPaidPackage && !displayInfo.isEmpty && (
+          <View style={styles.diamondBadge}>
+            <MaterialIcons name="diamond" size={12} color="#FFFFFF" />
+          </View>
+        )}
 
         {/* Free badge overlay */}
         {displayInfo.showFreeBadge && (
@@ -193,6 +205,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#FEE2E2',
+  },
+  diamondBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#F59E0B',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
   freeBadge: {
     position: 'absolute',
