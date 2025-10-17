@@ -131,7 +131,6 @@ export class LocationService {
       try {
         location = await Location.getCurrentPositionAsync({
           accuracy: this.config.accuracy,
-          timeout: 10000,
           mayShowUserSettingsDialog: true,
         });
       } catch (error) {
@@ -139,7 +138,6 @@ export class LocationService {
         // Fallback to balanced accuracy
         location = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
-          timeout: 15000,
           mayShowUserSettingsDialog: true,
         });
       }

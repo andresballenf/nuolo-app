@@ -2,6 +2,14 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { monetizationService, SubscriptionStatus, UserEntitlements, AttractionPack, AttractionPackage } from '../services/MonetizationService';
 import { useAuth } from './AuthContext';
 
+type PaywallTrigger = 'free_limit' | 'premium_attraction' | 'manual';
+
+interface PaywallContext {
+  trigger: PaywallTrigger;
+  attractionId?: string;
+  attractionName?: string;
+}
+
 export interface MonetizationState {
   subscription: SubscriptionStatus;
   entitlements: UserEntitlements;
@@ -27,12 +35,8 @@ export interface MonetizationState {
   
   // Paywall
   showPaywall: boolean;
-  setShowPaywall: (show: boolean) => void;
-  paywallContext?: {
-    trigger: 'free_limit' | 'premium_attraction' | 'manual';
-    attractionId?: string;
-    attractionName?: string;
-  };
+  setShowPaywall: (show: boolean, context?: PaywallContext) => void;
+  paywallContext?: PaywallContext;
 }
 
 const MonetizationContext = createContext<MonetizationState | undefined>(undefined);
@@ -65,11 +69,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [paywallContext, setPaywallContext] = useState<{
-    trigger: 'free_limit' | 'premium_attraction' | 'manual';
-    attractionId?: string;
-    attractionName?: string;
-  }>();
+  const [paywallContext, setPaywallContext] = useState<PaywallContext | undefined>(undefined);
 
   // Initialize monetization service when user authenticates
   useEffect(() => {
@@ -359,11 +359,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
   }, [user, subscription.isActive, subscription.type, refreshEntitlements]);
 
   // Enhanced setShowPaywall function that accepts context
-  const setShowPaywallWithContext = useCallback((show: boolean, context?: {
-    trigger: 'free_limit' | 'premium_attraction' | 'manual';
-    attractionId?: string;
-    attractionName?: string;
-  }) => {
+  const setShowPaywallWithContext = useCallback((show: boolean, context?: PaywallContext) => {
     setShowPaywall(show);
     if (show && context) {
       setPaywallContext(context);

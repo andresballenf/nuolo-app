@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
-import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { router } from 'expo-router';
 
@@ -35,7 +34,7 @@ const languages = [
   { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
   { code: 'ko', name: 'Korean', flag: '🇰🇷' },
   { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-];
+] as const;
 
 export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   isVisible,
@@ -43,7 +42,6 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   onNavigateToSettings,
 }) => {
   const { userPreferences, setUserPreferences } = useApp();
-  const { preferences: onboardingPreferences } = useOnboarding();
   const { user, isAuthenticated, signOut } = useAuth();
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -93,9 +91,8 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     }
   }, [isVisible]);
 
-  const handleLanguageChange = (languageCode: string) => {
+  const handleLanguageChange = (languageCode: (typeof languages)[number]['code']) => {
     setUserPreferences({
-      ...userPreferences,
       language: languageCode,
     });
   };

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 interface TooltipProps {
-  children: React.ReactElement;
+  children: React.ReactElement<{ onLongPress?: () => void }>;
   text: string;
   position?: 'top' | 'bottom' | 'left' | 'right';
   backgroundColor?: string;
@@ -151,6 +151,5 @@ const styles = StyleSheet.create({
   tooltipText: {
     fontSize: 14,
     fontWeight: '500',
-    whiteSpace: 'nowrap',
   },
 });

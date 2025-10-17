@@ -19,7 +19,7 @@ export {
 
 // Types
 export type {
-  EntitlementStatus,
+  EntitlementStatus as LegacyEntitlementStatus,
   AttractionPackage,
   SubscriptionPlan,
   UserEntitlements,

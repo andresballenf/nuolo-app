@@ -143,7 +143,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           apple_product_id: 'nuolo_basic_package',
           google_product_id: 'nuolo_basic_package',
           sort_order: 1,
-          active: true,
+          is_active: true,
         },
         {
           id: 'standard_package',
@@ -155,7 +155,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           google_product_id: 'nuolo_standard_package',
           sort_order: 2,
           badge_text: 'Most Popular',
-          active: true,
+          is_active: true,
         },
         {
           id: 'premium_package',
@@ -167,7 +167,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           google_product_id: 'nuolo_premium_package',
           sort_order: 3,
           badge_text: 'Best Value',
-          active: true,
+          is_active: true,
         },
       ];
       setPackages(mockPackages);
@@ -381,7 +381,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                       <View style={styles.statusInfo}>
                         <Text style={styles.statusTitle}>Free Tier</Text>
                         <Text style={styles.statusText}>
-                          {entitlements.remainingAttractions || 2} of 2 free guides remaining
+                          {entitlements.remainingFreeAttractions || 2} of 2 free guides remaining
                         </Text>
                       </View>
                     </View>
