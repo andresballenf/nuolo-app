@@ -30,6 +30,7 @@ const DEMO_ATTRACTION = {
   coordinate: { latitude: 40.7128, longitude: -74.0060 },
   description: 'A beautiful cathedral with rich history',
   rating: 4.8,
+  types: ['tourist_attraction'],
 };
 
 /**

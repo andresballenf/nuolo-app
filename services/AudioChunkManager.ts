@@ -38,7 +38,7 @@ export class AudioChunkManager {
   private onStateChange?: (state: ChunkPlaybackState) => void;
   private onChunkComplete?: (chunkIndex: number) => void;
   private onAllChunksComplete?: () => void;
-  private positionUpdateInterval?: NodeJS.Timeout;
+  private positionUpdateInterval?: ReturnType<typeof setInterval>;
   private totalDuration: number = 0;
   private chunkStartTimes: Map<number, number> = new Map(); // Cumulative start time for each chunk
 
