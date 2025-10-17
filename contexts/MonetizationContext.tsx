@@ -429,7 +429,7 @@ export function useContentAccess() {
 
   const checkAttractionAccess = async (attractionId: string): Promise<{
     hasAccess: boolean;
-    reason: 'premium' | 'owned' | 'free_remaining' | 'blocked';
+    reason: 'premium' | 'pack' | 'owned' | 'free_remaining' | 'blocked';
     message?: string;
   }> => {
     // Unlimited subscribers have unlimited access
@@ -443,9 +443,16 @@ export function useContentAccess() {
       return { hasAccess: true, reason: 'premium' };
     }
 
-    // Check if user has package access
-    if (entitlements.totalAttractionLimit > 2 && entitlements.attractionsUsed < entitlements.totalAttractionLimit) {
-      return { hasAccess: true, reason: 'owned' };
+    const baseFreeLimit = 2;
+    const totalCredits = entitlements.totalAttractionLimit ?? baseFreeLimit;
+    const usedCredits = entitlements.attractionsUsed ?? 0;
+    const remainingCredits = Math.max(0, totalCredits - usedCredits);
+    const hasPackCredits = !entitlements.hasUnlimitedAccess && totalCredits > baseFreeLimit;
+    const hasRemainingPackCredits = hasPackCredits && remainingCredits > 0;
+
+    // Check if user has package credits remaining
+    if (hasRemainingPackCredits) {
+      return { hasAccess: true, reason: 'pack' };
     }
 
     // Check if user owns this specific attraction
@@ -454,7 +461,7 @@ export function useContentAccess() {
     }
 
     // Check free tier allowance
-    if (entitlements.remainingFreeAttractions > 0) {
+    if (remainingCredits > 0) {
       return { hasAccess: true, reason: 'free_remaining' };
     }
 
@@ -482,7 +489,7 @@ export function useContentAccess() {
       return {
         canGenerate: true,
         shouldShowPaywall: false,
-        shouldRecordUsage: accessResult.reason === 'free_remaining',
+        shouldRecordUsage: accessResult.reason === 'free_remaining' || accessResult.reason === 'pack',
       };
     } else {
       // Determine paywall trigger based on reason

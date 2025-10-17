@@ -188,7 +188,7 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
               ) : (
                 <View style={styles.subscriptionBadgeFree}>
                   <Text style={styles.subscriptionBadgeFreeText}>
-                    {entitlements.remainingFreeAttractions} of 2 free guides remaining
+                    {entitlements.remainingFreeAttractions} of {entitlements.totalAttractionLimit} credits remaining
                   </Text>
                 </View>
               )}

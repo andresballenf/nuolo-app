@@ -54,13 +54,14 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
       };
     }
 
-    if (entitlements.ownedPacks.length > 0 || entitlements.ownedAttractions.length > 0) {
-      const totalOwned = entitlements.ownedPacks.length + entitlements.ownedAttractions.length;
+    if (entitlements.ownedPacks.length > 0) {
+      const remainingCredits = entitlements.remainingFreeAttractions;
+      const totalCredits = entitlements.totalAttractionLimit;
       return {
         type: 'partial' as const,
         icon: 'collections' as const,
-        title: 'Premium Content',
-        subtitle: `${totalOwned} pack${totalOwned === 1 ? '' : 's'}/attraction${totalOwned === 1 ? '' : 's'} owned`,
+        title: 'Credit Pack Active',
+        subtitle: `${remainingCredits}/${totalCredits} credits remaining`,
         color: '#F59E0B',
         backgroundColor: '#FFFBEB',
         borderColor: '#F59E0B',
@@ -72,7 +73,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
       type: 'free' as const,
       icon: 'free-breakfast' as const,
       title: 'Free Tier',
-      subtitle: `${entitlements.remainingFreeAttractions}/2 free guides remaining`,
+      subtitle: `${entitlements.remainingFreeAttractions}/${entitlements.totalAttractionLimit} free guides remaining`,
       color: entitlements.remainingFreeAttractions > 0 ? '#10B981' : '#EF4444',
       backgroundColor: entitlements.remainingFreeAttractions > 0 ? '#ECFDF5' : '#FEF2F2',
       borderColor: entitlements.remainingFreeAttractions > 0 ? '#10B981' : '#EF4444',
@@ -98,7 +99,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
           <Text style={[styles.compactText, { color: statusInfo.color }]}>
             {statusInfo.type === 'premium' ? 'Premium' : 
              statusInfo.type === 'partial' ? 'Partial' : 
-             `${entitlements.remainingFreeAttractions}/2`}
+             `${entitlements.remainingFreeAttractions}/${entitlements.totalAttractionLimit}`}
           </Text>
         </View>
 
@@ -204,9 +205,9 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
       {/* Usage Stats */}
       <View style={styles.usageStats}>
         <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Free Guides</Text>
+          <Text style={styles.statLabel}>Credits</Text>
           <Text style={styles.statValue}>
-            {entitlements.remainingFreeAttractions}/2 remaining
+            {entitlements.remainingFreeAttractions}/{entitlements.totalAttractionLimit} remaining
           </Text>
         </View>
 

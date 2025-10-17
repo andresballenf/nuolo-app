@@ -571,15 +571,56 @@ export class MonetizationService {
     try {
       if (!this.revenueCatConfigured) {
         logger.warn('RevenueCat not configured, returning default entitlements');
-        // Get usage from Supabase only
+
         const { data: usage } = await supabase
           .from('user_usage')
           .select('usage_count, package_limit')
           .eq('user_id', userId)
           .single();
 
-        const totalAttractionLimit = usage?.package_limit || 2;
-        const attractionsUsed = usage?.usage_count || 0;
+        let totalAttractionLimit = usage?.package_limit || 2;
+        let attractionsUsed = usage?.usage_count || 0;
+        let ownedPackages: string[] = [];
+        let packageDetails: AttractionPackage[] = [];
+
+        try {
+          const { data: packageEntitlements } = await supabase.rpc(
+            'get_user_package_entitlements',
+            { user_uuid: userId }
+          );
+
+          if (packageEntitlements && packageEntitlements.length > 0) {
+            const entitlementsRow = packageEntitlements[0];
+            if (typeof entitlementsRow.total_attraction_limit === 'number') {
+              totalAttractionLimit = entitlementsRow.total_attraction_limit;
+            }
+            if (typeof entitlementsRow.attractions_used === 'number') {
+              attractionsUsed = entitlementsRow.attractions_used;
+            }
+            if (Array.isArray(entitlementsRow.owned_packages)) {
+              ownedPackages = entitlementsRow.owned_packages.filter(
+                (pkg: unknown): pkg is string => typeof pkg === 'string'
+              );
+            }
+          }
+        } catch (error) {
+          logger.error('Failed to load package entitlements without RevenueCat', error);
+        }
+
+        if (ownedPackages.length > 0) {
+          const { data: packagesData, error: packagesError } = await supabase
+            .from('attraction_packages')
+            .select('*')
+            .in('id', ownedPackages)
+            .eq('is_active', true);
+
+          if (packagesError) {
+            logger.error('Failed to fetch owned attraction packages (no RevenueCat)', packagesError);
+          } else if (packagesData) {
+            packageDetails = packagesData;
+          }
+        }
+
         const remainingFreeAttractions = Math.max(0, totalAttractionLimit - attractionsUsed);
 
         return {
@@ -588,8 +629,8 @@ export class MonetizationService {
           remainingFreeAttractions,
           attractionsUsed,
           ownedAttractions: [],
-          ownedPacks: [],
-          ownedPackages: [],
+          ownedPacks: ownedPackages,
+          ownedPackages: packageDetails,
         };
       }
 
@@ -599,8 +640,6 @@ export class MonetizationService {
       const activeEntitlements = customerInfo.entitlements?.active ?? {};
       const activeEntitlementValues = Object.values(activeEntitlements);
       const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
-      const purchasedProductIds = new Set(customerInfo.allPurchasedProductIdentifiers ?? []);
-      const nonSubscriptionTransactions = customerInfo.nonSubscriptionTransactions ?? [];
 
       const unlimitedEntitlement =
         activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
@@ -612,57 +651,41 @@ export class MonetizationService {
         Boolean(unlimitedEntitlement) ||
         activeSubscriptions.has(MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY);
 
-      let computedAttractionLimit = 2; // Default free tier
-      const ownedPackages: string[] = [];
+      let totalAttractionLimit = 2;
+      let attractionsUsed = 0;
+      let ownedPackages: string[] = [];
+      let packageDetails: AttractionPackage[] = [];
 
-      for (const config of MonetizationService.PACKAGE_CONFIGS) {
-        const entitlementMatch = config.entitlementId
-          ? activeEntitlements[config.entitlementId]
-          : undefined;
-
-        const entitlementProductMatch = activeEntitlementValues.some(
-          entitlement => entitlement.productIdentifier === config.productId
+      try {
+        const { data: packageEntitlements, error: packageEntitlementsError } = await supabase.rpc(
+          'get_user_package_entitlements',
+          { user_uuid: userId }
         );
 
-        const productMatch =
-          purchasedProductIds.has(config.productId) ||
-          nonSubscriptionTransactions.some(tx => tx.productIdentifier === config.productId);
-
-        if (entitlementMatch || entitlementProductMatch || productMatch) {
-          computedAttractionLimit = Math.max(computedAttractionLimit, config.attractionLimit);
-          if (!ownedPackages.includes(config.id)) {
-            ownedPackages.push(config.id);
+        if (packageEntitlementsError) {
+          logger.error('Failed to load package entitlements', packageEntitlementsError);
+        } else if (packageEntitlements && packageEntitlements.length > 0) {
+          const entitlementsRow = packageEntitlements[0];
+          if (typeof entitlementsRow.total_attraction_limit === 'number') {
+            totalAttractionLimit = entitlementsRow.total_attraction_limit;
+          }
+          if (typeof entitlementsRow.attractions_used === 'number') {
+            attractionsUsed = entitlementsRow.attractions_used;
+          }
+          if (Array.isArray(entitlementsRow.owned_packages)) {
+            ownedPackages = entitlementsRow.owned_packages.filter(
+              (pkg: unknown): pkg is string => typeof pkg === 'string'
+            );
           }
         }
+      } catch (error) {
+        logger.error('Error while retrieving package entitlements', error);
       }
 
       if (hasUnlimitedAccess) {
-        computedAttractionLimit = MonetizationService.UNLIMITED_USAGE_LIMIT;
+        totalAttractionLimit = MonetizationService.UNLIMITED_USAGE_LIMIT;
       }
 
-      const { data: usage, error: usageError } = await supabase
-        .from('user_usage')
-        .select('usage_count, package_limit')
-        .eq('user_id', userId)
-        .single();
-
-      if (usageError && usageError.code !== 'PGRST116') {
-        logger.error('Failed to fetch user usage for entitlements', usageError);
-      }
-
-      const attractionsUsed = usage?.usage_count || 0;
-      const storedLimit = usage?.package_limit ?? 2;
-      const targetUsageLimit = computedAttractionLimit;
-
-      if (storedLimit !== targetUsageLimit) {
-        await this.syncUsageLimit(userId, targetUsageLimit, usage ?? null);
-      }
-
-      const remainingFreeAttractions = hasUnlimitedAccess
-        ? MonetizationService.UNLIMITED_USAGE_LIMIT
-        : Math.max(0, targetUsageLimit - attractionsUsed);
-
-      let packageDetails: AttractionPackage[] = [];
       if (ownedPackages.length > 0) {
         const { data: packagesData, error: packagesError } = await supabase
           .from('attraction_packages')
@@ -677,10 +700,12 @@ export class MonetizationService {
         }
       }
 
+      const remainingAttractions = Math.max(0, totalAttractionLimit - attractionsUsed);
+
       return {
         hasUnlimitedAccess,
-        totalAttractionLimit: targetUsageLimit,
-        remainingFreeAttractions,
+        totalAttractionLimit,
+        remainingFreeAttractions: remainingAttractions,
         attractionsUsed,
         ownedAttractions: [],
         ownedPacks: ownedPackages,
@@ -697,49 +722,6 @@ export class MonetizationService {
         ownedPacks: [],
         ownedPackages: [],
       };
-    }
-  }
-
-  private async syncUsageLimit(
-    userId: string,
-    targetLimit: number,
-    existingUsage: { package_limit?: number | null; usage_count?: number | null } | null
-  ): Promise<void> {
-    try {
-      if (existingUsage) {
-        if ((existingUsage.package_limit ?? 2) === targetLimit) {
-          return;
-        }
-
-        const { error: updateError } = await supabase
-          .from('user_usage')
-          .update({
-            package_limit: targetLimit,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId);
-
-        if (updateError) {
-          logger.error('Failed to update user usage limit', updateError);
-        }
-        return;
-      }
-
-      const { error: insertError } = await supabase
-        .from('user_usage')
-        .insert({
-          user_id: userId,
-          usage_count: 0,
-          package_usage_count: 0,
-          package_limit: targetLimit,
-          updated_at: new Date().toISOString(),
-        });
-
-      if (insertError) {
-        logger.error('Failed to create user usage record with limit', insertError);
-      }
-    } catch (error: unknown) {
-      logger.error('Error syncing user usage limit', error);
     }
   }
 
