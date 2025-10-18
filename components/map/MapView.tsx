@@ -21,6 +21,10 @@ import {
   LabelPlacement 
 } from '../../utils/markerOverlap';
 
+export type SearchAreaHandle = {
+  searchThisArea: () => Promise<void>;
+};
+
 interface MapViewComponentProps {
   onPointsOfInterestUpdate?: (pois: PointOfInterest[], isManualSearch?: boolean) => void;
   onMarkerPress?: (poi: PointOfInterest) => void;
@@ -30,7 +34,7 @@ interface MapViewComponentProps {
   initialZoom?: number;
   triggerGPS?: number;
   onSearchStateChange?: (showButton: boolean, isSearching: boolean) => void;
-  onSearchAreaRequest?: React.MutableRefObject<any>;
+  onSearchAreaRequest?: React.MutableRefObject<SearchAreaHandle | null>;
   mapRef?: React.MutableRefObject<MapView | null>;
 }
 
@@ -71,7 +75,7 @@ export default function MapViewComponent({
   });
   const [currentZoom, setCurrentZoom] = useState(initialZoom);
   const [selectedPOI, setSelectedPOI] = useState<PointOfInterest | null>(null);
-  const internalMapRef = useRef<MapView>(null);
+  const internalMapRef = useRef<MapView | null>(null);
   const mapRef = externalMapRef || internalMapRef;
   const [markerPositions, setMarkerPositions] = useState<{ [key: string]: { x: number; y: number } }>({});
   const [labelPlacement, setLabelPlacement] = useState<LabelPlacement>({});
@@ -102,7 +106,7 @@ export default function MapViewComponent({
   }, [showSearchButton, isSearching, onSearchStateChange]);
 
   // Store search function for parent to call
-  React.useImperativeHandle(onSearchAreaRequest, () => ({
+  React.useImperativeHandle(onSearchAreaRequest, (): SearchAreaHandle => ({
     searchThisArea: () => handleSearchThisArea(currentCenter)
   }), [handleSearchThisArea, currentCenter]);
 

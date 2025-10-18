@@ -111,34 +111,27 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   const [sheetState, setSheetState] = useState<SheetState>(() => currentState);
   const isMounted = useRef(false);
   
-  // Animation values - use lazy initialization to avoid function calls during render
-  const translateY = useRef<Animated.Value | null>(null);
+  const initialTranslateY = useMemo(() => {
+    switch (currentState) {
+      case 'hidden':
+        return SCREEN_HEIGHT;
+      case 'detail':
+        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.DETAIL);
+      case 'collapsed':
+        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.COLLAPSED);
+      case 'half':
+        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.HALF);
+      case 'expanded':
+        return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.EXPANDED);
+      default:
+        return SCREEN_HEIGHT;
+    }
+  }, [currentState]);
+
+  // Animation values - use refs to retain instances across renders
+  const translateY = useRef<Animated.Value>(new Animated.Value(initialTranslateY));
   // Backdrop removed - Standard bottom sheets don't use backdrop per MD3 specs
-  const contentOpacity = useRef<Animated.Value | null>(null);
-  
-  // Initialize animation values once
-  if (!translateY.current) {
-    const initialHeight = (() => {
-      switch (currentState) {
-        case 'hidden':
-          return SCREEN_HEIGHT;
-        case 'detail':
-          return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.DETAIL);
-        case 'collapsed':
-          return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.COLLAPSED);
-        case 'half':
-          return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.HALF);
-        case 'expanded':
-          return SCREEN_HEIGHT * (1 - SHEET_HEIGHTS.EXPANDED);
-        default:
-          return SCREEN_HEIGHT;
-      }
-    })();
-    
-    translateY.current = new Animated.Value(initialHeight);
-    // No backdrop initialization for standard bottom sheet
-    contentOpacity.current = new Animated.Value(1);
-  }
+  const contentOpacity = useRef<Animated.Value>(new Animated.Value(1));
   
   // Track if component is mounted
   useEffect(() => {
@@ -150,7 +143,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   
   // Refs
   const lastGestureY = useRef(0);
-  const currentHeight = useRef(0);
+  const currentHeight = useRef(initialTranslateY);
   
   // Get audio context
   const audioContext = useAudio();
@@ -257,7 +250,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
     }
     
     // Standard bottom sheet - Only animate translateY, no backdrop
-    Animated.spring(translateY.current!, {
+    Animated.spring(translateY.current, {
       toValue: targetY,
       useNativeDriver: true,
       tension: 65,
@@ -282,7 +275,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
         return Math.abs(gestureState.dy) > 5;
       },
       onPanResponderGrant: () => {
-        lastGestureY.current = (translateY.current as any)._value;
+        lastGestureY.current = translateY.current.__getValue();
       },
       onPanResponderMove: (_, gestureState) => {
         const newY = lastGestureY.current + gestureState.dy;
@@ -292,7 +285,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
         const maxY = SCREEN_HEIGHT;
         const constrainedY = Math.max(minY, Math.min(maxY, newY));
         
-        translateY.current!.setValue(constrainedY);
+        translateY.current.setValue(constrainedY);
         
         // No backdrop updates for standard bottom sheet
       },
@@ -322,7 +315,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
             else if (sheetState === 'half') targetState = 'expanded';
           } else {
             // Snap to nearest state
-            const currentY = (translateY.current as any)._value;
+            const currentY = translateY.current.__getValue();
             const states: SheetState[] = ['hidden', 'detail', 'collapsed', 'half', 'expanded'];
             let minDistance = SCREEN_HEIGHT;
             
@@ -345,13 +338,13 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   
   // Handle back navigation
   const handleBack = useCallback(() => {
-    Animated.timing(contentOpacity.current!, {
+    Animated.timing(contentOpacity.current, {
       toValue: 0,
       duration: 150,
       useNativeDriver: true,
     }).start(() => {
       onBackPress?.();
-      Animated.timing(contentOpacity.current!, {
+      Animated.timing(contentOpacity.current, {
         toValue: 1,
         duration: 150,
         useNativeDriver: true,
@@ -361,7 +354,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   
   // Handle attraction selection
   const handleAttractionSelect = useCallback((attraction: PointOfInterest) => {
-    Animated.timing(contentOpacity.current!, {
+    Animated.timing(contentOpacity.current, {
       toValue: 0,
       duration: 150,
       useNativeDriver: true,
@@ -371,7 +364,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       setTimeout(() => {
         animateToState('detail');
       }, 0);
-      Animated.timing(contentOpacity.current!, {
+      Animated.timing(contentOpacity.current, {
         toValue: 1,
         duration: 150,
         useNativeDriver: true,
@@ -388,7 +381,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       // Then animate to the new position
       const targetY = getSheetHeight(currentState);
       // Standard bottom sheet - Only animate translateY
-      Animated.spring(translateY.current!, {
+      Animated.spring(translateY.current, {
         toValue: targetY,
         useNativeDriver: true,
         tension: 65,
@@ -442,7 +435,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
     switch (contentType) {
       case 'attractions':
         return (
-          <Animated.View style={[styles.content, { opacity: contentOpacity.current || 1 }]}>
+          <Animated.View style={[styles.content, { opacity: contentOpacity.current }]}>
             <FlatList
               data={attractions}
               keyExtractor={(item) => item.id}
@@ -473,7 +466,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
           : null;
         
         return (
-          <Animated.View style={[styles.content, { opacity: contentOpacity.current || 1 }]}>
+          <Animated.View style={[styles.content, { opacity: contentOpacity.current }]}>
             <View style={styles.detailContainer}>
               {/* Use same list item component but with details shown */}
               <AttractionListItem
@@ -504,7 +497,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       
       case 'settings':
         return (
-          <Animated.View style={[styles.content, { opacity: contentOpacity.current || 1 }]}>
+          <Animated.View style={[styles.content, { opacity: contentOpacity.current }]}>
             <ScrollView showsVerticalScrollIndicator={false}>
               {settingsContent || (
                 <View style={styles.placeholderContent}>
@@ -517,7 +510,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       
       case 'profile':
         return (
-          <Animated.View style={[styles.content, { opacity: contentOpacity.current || 1 }]}>
+          <Animated.View style={[styles.content, { opacity: contentOpacity.current }]}>
             <ScrollView showsVerticalScrollIndicator={false}>
               {profileContent || (
                 <View style={styles.placeholderContent}>
