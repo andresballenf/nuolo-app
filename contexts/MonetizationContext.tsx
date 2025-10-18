@@ -29,10 +29,12 @@ export interface MonetizationState {
   purchaseSubscription: () => Promise<boolean>;
   restorePurchases: () => Promise<void>;
   refreshEntitlements: () => Promise<void>;
-  
+  resetFreeCounter?: () => Promise<void>;
+
   // Content access
   canAccessAttraction: (attractionId: string) => Promise<boolean>;
   recordAttractionUsage: (attractionId: string) => Promise<void>;
+
   
   // Paywall
   showPaywall: boolean;
@@ -426,8 +428,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     showPaywall,
     setShowPaywall: setShowPaywallWithContext,
     paywallContext,
-    // @ts-ignore - Development only
-    resetFreeCounter: __DEV__ ? resetFreeCounter : undefined,
+    ...(__DEV__ ? { resetFreeCounter } : {}),
   };
 
   return (
