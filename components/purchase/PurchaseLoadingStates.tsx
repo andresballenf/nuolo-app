@@ -15,11 +15,21 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import type { MaterialIconName } from '../../types/icons';
+
 interface PurchaseLoadingStateProps {
   variant: 'processing' | 'validating' | 'restoring' | 'connecting';
   message?: string;
   showCancel?: boolean;
   onCancel?: () => void;
+}
+
+interface LoadingConfig {
+  icon: MaterialIconName;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  backgroundColor: string;
 }
 
 export const PurchaseLoadingState: React.FC<PurchaseLoadingStateProps> = ({
@@ -76,7 +86,7 @@ export const PurchaseLoadingState: React.FC<PurchaseLoadingStateProps> = ({
     opacity: fadeOpacity.value,
   }));
 
-  const getLoadingConfig = () => {
+  const getLoadingConfig = (): LoadingConfig => {
     switch (variant) {
       case 'processing':
         return {
@@ -128,7 +138,7 @@ export const PurchaseLoadingState: React.FC<PurchaseLoadingStateProps> = ({
         ]}
       >
         <MaterialIcons
-          name={config.icon as any}
+          name={config.icon}
           size={48}
           color={config.iconColor}
         />
@@ -269,6 +279,13 @@ interface PurchaseErrorStateProps {
   variant?: 'payment' | 'network' | 'store' | 'generic';
 }
 
+interface PurchaseErrorConfig {
+  icon: MaterialIconName;
+  iconColor: string;
+  defaultTitle: string;
+  defaultMessage: string;
+}
+
 export const PurchaseErrorState: React.FC<PurchaseErrorStateProps> = ({
   title,
   message,
@@ -276,7 +293,7 @@ export const PurchaseErrorState: React.FC<PurchaseErrorStateProps> = ({
   onAction,
   variant = 'generic',
 }) => {
-  const getErrorConfig = () => {
+  const getErrorConfig = (): PurchaseErrorConfig => {
     switch (variant) {
       case 'payment':
         return {
@@ -318,7 +335,7 @@ export const PurchaseErrorState: React.FC<PurchaseErrorStateProps> = ({
     <View style={styles.errorContainer}>
       <View style={styles.errorIconContainer}>
         <MaterialIcons
-          name={config.icon as any}
+          name={config.icon}
           size={48}
           color={config.iconColor}
         />

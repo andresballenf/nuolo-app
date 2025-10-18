@@ -19,6 +19,7 @@ import Animated, {
   withDelay,
 } from 'react-native-reanimated';
 
+import type { MaterialIconName } from '../../types/icons';
 import { Button } from '../ui/Button';
 import { usePurchase } from '../../contexts/PurchaseContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -31,6 +32,16 @@ interface PurchaseRestoreFlowProps {
 }
 
 type RestoreStep = 'initial' | 'restoring' | 'success' | 'empty' | 'error';
+
+interface StepConfig {
+  icon: MaterialIconName;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  buttonTitle: string;
+  buttonVariant: 'primary' | 'outline';
+  showProgress: boolean;
+}
 
 export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
   visible,
@@ -141,7 +152,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
     }, 200);
   }, [currentStep, onClose]);
 
-  const getStepConfig = () => {
+  const getStepConfig = (): StepConfig => {
     switch (currentStep) {
       case 'initial':
         return {
@@ -152,7 +163,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
             ? 'Welcome back! Let\'s restore your purchases.'
             : 'Restore any previous purchases from your account',
           buttonTitle: 'Start Restore',
-          buttonVariant: 'primary' as const,
+          buttonVariant: 'primary',
           showProgress: false,
         };
       
@@ -163,7 +174,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
           title: 'Restoring...',
           subtitle: 'Checking your purchase history',
           buttonTitle: 'Restoring...',
-          buttonVariant: 'primary' as const,
+          buttonVariant: 'primary',
           showProgress: true,
         };
       
@@ -174,7 +185,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
           title: 'Success!',
           subtitle: `Successfully restored ${restoredCount} purchase${restoredCount > 1 ? 's' : ''}`,
           buttonTitle: 'Done',
-          buttonVariant: 'primary' as const,
+          buttonVariant: 'primary',
           showProgress: false,
         };
       
@@ -185,7 +196,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
           title: 'No Purchases Found',
           subtitle: 'No previous purchases were found for this account',
           buttonTitle: 'OK',
-          buttonVariant: 'outline' as const,
+          buttonVariant: 'outline',
           showProgress: false,
         };
       
@@ -196,7 +207,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
           title: 'Restore Failed',
           subtitle: purchaseError?.userFriendly || 'Unable to restore purchases. Please try again.',
           buttonTitle: 'Try Again',
-          buttonVariant: 'outline' as const,
+          buttonVariant: 'outline',
           showProgress: false,
         };
     }
@@ -261,7 +272,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
             {/* Icon */}
             <Animated.View style={[styles.iconContainer, iconAnimatedStyle]}>
               <MaterialIcons
-                name={stepConfig.icon as any}
+                name={stepConfig.icon}
                 size={64}
                 color={stepConfig.iconColor}
               />

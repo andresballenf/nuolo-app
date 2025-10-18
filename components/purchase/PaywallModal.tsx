@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
+import type { MaterialIconName } from '../../types/icons';
 import { Button } from '../ui/Button';
 import { usePurchase } from '../../contexts/PurchaseContext';
 import type { SubscriptionPlan, AttractionPackage } from '../../contexts/PurchaseContext';
@@ -31,6 +32,12 @@ interface PaywallModalProps {
 type TabType = 'subscription' | 'packages';
 
 type SubscriptionPlanVariant = SubscriptionPlan & { displayPrice: string; subtitle?: string };
+
+interface HeaderContent {
+  title: string;
+  subtitle: string;
+  icon: MaterialIconName;
+}
 
 export const PaywallModal: React.FC<PaywallModalProps> = ({
   visible,
@@ -115,7 +122,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
     }
   }, [restorePurchases]);
 
-  const getHeaderContent = () => {
+  const getHeaderContent = (): HeaderContent => {
     switch (trigger) {
       case 'free_limit':
         return {
@@ -276,7 +283,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           
           <View style={styles.headerContent}>
             <MaterialIcons 
-              name={headerContent.icon as any} 
+              name={headerContent.icon} 
               size={48} 
               color="white" 
             />
