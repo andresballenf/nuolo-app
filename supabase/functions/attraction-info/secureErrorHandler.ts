@@ -7,6 +7,7 @@ interface ErrorResponse {
   errorCode?: string;
   timestamp: number;
   requestId?: string;
+  stack?: string;
 }
 
 interface ErrorDetails {
@@ -244,7 +245,7 @@ export class SecureErrorHandler {
     
     // Include stack trace only in development and for internal errors
     if (includeStack && (Deno.env.get('DENO_DEPLOYMENT_ID') === undefined)) {
-      (response as any).stack = this.sanitizeErrorMessage(error.stack || '');
+      response.stack = this.sanitizeErrorMessage(error.stack || '');
     }
     
     return response;
