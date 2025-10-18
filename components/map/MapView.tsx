@@ -23,6 +23,7 @@ import {
 
 export type SearchAreaHandle = {
   searchThisArea: () => Promise<void>;
+  searchByQuery: (query: string) => Promise<void>;
 };
 
 interface MapViewComponentProps {
@@ -92,6 +93,7 @@ export default function MapViewComponent({
     isSearching,
     showSearchButton,
     searchNearbyPlaces,
+    searchPlaces,
     checkIfSearchNeeded,
     handleSearchThisArea,
   } = usePlacesSearch({
@@ -107,8 +109,9 @@ export default function MapViewComponent({
 
   // Store search function for parent to call
   React.useImperativeHandle(onSearchAreaRequest, (): SearchAreaHandle => ({
-    searchThisArea: () => handleSearchThisArea(currentCenter)
-  }), [handleSearchThisArea, currentCenter]);
+    searchThisArea: () => handleSearchThisArea(currentCenter),
+    searchByQuery: (query: string) => searchPlaces(query, currentCenter, 5000),
+  }), [handleSearchThisArea, searchPlaces, currentCenter]);
 
   useEffect(() => {
     requestLocationPermission();

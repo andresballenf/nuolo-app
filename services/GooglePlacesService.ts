@@ -41,12 +41,83 @@ export interface PointOfInterest {
   photos?: string[]; // Array of photo URLs
 }
 
+// Cache configuration
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
 class GooglePlacesService {
   private apiKey: string; // Kept for backward compatibility with photo URLs
   private useProxy: boolean = true; // Toggle for proxy usage
+  private searchCache: Map<string, CacheEntry<PointOfInterest[]>> = new Map();
+  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+  private readonly MAX_CACHE_SIZE = 50; // Limit cache entries
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
+  }
+
+  /**
+   * Generate cache key from search parameters
+   */
+  private getCacheKey(type: string, params: Record<string, any>): string {
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${key}:${params[key]}`)
+      .join('|');
+    return `${type}|${sortedParams}`;
+  }
+
+  /**
+   * Check if cache entry is valid
+   */
+  private isCacheValid(entry: CacheEntry<any>): boolean {
+    return Date.now() - entry.timestamp < this.CACHE_DURATION;
+  }
+
+  /**
+   * Get from cache if available and valid
+   */
+  private getFromCache(key: string): PointOfInterest[] | null {
+    const entry = this.searchCache.get(key);
+    if (entry && this.isCacheValid(entry)) {
+      console.log(`[CACHE HIT] ${key}`);
+      return entry.data;
+    }
+    if (entry) {
+      console.log(`[CACHE EXPIRED] ${key}`);
+      this.searchCache.delete(key);
+    }
+    return null;
+  }
+
+  /**
+   * Save to cache with size management
+   */
+  private saveToCache(key: string, data: PointOfInterest[]): void {
+    // Implement LRU-style cache by removing oldest entry if at capacity
+    if (this.searchCache.size >= this.MAX_CACHE_SIZE) {
+      const firstKey = this.searchCache.keys().next().value;
+      if (firstKey) {
+        this.searchCache.delete(firstKey);
+        console.log(`[CACHE EVICTED] ${firstKey}`);
+      }
+    }
+
+    this.searchCache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+    console.log(`[CACHE SAVED] ${key} (${this.searchCache.size}/${this.MAX_CACHE_SIZE})`);
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  public clearCache(): void {
+    this.searchCache.clear();
+    console.log('[CACHE CLEARED]');
   }
 
   /**
@@ -77,12 +148,29 @@ class GooglePlacesService {
   /**
    * Search for nearby tourist attractions
    * SECURITY: Uses server-side proxy to protect API key
+   * PERFORMANCE: Implements caching for repeated searches
    */
   async searchNearbyAttractions(
     location: { lat: number; lng: number },
     radius: number = 1500
   ): Promise<PointOfInterest[]> {
     try {
+      // Round coordinates to reduce cache misses from minor location changes
+      const roundedLat = Math.round(location.lat * 1000) / 1000;
+      const roundedLng = Math.round(location.lng * 1000) / 1000;
+
+      const cacheKey = this.getCacheKey('nearby', {
+        lat: roundedLat,
+        lng: roundedLng,
+        radius: Math.round(radius / 100) * 100 // Round to nearest 100m
+      });
+
+      // Check cache first
+      const cached = this.getFromCache(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
       const params = `location=${location.lat},${location.lng}&radius=${radius}&type=tourist_attraction`;
 
       const data: PlacesSearchResponse = await this.proxyRequest(
@@ -95,7 +183,12 @@ class GooglePlacesService {
         return [];
       }
 
-      return data.results.map(this.transformPlaceToPointOfInterest);
+      const results = data.results.map(this.transformPlaceToPointOfInterest);
+
+      // Save to cache
+      this.saveToCache(cacheKey, results);
+
+      return results;
     } catch (error) {
       console.error('Error searching nearby attractions:', error);
       return [];
@@ -105,6 +198,7 @@ class GooglePlacesService {
   /**
    * Search for places with custom query
    * SECURITY: Uses server-side proxy to protect API key
+   * PERFORMANCE: Implements caching for repeated searches
    */
   async searchPlaces(
     query: string,
@@ -112,6 +206,26 @@ class GooglePlacesService {
     radius: number = 5000
   ): Promise<PointOfInterest[]> {
     try {
+      // Normalize query for cache consistency
+      const normalizedQuery = query.trim().toLowerCase();
+
+      // Round coordinates to reduce cache misses
+      const roundedLat = Math.round(location.lat * 1000) / 1000;
+      const roundedLng = Math.round(location.lng * 1000) / 1000;
+
+      const cacheKey = this.getCacheKey('text_search', {
+        query: normalizedQuery,
+        lat: roundedLat,
+        lng: roundedLng,
+        radius: Math.round(radius / 1000) * 1000 // Round to nearest km
+      });
+
+      // Check cache first
+      const cached = this.getFromCache(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
       const params = `query=${encodeURIComponent(query)}&location=${location.lat},${location.lng}&radius=${radius}`;
 
       const data: PlacesSearchResponse = await this.proxyRequest(
@@ -124,7 +238,12 @@ class GooglePlacesService {
         return [];
       }
 
-      return data.results.map(this.transformPlaceToPointOfInterest);
+      const results = data.results.map(this.transformPlaceToPointOfInterest);
+
+      // Save to cache
+      this.saveToCache(cacheKey, results);
+
+      return results;
     } catch (error) {
       console.error('Error searching places:', error);
       return [];

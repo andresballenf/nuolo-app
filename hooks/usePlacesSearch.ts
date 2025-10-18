@@ -101,29 +101,84 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
   ): Promise<void> => {
     if (!googlePlacesService.current) {
       console.warn('Google Places service not initialized');
+      Alert.alert(
+        'Service Error',
+        'Maps service is not ready. Please try again in a moment.'
+      );
+      return;
+    }
+
+    // Validate query
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      console.warn('Empty search query provided');
+      return;
+    }
+
+    if (trimmedQuery.length < 2) {
+      Alert.alert(
+        'Invalid Search',
+        'Please enter at least 2 characters to search.'
+      );
       return;
     }
 
     setIsSearching(true);
+    setShowSearchButton(false);
 
     try {
-      const results = await googlePlacesService.current.searchPlaces(query, location, radius);
+      console.log(`Searching for: "${trimmedQuery}" near ${location.lat}, ${location.lng}`);
+      const results = await googlePlacesService.current.searchPlaces(trimmedQuery, location, radius);
       const filteredResults = googlePlacesService.current.filterTouristAttractions(results);
 
       setPointsOfInterest(filteredResults);
       setLastSearchCenter(location);
 
-      console.log(`Found ${filteredResults.length} results for "${query}"`);
+      onPointsOfInterestUpdate?.(filteredResults, true);
+
+      if (filteredResults.length === 0) {
+        Alert.alert(
+          'No Results',
+          `We couldn't find any attractions matching "${trimmedQuery}". Try a different search term or adjust your location.`,
+          [
+            { text: 'OK', style: 'cancel' },
+            { text: 'Search Nearby', onPress: () => {
+              // Trigger nearby search instead
+              console.log('Triggering nearby search as fallback');
+            }}
+          ]
+        );
+      } else {
+        console.log(`Found ${filteredResults.length} results for "${trimmedQuery}"`);
+      }
     } catch (error) {
       console.error('Error searching places:', error);
-      Alert.alert(
-        'Search Error',
-        'Unable to search for places. Please try again.'
-      );
+
+      // Provide more helpful error messages
+      let errorMessage = 'Unable to search for places. Please try again.';
+      let errorTitle = 'Search Error';
+
+      if (error instanceof Error) {
+        if (error.message.includes('network')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+          errorTitle = 'Connection Error';
+        } else if (error.message.includes('timeout')) {
+          errorMessage = 'Search timed out. Please try again with a different search term.';
+          errorTitle = 'Timeout Error';
+        } else if (error.message.includes('quota')) {
+          errorMessage = 'Service temporarily unavailable. Please try again later.';
+          errorTitle = 'Service Unavailable';
+        }
+      }
+
+      Alert.alert(errorTitle, errorMessage, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => searchPlaces(query, location, radius) }
+      ]);
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [onPointsOfInterestUpdate]);
 
   /**
    * Check if search is needed based on location change

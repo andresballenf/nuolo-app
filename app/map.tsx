@@ -1,4 +1,6 @@
-import { View, StyleSheet, Alert, StatusBar } from 'react-native';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { View, StyleSheet, Alert, StatusBar, Text } from 'react-native';
+import { Redirect } from 'expo-router';
 import * as Location from 'expo-location';
 import type MapView from 'react-native-maps';
 import MapViewComponent, { type SearchAreaHandle } from '../components/map/MapView';
@@ -16,13 +18,13 @@ import { useAudio } from '../contexts/AudioContext';
 import type { AttractionForAudio, AudioGenerationPreferences } from '../contexts/AudioContext';
 import { useMonetization } from '../contexts/MonetizationContext';
 import { useContentAccess } from '../contexts/MonetizationContext';
-import { Button } from '../components/ui/Button';
+import { useAuth } from '../contexts/AuthContext';
 import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Text } from 'react-native';
+import { Button } from '../components/ui/Button';
 
 export default function MapScreen() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const { setSelectedAttraction, setIsBottomSheetOpen, gpsStatus, userPreferences, setGpsStatus } = useApp();
   const { resetOnboarding } = useOnboarding();
   const audioContext = useAudio();
@@ -101,6 +103,14 @@ export default function MapScreen() {
   
   // Track if initial load has occurred
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
+
+  if (authLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/auth" />;
+  }
 
   // Popular locations for quick testing
   const popularLocations = [
@@ -858,6 +868,9 @@ export default function MapScreen() {
         onSearchThisArea={() => {
           // Call the search function from MapView
           mapSearchRef.current?.searchThisArea();
+        }}
+        onSearchByQuery={(query: string) => {
+          mapSearchRef.current?.searchByQuery(query);
         }}
         mapType={mapType}
         mapTilt={mapTilt}

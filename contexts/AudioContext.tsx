@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Audio } from 'expo-av';
-import { Alert } from 'react-native';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Alert, AppState, AppStateStatus } from 'react-native';
 import { TranscriptSegment } from '../services/AttractionInfoService';
 import { AudioService } from '../services/AudioService';
 import { AudioChunkManager, ChunkPlaybackState } from '../services/AudioChunkManager';
@@ -191,44 +191,43 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const chunkManagerRef = useRef<AudioChunkManager | null>(null);
   const streamHandlerRef = useRef<AudioStreamHandler | null>(null);
   const audioGenerationServiceRef = useRef<AudioGenerationService | null>(null);
-
-  // Configure audio session
-  useEffect(() => {
-    const configureAudioSession = async () => {
+  const configureAudioSession = useCallback(async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: false,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        playThroughEarpieceAndroid: false,
+      });
+      console.log('Audio session configured successfully');
+    } catch (error) {
+      console.error('Failed to configure audio session:', error);
+      
+      // Try fallback configuration without interruption overrides
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           staysActiveInBackground: true,
-          interruptionModeIOS: 1, // MixWithOthers
           playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          interruptionModeAndroid: 2, // DoNotMix  
+          shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,
         });
-        console.log('Audio session configured successfully');
-      } catch (error) {
-        console.error('Failed to configure audio session:', error);
-        
-        // Try fallback configuration
-        try {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            staysActiveInBackground: true,
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: true,
-            playThroughEarpieceAndroid: false,
-          });
-          console.log('Audio session configured with fallback settings');
-        } catch (fallbackError) {
-          console.error('Failed to configure audio session with fallback:', fallbackError);
-          Alert.alert(
-            'Audio Setup Error',
-            'Failed to configure audio session. Audio features may not work properly.'
-          );
-        }
+        console.log('Audio session configured with fallback settings');
+      } catch (fallbackError) {
+        console.error('Failed to configure audio session with fallback:', fallbackError);
+        Alert.alert(
+          'Audio Setup Error',
+          'Failed to configure audio session. Audio features may not work properly.'
+        );
       }
-    };
+    }
+  }, []);
 
+  // Configure audio session
+  useEffect(() => {
     configureAudioSession();
 
     // Cleanup on unmount
@@ -240,7 +239,20 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         clearInterval(positionUpdateRef.current);
       }
     };
-  }, []);
+  }, [configureAudioSession]);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        configureAudioSession();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [configureAudioSession]);
 
   // Position tracking
   const startPositionTracking = useCallback(() => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,8 +8,13 @@ import {
   Animated,
   Platform,
   Image,
+  TextInput,
+  Keyboard,
+  Dimensions,
+  FlatList,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MapPreferencesMenu } from '../map/MapPreferencesMenu';
 import { ProfileMenu } from './ProfileMenu';
 import { SubscriptionBadge } from './SubscriptionBadge';
@@ -22,6 +27,7 @@ interface TopNavigationBarProps {
   // Search functionality
   isSearching: boolean;
   onSearchThisArea: () => void;
+  onSearchByQuery?: (query: string) => void;
 
   // Map preferences
   mapType: 'satellite' | 'hybrid';
@@ -38,9 +44,26 @@ interface TopNavigationBarProps {
   isEnablingGPS?: boolean;
 }
 
+// Storage keys for search history
+const SEARCH_HISTORY_KEY = '@nuolo_search_history';
+const MAX_HISTORY_ITEMS = 10;
+
+// Popular search suggestions
+const POPULAR_SEARCHES = [
+  'Museums',
+  'Parks',
+  'Restaurants',
+  'Historical Sites',
+  'Art Galleries',
+  'Churches',
+  'Monuments',
+  'Shopping',
+];
+
 export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   isSearching,
   onSearchThisArea,
+  onSearchByQuery,
   mapType,
   mapTilt,
   onMapTypeChange,
@@ -64,7 +87,90 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
   const mapButtonScale = useRef(new Animated.Value(1)).current;
   const profileButtonScale = useRef(new Animated.Value(1)).current;
   const gpsButtonScale = useRef(new Animated.Value(1)).current;
-  
+
+  const searchExpandAnim = useRef(new Animated.Value(0)).current;
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const searchInputRef = useRef<TextInput | null>(null);
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const SCREEN_WIDTH = Dimensions.get('window').width;
+  const [toolbarWidth, setToolbarWidth] = useState<number | null>(null);
+  const defaultExpandedWidth = SCREEN_WIDTH - 32;
+
+  // Load search history on mount
+  useEffect(() => {
+    loadSearchHistory();
+  }, []);
+
+  // Load search history from storage
+  const loadSearchHistory = useCallback(async () => {
+    try {
+      const history = await AsyncStorage.getItem(SEARCH_HISTORY_KEY);
+      if (history) {
+        setSearchHistory(JSON.parse(history));
+      }
+    } catch (error) {
+      console.error('Failed to load search history:', error);
+    }
+  }, []);
+
+  // Save search to history
+  const saveToHistory = useCallback(async (query: string) => {
+    try {
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery) return;
+
+      // Remove duplicates and add to front
+      const newHistory = [
+        trimmedQuery,
+        ...searchHistory.filter(item => item.toLowerCase() !== trimmedQuery.toLowerCase())
+      ].slice(0, MAX_HISTORY_ITEMS);
+
+      setSearchHistory(newHistory);
+      await AsyncStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(newHistory));
+    } catch (error) {
+      console.error('Failed to save search history:', error);
+    }
+  }, [searchHistory]);
+
+  // Clear search history
+  const clearSearchHistory = useCallback(async () => {
+    try {
+      setSearchHistory([]);
+      await AsyncStorage.removeItem(SEARCH_HISTORY_KEY);
+    } catch (error) {
+      console.error('Failed to clear search history:', error);
+    }
+  }, []);
+
+  // Get filtered suggestions based on query
+  const getFilteredSuggestions = useCallback(() => {
+    if (!searchQuery.trim()) {
+      // Show history and popular searches when no query
+      return {
+        history: searchHistory,
+        popular: POPULAR_SEARCHES
+      };
+    }
+
+    const lowerQuery = searchQuery.toLowerCase();
+    const filteredHistory = searchHistory.filter(item =>
+      item.toLowerCase().includes(lowerQuery)
+    );
+    const filteredPopular = POPULAR_SEARCHES.filter(item =>
+      item.toLowerCase().includes(lowerQuery) &&
+      !searchHistory.includes(item)
+    );
+
+    return {
+      history: filteredHistory,
+      popular: filteredPopular
+    };
+  }, [searchQuery, searchHistory]);
+
   // Get user initial for profile button
   const getUserInitial = () => {
     if (!user) return null;
@@ -102,9 +208,110 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
     });
   };
 
+  useEffect(() => {
+    Animated.timing(searchExpandAnim, {
+      toValue: isSearchExpanded ? 1 : 0,
+      duration: 220,
+      useNativeDriver: false,
+    }).start(() => {
+      if (isSearchExpanded) {
+        searchInputRef.current?.focus();
+      } else {
+        searchInputRef.current?.blur();
+      }
+    });
+
+    if (!isSearchExpanded) {
+      Keyboard.dismiss();
+    }
+  }, [isSearchExpanded, searchExpandAnim]);
+
+  const handleOpenSearch = () => {
+    setIsSearchExpanded(true);
+    setShowSuggestions(true);
+  };
+
+  const handleCancelSearch = () => {
+    setIsSearchExpanded(false);
+    setSearchQuery('');
+    setShowSuggestions(false);
+    setIsSearchLoading(false);
+
+    // Clear debounce timer
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setShowSuggestions(true);
+    searchInputRef.current?.focus();
+  };
+
+  const handleSubmitSearch = async (query?: string) => {
+    const searchTerm = (query || searchQuery).trim();
+    if (!searchTerm) return;
+
+    try {
+      setIsSearchLoading(true);
+      setShowSuggestions(false);
+
+      // Save to history
+      await saveToHistory(searchTerm);
+
+      // Execute search
+      onSearchByQuery?.(searchTerm);
+
+      // Close search after a short delay to show loading state
+      setTimeout(() => {
+        setIsSearchLoading(false);
+        setIsSearchExpanded(false);
+        setSearchQuery('');
+      }, 500);
+    } catch (error) {
+      console.error('Search failed:', error);
+      setIsSearchLoading(false);
+    }
+  };
+
+  const handleSuggestionPress = (suggestion: string) => {
+    setSearchQuery(suggestion);
+    handleSubmitSearch(suggestion);
+  };
+
+  const handleCollapsedPress = () => {
+    if (isSearchExpanded) {
+      handleSubmitSearch();
+    } else {
+      handleOpenSearch();
+    }
+  };
+
+  const expandedSearchWidth = Math.max(toolbarWidth ?? defaultExpandedWidth, 44);
+
+  const interpolatedSearchWidth = searchExpandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [44, expandedSearchWidth],
+  });
+
+  const interpolatedSearchRadius = searchExpandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [22, 22],
+  });
+
+  const searchContentOpacity = searchExpandAnim.interpolate({
+    inputRange: [0, 0.2, 1],
+    outputRange: [0, 0.4, 1],
+  });
+
+  const handleTopRowLayout = useCallback((event: { nativeEvent: { layout: { width: number } } }) => {
+    setToolbarWidth(event.nativeEvent.layout.width);
+  }, []);
+
   return (
     <View style={styles.container}>
-      <View style={styles.buttonContainer}>
+      <View style={styles.buttonContainer} onLayout={handleTopRowLayout}>
         {/* Search Area Button - Pill shaped */}
         <Animated.View
           style={[
@@ -229,6 +436,160 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
         </Animated.View>
       </View>
 
+      {/* Secondary Row - Expandable Search */}
+      <View style={[styles.secondaryRow, { justifyContent: isSearchExpanded ? 'flex-start' : 'flex-end' }]}>
+        <Animated.View
+          style={[
+            styles.expandableSearchContainer,
+            {
+              width: interpolatedSearchWidth,
+              borderRadius: interpolatedSearchRadius,
+              paddingHorizontal: isSearchExpanded ? 16 : 4,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[
+              styles.searchToggleButton,
+              isSearchExpanded && styles.searchToggleButtonActive,
+            ]}
+            onPress={handleCollapsedPress}
+            activeOpacity={0.85}
+          >
+            <MaterialIcons
+              name="search"
+              size={24}
+              color={isSearchExpanded ? '#84cc16' : '#6B7280'}
+            />
+          </TouchableOpacity>
+
+          {isSearchExpanded && (
+            <Animated.View style={[styles.searchInputWrapper, { opacity: searchContentOpacity }]}>
+              <TextInput
+                ref={searchInputRef}
+                value={searchQuery}
+                onChangeText={(text) => {
+                  setSearchQuery(text);
+                  setShowSuggestions(true);
+                }}
+                placeholder="Search attractions"
+                placeholderTextColor="#9CA3AF"
+                style={styles.searchInput}
+                returnKeyType="search"
+                onSubmitEditing={() => handleSubmitSearch()}
+                onFocus={() => setShowSuggestions(true)}
+                autoFocus={false}
+                autoCorrect={false}
+                autoCapitalize="words"
+              />
+
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  style={styles.searchClearButton}
+                  onPress={handleClearSearch}
+                  accessibilityLabel="Clear search"
+                >
+                  <MaterialIcons name="cancel" size={20} color="#9CA3AF" />
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.searchCloseButton}
+                onPress={handleCancelSearch}
+                accessibilityLabel="Close search"
+              >
+                <MaterialIcons name="arrow-back-ios" size={16} color="#6B7280" />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </Animated.View>
+
+        {/* Search Suggestions Dropdown */}
+        {isSearchExpanded && showSuggestions && !isSearchLoading && (
+          <View
+            style={[
+              styles.suggestionsContainer,
+              {
+                width: expandedSearchWidth,
+                maxWidth: expandedSearchWidth,
+              },
+            ]}
+          >
+            {(() => {
+              const { history, popular } = getFilteredSuggestions();
+              const hasHistory = history.length > 0;
+              const hasPopular = popular.length > 0;
+
+              if (!hasHistory && !hasPopular) {
+                return (
+                  <View style={styles.emptySuggestions}>
+                    <MaterialIcons name="location-searching" size={40} color="#D1D5DB" />
+                    <Text style={styles.emptySuggestionsText}>
+                      {searchQuery.trim() ? 'No matching suggestions' : 'Search for places, attractions, or landmarks'}
+                    </Text>
+                  </View>
+                );
+              }
+
+              return (
+                <FlatList
+                  data={[
+                    ...(hasHistory ? [{ type: 'header' as const, title: 'Recent Searches' }] : []),
+                    ...history.map(item => ({ type: 'history' as const, value: item })),
+                    ...(hasPopular ? [{ type: 'header' as const, title: 'Popular Searches' }] : []),
+                    ...popular.map(item => ({ type: 'popular' as const, value: item })),
+                  ]}
+                  keyExtractor={(item, index) => `${item.type}-${index}`}
+                  renderItem={({ item }) => {
+                    if (item.type === 'header') {
+                      return (
+                        <View style={styles.suggestionHeader}>
+                          <Text style={styles.suggestionHeaderText}>{item.title}</Text>
+                          {item.title === 'Recent Searches' && history.length > 0 && (
+                            <TouchableOpacity onPress={clearSearchHistory}>
+                              <Text style={styles.clearHistoryButton}>Clear</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      );
+                    }
+
+                    // Type narrowing: if not header, then it must have value
+                    const suggestionValue = 'value' in item ? item.value : '';
+
+                    return (
+                      <TouchableOpacity
+                        style={styles.suggestionItem}
+                        onPress={() => handleSuggestionPress(suggestionValue)}
+                      >
+                        <MaterialIcons
+                          name={item.type === 'history' ? 'history' : 'explore'}
+                          size={20}
+                          color={item.type === 'history' ? '#9CA3AF' : '#84cc16'}
+                        />
+                        <Text style={styles.suggestionText}>{suggestionValue}</Text>
+                        <MaterialIcons name="north-west" size={16} color="#D1D5DB" />
+                      </TouchableOpacity>
+                    );
+                  }}
+                  style={styles.suggestionsList}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                />
+              );
+            })()}
+          </View>
+        )}
+
+        {/* Search Loading Indicator */}
+        {isSearchExpanded && isSearchLoading && (
+          <View style={styles.searchLoadingContainer}>
+            <ActivityIndicator size="small" color="#84cc16" />
+            <Text style={styles.searchLoadingText}>Searching...</Text>
+          </View>
+        )}
+      </View>
+
       {/* Map Preferences Menu */}
       <MapPreferencesMenu
         isVisible={showMapPreferences}
@@ -268,6 +629,12 @@ const styles = StyleSheet.create({
     gap: 4,
     width: '100%',
     alignSelf: 'center',
+  },
+  secondaryRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    width: '100%',
+    position: 'relative',
   },
   searchButton: {
     height: 44,
@@ -358,5 +725,147 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#84cc16',
     backgroundColor: '#F0FDF4',
+  },
+  expandableSearchContainer: {
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 5,
+    height: 44,
+  },
+  searchToggleButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  searchToggleButtonActive: {
+    backgroundColor: 'transparent',
+  },
+  searchInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '400',
+    paddingVertical: 0,
+  },
+  searchClearButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    marginRight: 4,
+  },
+  searchCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: 52,
+    left: 0,
+    maxHeight: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+    zIndex: 1001,
+  },
+  suggestionsList: {
+    maxHeight: 320,
+  },
+  suggestionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#F9FAFB',
+    borderBottomWidth: 0,
+  },
+  suggestionHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  clearHistoryButton: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#84cc16',
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+    borderBottomWidth: 0,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '400',
+    color: '#1F2937',
+  },
+  emptySuggestions: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    gap: 16,
+  },
+  emptySuggestionsText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#9CA3AF',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  searchLoadingContainer: {
+    position: 'absolute',
+    top: 52,
+    right: 0,
+    minWidth: 200,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  searchLoadingText: {
+    fontSize: 15,
+    color: '#6B7280',
+    fontWeight: '500',
   },
 });

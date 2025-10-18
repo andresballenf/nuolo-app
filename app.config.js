@@ -36,6 +36,9 @@ module.exports = {
               "nuolo"
             ]
           }
+        ],
+        UIBackgroundModes: [
+          "audio"
         ]
       }
     },
@@ -69,7 +72,8 @@ module.exports = {
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-        "com.android.vending.BILLING"
+        "com.android.vending.BILLING",
+        "android.permission.WAKE_LOCK"
       ]
     },
     web: {

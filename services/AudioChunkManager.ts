@@ -1,4 +1,4 @@
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 
 export interface AudioChunkData {
@@ -54,14 +54,26 @@ export class AudioChunkManager {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         staysActiveInBackground: true,
-        interruptionModeIOS: 1, // MixWithOthers
+        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
         playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        interruptionModeAndroid: 2, // DoNotMix
+        shouldDuckAndroid: false,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
         playThroughEarpieceAndroid: false,
       });
     } catch (error) {
       console.error('Failed to configure audio session:', error);
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          staysActiveInBackground: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        console.log('Audio session configured with fallback settings in AudioChunkManager');
+      } catch (fallbackError) {
+        console.error('AudioChunkManager fallback audio session configuration failed:', fallbackError);
+      }
     }
   }
 
