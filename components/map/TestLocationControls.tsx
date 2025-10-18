@@ -70,6 +70,7 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
 
   const [isExpanded, setIsExpanded] = useState(false);
   const monetization = useMonetization();
+  const { resetFreeCounter } = monetization;
   const appContext = useApp();
 
   const validateAndApplyCoordinates = () => {
@@ -335,17 +336,16 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
               <Button
                 title="🔄 Reset Free Counter"
                 onPress={async () => {
-                  // @ts-ignore
-                  if (monetization.resetFreeCounter) {
-                    try {
-                      // @ts-ignore
-                      await monetization.resetFreeCounter();
-                      Alert.alert('Success', 'Free counter has been reset to 2/2');
-                    } catch (error) {
-                      Alert.alert('Error', 'Failed to reset free counter');
-                    }
-                  } else {
+                  if (!resetFreeCounter) {
                     Alert.alert('Info', 'Reset function not available');
+                    return;
+                  }
+
+                  try {
+                    await resetFreeCounter();
+                    Alert.alert('Success', 'Free counter has been reset to 2/2');
+                  } catch (error) {
+                    Alert.alert('Error', 'Failed to reset free counter');
                   }
                 }}
                 variant="secondary"

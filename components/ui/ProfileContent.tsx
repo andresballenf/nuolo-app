@@ -49,6 +49,7 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     setShowPaywall,
     refreshEntitlements,
     initialized,
+    resetFreeCounter,
   } = monetization;
   
   // Modal states for editing preferences
@@ -435,12 +436,13 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
           <Button
             title="🔧 Reset Free Counter (Dev)"
             onPress={async () => {
-              // @ts-ignore
-              if (monetization.resetFreeCounter) {
-                // @ts-ignore
-                await monetization.resetFreeCounter();
-                Alert.alert('Success', 'Free counter has been reset to 2/2');
+              if (!resetFreeCounter) {
+                Alert.alert('Info', 'Reset function not available');
+                return;
               }
+
+              await resetFreeCounter();
+              Alert.alert('Success', 'Free counter has been reset to 2/2');
             }}
             variant="outline"
             size="md"
