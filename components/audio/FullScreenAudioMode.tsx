@@ -9,13 +9,15 @@ import {
   Dimensions,
   ScrollView,
   Image,
+  findNodeHandle,
 } from 'react-native';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
-import { AudioTrack } from '../../contexts/AudioContext';
+import type { AudioTrack } from '../../contexts/AudioContext';
 import { useApp } from '../../contexts/AppContext';
 import * as Haptics from 'expo-haptics';
+import type { TranscriptSegment } from '../../services/AttractionInfoService';
 
 interface FullScreenAudioModeProps {
   isVisible: boolean;
@@ -35,7 +37,7 @@ interface FullScreenAudioModeProps {
   duration?: number;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
-  transcriptSegments?: any[]; // Not used anymore but kept for compatibility
+  transcriptSegments?: TranscriptSegment[]; // Not used anymore but kept for compatibility
 }
 
 const { width, height } = Dimensions.get('window');
@@ -52,6 +54,8 @@ const PAUSE_PERIOD = 500; // Pause after sentence
 const PAUSE_COMMA = 250; // Pause after comma
 const PAUSE_SEMICOLON = 350; // Pause after semicolon
 const PAUSE_QUESTION = 450; // Pause after question
+
+type TouchableOpacityInstance = React.ComponentRef<typeof TouchableOpacity>;
 
 export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   isVisible,
@@ -74,8 +78,8 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   transcriptSegments,
 }) => {
   const { userPreferences } = useApp();
-  const scrollViewRef = useRef<ScrollView>(null);
-  const phraseRefs = useRef<{ [key: number]: View | null }>({});
+  const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(null);
+  const phraseRefs = useRef<Record<number, TouchableOpacityInstance | null>>({});
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrolledPhraseRef = useRef(-1);
@@ -266,13 +270,18 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
       lastScrolledPhraseRef.current = activePhraseIndex;
       
       const phraseRef = phraseRefs.current[activePhraseIndex];
-      if (phraseRef && scrollViewRef.current) {
+      const scrollViewNode = scrollViewRef.current ? findNodeHandle(scrollViewRef.current) : null;
+      if (
+        phraseRef &&
+        typeof phraseRef.measureLayout === 'function' &&
+        scrollViewNode != null
+      ) {
         phraseRef.measureLayout(
-          scrollViewRef.current as any,
-          (x, y, width, height) => {
+          scrollViewNode,
+          (_x, y, _width, measuredHeight) => {
             if (scrollViewRef.current) {
               // Calculate position to center the phrase
-              const scrollToY = Math.max(0, y - VIEWPORT_CENTER + height / 2);
+              const scrollToY = Math.max(0, y - VIEWPORT_CENTER + measuredHeight / 2);
               
               scrollViewRef.current.scrollTo({
                 y: scrollToY,
@@ -437,7 +446,7 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
                       <TouchableOpacity
                         key={index}
                         ref={(ref) => {
-                          phraseRefs.current[index] = ref as any;
+                          phraseRefs.current[index] = ref;
                         }}
                         onPress={() => handlePhrasePress(index)}
                         activeOpacity={0.7}

@@ -8,6 +8,34 @@ import { AudioStreamHandler } from '../services/AudioStreamHandler';
 import { AudioGenerationService, GenerationProgress } from '../services/AudioGenerationService';
 import type { PointOfInterest } from '../services/GooglePlacesService';
 
+export type AudioTheme = 'history' | 'nature' | 'architecture' | 'culture';
+export type AudioLengthPreference = 'short' | 'medium' | 'deep-dive';
+export type AudioLanguage = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'it' | 'pt' | 'ru' | 'ko';
+export type AudioVoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
+export type AudioAIProvider = 'openai' | 'gemini';
+
+export interface Coordinates {
+  lat: number;
+  lng: number;
+}
+
+export interface AttractionForAudio {
+  id: string;
+  name: string;
+  address?: string;
+  description?: string;
+  userLocation?: Coordinates;
+  photos?: string[];
+}
+
+export interface AudioGenerationPreferences {
+  theme: AudioTheme;
+  audioLength: AudioLengthPreference;
+  voiceStyle: AudioVoiceStyle;
+  language: AudioLanguage;
+  aiProvider?: AudioAIProvider;
+}
+
 export interface AudioTrack {
   id: string;
   title: string;
@@ -102,7 +130,7 @@ export interface AudioActions {
   startGeneratingAudio: (attractionId: string, name: string) => void;
   clearGenerationState: () => void;
   setGenerationError: (error: string) => void;
-  generateAndPlay: (attraction: any) => Promise<void>;
+  generateAndPlay: (attraction: AttractionForAudio) => Promise<void>;
   generateAudioGuide: (
     attraction: PointOfInterest,
     options?: {
@@ -113,8 +141,16 @@ export interface AudioActions {
   ) => Promise<boolean>;
 
   // Chunk-based audio
-  streamGenerateAndPlay: (attraction: any, text: string, preferences: any) => Promise<void>;
-  generateChunkedAudio: (attraction: any, text: string, preferences: any) => Promise<void>;
+  streamGenerateAndPlay: (
+    attraction: AttractionForAudio,
+    text: string,
+    preferences: AudioGenerationPreferences
+  ) => Promise<void>;
+  generateChunkedAudio: (
+    attraction: AttractionForAudio,
+    text: string,
+    preferences: AudioGenerationPreferences
+  ) => Promise<void>;
   cancelStreaming: () => void;
 }
 
@@ -663,7 +699,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const generateAndPlay = useCallback(async (attraction: any) => {
+  const generateAndPlay = useCallback(async (attraction: AttractionForAudio) => {
     // This will be implemented in map.tsx
     // Placeholder for now
     console.log('Generate and play for attraction:', attraction.name);
@@ -697,12 +733,16 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   // New chunk-based streaming audio generation
   const streamGenerateAndPlay = useCallback(async (
-    attraction: any,
+    attraction: AttractionForAudio,
     text: string,
-    preferences: any
+    preferences: AudioGenerationPreferences
   ) => {
     try {
       console.log('Starting chunked audio generation for:', attraction.name);
+
+      if (!attraction.userLocation) {
+        throw new Error('Attraction userLocation is required for streaming audio generation');
+      }
       
       // Initialize chunk manager if needed
       if (!chunkManagerRef.current) {
@@ -830,26 +870,31 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         }
       );
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error in streamGenerateAndPlay:', error);
+      const message = error instanceof Error ? error.message : 'Failed to generate audio';
       setState(prev => ({
         ...prev,
         isGeneratingAudio: false,
-        generationError: error.message,
+        generationError: message,
         isBuffering: false
       }));
-      Alert.alert('Audio Error', error.message || 'Failed to generate audio');
+      Alert.alert('Audio Error', message);
     }
   }, []);
 
   // New app-orchestrated chunked audio generation
   const generateChunkedAudio = useCallback(async (
-    attraction: any,
+    attraction: AttractionForAudio,
     text: string,
-    preferences: any
+    preferences: AudioGenerationPreferences
   ) => {
     try {
       console.log('Starting app-orchestrated chunked audio generation for:', attraction.name);
+
+      if (!attraction.userLocation) {
+        throw new Error('Attraction userLocation is required for chunked audio generation');
+      }
       
       // Initialize chunk manager if needed
       if (!chunkManagerRef.current) {
@@ -930,8 +975,8 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       // Generate chunks with callbacks
       await audioGenerationServiceRef.current.generateChunkedAudio(
         text,
-        preferences.voiceStyle || 'casual',
-        preferences.language || 'en',
+        preferences.voiceStyle,
+        preferences.language,
         {
           onFirstChunkReady: async (chunk) => {
             console.log('First chunk ready, starting playback');
@@ -991,15 +1036,16 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         }
       );
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error in generateChunkedAudio:', error);
+      const message = error instanceof Error ? error.message : 'Failed to generate audio';
       setState(prev => ({
         ...prev,
         isGeneratingAudio: false,
-        generationError: error.message,
+        generationError: message,
         isBuffering: false
       }));
-      Alert.alert('Audio Error', error.message || 'Failed to generate audio');
+      Alert.alert('Audio Error', message);
     }
   }, []);
 

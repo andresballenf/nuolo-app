@@ -12,6 +12,7 @@ import { RevenueCatPaywallModal } from '../components/ui/RevenueCatPaywallModal'
 import { useApp } from '../contexts/AppContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAudio } from '../contexts/AudioContext';
+import type { AttractionForAudio, AudioGenerationPreferences } from '../contexts/AudioContext';
 import { useMonetization } from '../contexts/MonetizationContext';
 import { useContentAccess } from '../contexts/MonetizationContext';
 import { Button } from '../components/ui/Button';
@@ -493,21 +494,25 @@ export default function MapScreen() {
           console.log('Using new app-orchestrated chunked audio generation');
           
           // Use the new chunked generation method from AudioContext
+          const attractionForAudio: AttractionForAudio = {
+            id: attraction.id,
+            name: attraction.name,
+            address: attraction.description || 'Unknown location',
+            userLocation: currentLocation,
+            photos: attraction.photos, // Pass the photos array for image display
+          };
+
+          const audioPreferences: AudioGenerationPreferences = {
+            theme: userPreferences.theme,
+            audioLength: userPreferences.audioLength,
+            voiceStyle: userPreferences.voiceStyle,
+            language: userPreferences.language,
+          };
+
           await audioContext.generateChunkedAudio(
-            {
-              id: attraction.id,
-              name: attraction.name,
-              address: attraction.description || 'Unknown location',
-              userLocation: currentLocation,
-              photos: attraction.photos, // Pass the photos array for image display
-            },
+            attractionForAudio,
             text,
-            {
-              theme: userPreferences.theme,
-              audioLength: userPreferences.audioLength,
-              voiceStyle: userPreferences.voiceStyle,
-              language: userPreferences.language,
-            }
+            audioPreferences
           );
           
           audioGenerated = true;
