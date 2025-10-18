@@ -1,6 +1,7 @@
 import { View, StyleSheet, Alert, StatusBar } from 'react-native';
 import * as Location from 'expo-location';
-import MapViewComponent from '../components/map/MapView';
+import type MapView from 'react-native-maps';
+import MapViewComponent, { type SearchAreaHandle } from '../components/map/MapView';
 import { TestLocationControls } from '../components/map/TestLocationControls';
 import { MaterialBottomSheet, SheetContentType, SheetState } from '../components/ui/MaterialBottomSheet';
 import { ProfileContent } from '../components/ui/ProfileContent';
@@ -95,8 +96,8 @@ export default function MapScreen() {
   // Search state
   const [showSearchButton, setShowSearchButton] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const mapSearchRef = useRef<any>(null);
-  const mapRef = useRef<any>(null);
+  const mapSearchRef = useRef<SearchAreaHandle | null>(null);
+  const mapRef = useRef<MapView | null>(null);
   
   // Track if initial load has occurred
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
@@ -856,7 +857,7 @@ export default function MapScreen() {
         isSearching={isSearching}
         onSearchThisArea={() => {
           // Call the search function from MapView
-          mapSearchRef.current?.searchThisArea?.();
+          mapSearchRef.current?.searchThisArea();
         }}
         mapType={mapType}
         mapTilt={mapTilt}
