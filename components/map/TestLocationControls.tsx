@@ -12,6 +12,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { useMonetization } from '../../contexts/MonetizationContext';
 import { useApp } from '../../contexts/AppContext';
+import type { AIProvider } from '../../contexts/AppContext';
 
 interface PopularLocation {
   name: string;
@@ -45,6 +46,9 @@ const POPULAR_LOCATIONS: PopularLocation[] = [
   { name: 'Cincinnati', lat: 39.1088, lng: -84.5175 },
 ];
 
+const OPENAI_PROVIDER: AIProvider = 'openai';
+const GEMINI_PROVIDER: AIProvider = 'gemini';
+
 export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
   isTestModeEnabled,
   onTestModeToggle,
@@ -72,6 +76,9 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
   const monetization = useMonetization();
   const { resetFreeCounter } = monetization;
   const appContext = useApp();
+  const activeAiProvider: AIProvider = appContext.userPreferences.aiProvider ?? OPENAI_PROVIDER;
+  const isOpenAiProvider = activeAiProvider === OPENAI_PROVIDER;
+  const isGeminiProvider = activeAiProvider === GEMINI_PROVIDER;
 
   const validateAndApplyCoordinates = () => {
     const lat = parseFloat(testLatitude);
@@ -293,17 +300,19 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                   <TouchableOpacity
                     style={[
                       styles.aiProviderButton,
-                      (appContext.userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderButtonActive
+                      isOpenAiProvider && styles.aiProviderButtonActive,
                     ]}
                     onPress={() => {
-                      appContext.setUserPreferences({ aiProvider: 'openai' });
+                      appContext.setUserPreferences({ aiProvider: OPENAI_PROVIDER });
                       Alert.alert('AI Provider', 'Switched to OpenAI + ElevenLabs');
                     }}
                   >
-                    <Text style={[
-                      styles.aiProviderText,
-                      (appContext.userPreferences.aiProvider || 'openai') === 'openai' && styles.aiProviderTextActive
-                    ]}>
+                    <Text
+                      style={[
+                        styles.aiProviderText,
+                        isOpenAiProvider && styles.aiProviderTextActive,
+                      ]}
+                    >
                       OpenAI
                     </Text>
                   </TouchableOpacity>
@@ -311,23 +320,25 @@ export const TestLocationControls: React.FC<TestLocationControlsProps> = ({
                   <TouchableOpacity
                     style={[
                       styles.aiProviderButton,
-                      appContext.userPreferences.aiProvider === 'gemini' && styles.aiProviderButtonActive
+                      isGeminiProvider && styles.aiProviderButtonActive,
                     ]}
                     onPress={() => {
-                      appContext.setUserPreferences({ aiProvider: 'gemini' });
+                      appContext.setUserPreferences({ aiProvider: GEMINI_PROVIDER });
                       Alert.alert('AI Provider', 'Switched to Gemini Native Audio');
                     }}
                   >
-                    <Text style={[
-                      styles.aiProviderText,
-                      appContext.userPreferences.aiProvider === 'gemini' && styles.aiProviderTextActive
-                    ]}>
+                    <Text
+                      style={[
+                        styles.aiProviderText,
+                        isGeminiProvider && styles.aiProviderTextActive,
+                      ]}
+                    >
                       Gemini
                     </Text>
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.aiProviderHint}>
-                  {(appContext.userPreferences.aiProvider || 'openai') === 'openai'
+                  {isOpenAiProvider
                     ? 'Two-step: GPT-4 text + TTS audio'
                     : 'Single-step: Gemini generates text + audio simultaneously'}
                 </Text>

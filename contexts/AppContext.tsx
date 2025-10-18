@@ -3,11 +3,21 @@ import { storage } from '../lib/utils';
 import { PreferencesService } from '../services/PreferencesService';
 import { supabase } from '../lib/supabase';
 
-type Theme = 'history' | 'nature' | 'architecture' | 'culture';
-type AudioLength = 'short' | 'medium' | 'deep-dive';
-type Language = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'it' | 'pt' | 'ru' | 'ko';
-type VoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
-type AIProvider = 'openai' | 'gemini';
+export type Theme = 'history' | 'nature' | 'architecture' | 'culture' | 'general';
+export type AudioLength = 'short' | 'medium' | 'deep-dive';
+export type Language =
+  | 'en'
+  | 'es'
+  | 'fr'
+  | 'de'
+  | 'zh'
+  | 'ja'
+  | 'it'
+  | 'pt'
+  | 'ru'
+  | 'ko';
+export type VoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
+export type AIProvider = 'openai' | 'gemini';
 
 interface GpsStatus {
   active: boolean;
@@ -18,7 +28,7 @@ interface GpsStatus {
   lastUpdated: Date | null;
 }
 
-interface UserPreferences {
+export interface UserPreferences {
   theme: Theme;
   audioLength: AudioLength;
   language: Language;
