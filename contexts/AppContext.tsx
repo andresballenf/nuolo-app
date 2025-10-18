@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 
 type Theme = 'history' | 'nature' | 'architecture' | 'culture';
 type AudioLength = 'short' | 'medium' | 'deep-dive';
-type Language = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja';
+type Language = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'it' | 'pt' | 'ru' | 'ko';
 type VoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
 type AIProvider = 'openai' | 'gemini';
 

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Session, AuthError } from '@supabase/supabase-js';
+import type { Session, AuthError, PostgrestSingleResponse } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -156,11 +156,11 @@ const secureStorage = {
 };
 
 async function withTimeout<T>(
-  promise: Promise<T>,
+  operation: () => PromiseLike<T>,
   timeoutMs: number,
   timeoutMessage: string
 ): Promise<T> {
-  let timeoutHandle: ReturnType<typeof setTimeout>;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => {
       reject(new Error(timeoutMessage));
@@ -168,9 +168,11 @@ async function withTimeout<T>(
   });
 
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    return await Promise.race([operation(), timeoutPromise]);
   } finally {
-    clearTimeout(timeoutHandle);
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 
@@ -430,13 +432,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       emailVerified: !!sessionUser?.email_confirmed_at,
     };
 
+    type ProfileRow = {
+      full_name?: string | null;
+      avatar_url?: string | null;
+      preferences?: Record<string, unknown> | null;
+    };
+
     try {
-      const { data, error } = await withTimeout(
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .single(),
+      const { data, error } = await withTimeout<PostgrestSingleResponse<ProfileRow>>(
+        () =>
+          supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single(),
         PROFILE_FETCH_TIMEOUT,
         'Profile fetch timed out'
       );
@@ -447,9 +456,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data) {
         userData.profile = {
-          fullName: data.full_name,
-          avatar: data.avatar_url,
-          preferences: data.preferences,
+          fullName: data.full_name ?? undefined,
+          avatar: data.avatar_url ?? undefined,
+          preferences: data.preferences ? (data.preferences as Record<string, any>) : undefined,
         };
       }
     } catch (error) {
@@ -459,7 +468,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!userData.email) {
       try {
         const { data: authData, error: authError } = await withTimeout(
-          supabase.auth.getUser(),
+          () => supabase.auth.getUser(),
           PROFILE_FETCH_TIMEOUT,
           'Auth user fetch timed out'
         );

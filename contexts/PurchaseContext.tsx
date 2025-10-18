@@ -11,7 +11,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
-import type { InAppPurchase as ExpoInAppPurchase } from 'expo-in-app-purchases';
 import { storage } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -31,6 +30,11 @@ const InAppPurchases: any = {
     DEFERRED: 3,
   },
 };
+
+interface LegacyInAppPurchase {
+  productId: string;
+  purchaseTime: number;
+}
 
 export type EntitlementStatus = 'free' | 'premium' | 'unlimited';
 
@@ -462,7 +466,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       const { responseCode, results } = await InAppPurchases.getPurchaseHistoryAsync();
       
       if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
-        const validPurchases = results.filter((purchase: ExpoInAppPurchase) =>
+        const validPurchases = results.filter((purchase: LegacyInAppPurchase) =>
           Object.values(PRODUCT_IDS).includes(purchase.productId)
         );
         
@@ -472,7 +476,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
           let subscriptionExpiry: Date | undefined;
           let status: EntitlementStatus = entitlements.status;
           
-          validPurchases.forEach((purchase: ExpoInAppPurchase) => {
+          validPurchases.forEach((purchase: LegacyInAppPurchase) => {
             if (purchase.productId === PRODUCT_IDS.MONTHLY_PREMIUM) {
               status = 'unlimited';
               subscriptionExpiry = new Date(purchase.purchaseTime + 30 * 24 * 60 * 60 * 1000);

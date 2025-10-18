@@ -4,6 +4,7 @@ import Purchases, {
   PurchasesPackage,
   CustomerInfo,
   PurchasesStoreProduct,
+  PurchasesEntitlementInfo,
   LOG_LEVEL,
 } from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
@@ -421,7 +422,7 @@ export class MonetizationService {
         throw new Error('RevenueCat not configured');
       }
 
-      const { customerInfo } = await Purchases.restorePurchases();
+      const customerInfo = await Purchases.restorePurchases();
 
       // Sync restored purchases with Supabase
       await this.syncCustomerInfo(customerInfo);
@@ -471,15 +472,16 @@ export class MonetizationService {
         };
       }
 
-      const { customerInfo } = await Purchases.getCustomerInfo();
+      const customerInfo = await Purchases.getCustomerInfo();
       await this.syncCustomerInfo(customerInfo);
 
       const activeEntitlements = customerInfo.entitlements?.active ?? {};
+      const activeEntitlementValues = Object.values(activeEntitlements) as PurchasesEntitlementInfo[];
       const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
 
       const unlimitedEntitlement =
         activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
-        Object.values(activeEntitlements).find(
+        activeEntitlementValues.find(
           entitlement => entitlement.productIdentifier === MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY
         );
 
@@ -636,11 +638,11 @@ export class MonetizationService {
         };
       }
 
-      const { customerInfo } = await Purchases.getCustomerInfo();
+      const customerInfo = await Purchases.getCustomerInfo();
       await this.syncCustomerInfo(customerInfo);
 
       const activeEntitlements = customerInfo.entitlements?.active ?? {};
-      const activeEntitlementValues = Object.values(activeEntitlements);
+      const activeEntitlementValues = Object.values(activeEntitlements) as PurchasesEntitlementInfo[];
       const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
 
       const unlimitedEntitlement =
@@ -947,12 +949,10 @@ export class MonetizationService {
     for (const pkg of this.currentOfferings.current.availablePackages) {
       const packageIdentifier = pkg.identifier?.toLowerCase?.() ?? '';
       const productIdentifier = pkg.product?.identifier?.toLowerCase?.() ?? '';
-      const entitlementIdentifier = pkg.product?.entitlementIdentifier?.toLowerCase?.() ?? '';
 
       if (
         (packageIdentifier && matchTargets.has(packageIdentifier)) ||
-        (productIdentifier && matchTargets.has(productIdentifier)) ||
-        (entitlementIdentifier && matchTargets.has(entitlementIdentifier))
+        (productIdentifier && matchTargets.has(productIdentifier))
       ) {
         return pkg;
       }
@@ -964,7 +964,6 @@ export class MonetizationService {
       availablePackages: this.currentOfferings.current.availablePackages.map(pkg => ({
         identifier: pkg.identifier,
         productIdentifier: pkg.product?.identifier,
-        entitlementIdentifier: pkg.product?.entitlementIdentifier,
       })),
     });
 
