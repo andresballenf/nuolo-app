@@ -16,12 +16,12 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
   const targetLanguage = languageNames[preferences.language] || 'English';
   const isNonEnglish = preferences.language && preferences.language !== 'en';
   
-  // Adjust word count based on audio length preference
-  const wordCount = preferences.audioLength === 'short'
-    ? '180-260 words (about 2 minutes of audio)'
+  // Adjust pacing guidance based on audio length preference
+  const durationGoal = preferences.audioLength === 'short'
+    ? 'about 2 minutes of spoken narration'
     : preferences.audioLength === 'medium'
-      ? '700-900 words (roughly 4-6 minutes of audio)'
-      : '1200-1500 words (approximately 7-10 minutes of audio)';
+      ? 'around 4 minutes of spoken narration'
+      : 'roughly 7 minutes of spoken narration';
 
   // Map theme preferences to content focus
   const themeGuide = {
@@ -37,36 +37,28 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
   // Map voice style to narrative tone
   const voiceInstructions = {
     'casual': 'Write in a friendly, conversational tone like chatting with a friend. Use relatable language, contractions, and occasional humor.',
-    'formal': 'Write in a professional, informative tone like a Wikipedia article but still engaging. Use clear, structured information.',
+    'formal': 'Write like a confident museum curator speaking on-site: precise, welcoming, and clearly structured without sounding stiff.',
     'energetic': 'Write with enthusiasm and excitement! Use dynamic language, vivid descriptions, and convey genuine passion for the place.',
     'calm': 'Write in a soothing, contemplative tone. Use peaceful language, gentle pacing, and reflective observations.'
   };
   
   const voiceStyle = voiceInstructions[preferences.voiceStyle] || voiceInstructions['casual'];
   
-  // Language-specific instructions - MOVED TO THE VERY TOP AND MADE MORE EMPHATIC
+  // Language-specific instruction
   const languageInstruction = isNonEnglish 
-    ? `🚨🚨🚨 CRITICAL LANGUAGE REQUIREMENT 🚨🚨🚨
-YOU MUST WRITE YOUR ENTIRE RESPONSE IN ${targetLanguage.toUpperCase()}!
-DO NOT USE ENGLISH! USE ONLY ${targetLanguage.toUpperCase()}!
+    ? `LANGUAGE REQUIREMENT: Respond entirely in ${targetLanguage}. Do not include any English words.`
+    : '';
 
-Every single word must be in ${targetLanguage}:
-- All descriptions must be in ${targetLanguage}
-- All facts must be in ${targetLanguage}
-- All storytelling must be in ${targetLanguage}
-- Use ${targetLanguage} grammar and sentence structure
-- Use culturally appropriate expressions in ${targetLanguage}
-
-THIS IS MANDATORY: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()}, NOT ENGLISH!
-
-` 
+  // Provide the listener's vantage point when available
+  const vantagePoint = userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number'
+    ? `Listener vantage point: The listener is presently near latitude ${userLocation.lat.toFixed(4)}, longitude ${userLocation.lng.toFixed(4)}. Describe what they can notice from this spot when possible.`
     : '';
 
   // Adjust units based on language/region
   const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language);
   const unitSystem = useMetric ? 'Use metric units (meters, kilometers)' : 'Use imperial units (feet, miles)';
 
-  return `${languageInstruction} Create an audio tour narrative for "${attractionName}" targeting about ${wordCount}, but treat this as a soft goal.
+  return `${languageInstruction ? languageInstruction + '\n\n' : ''}${vantagePoint ? vantagePoint + '\n\n' : ''}Create an audio tour narrative for "${attractionName}" targeting ${durationGoal}, but treat this as guidance rather than a quota.
 
 Identity resolution
 Use the full address to ensure you describe the correct place, but avoid mentioning the address in the output:
@@ -80,11 +72,12 @@ Emphasize ${themeFocus} if verifiable details exist, but keep a balanced mix of 
 
 Narrative ingredients
 Blend naturally (order can vary):
-- A vivid opening moment
-- Core factual details, spotlighting the theme if possible
-- Authentic local color or trivia, only if true
-- Why locals care or how it fits daily life
-- One insider tip for visitors
+- Begin by orienting the listener to where they are standing and what to look at first
+- Paint one vivid sensory moment using sight, sound, or texture grounded in reality
+- Share core factual details, spotlighting the theme if possible
+- Offer authentic local color or trivia only when verified
+- Explain why locals care or how it fits daily life today
+- Give one insider tip or next-step suggestion for visitors
 
 Detail guidance
 - If this place has strong, verifiable facts, share several specific details that teach the listener something new. Prefer concrete names, dates, design features, cultural context, or cause and effect. Vary angles to avoid repetition.
@@ -93,7 +86,7 @@ Detail guidance
 - Never pad with filler to meet a length target.
 
 Precedence rule
-- If Detail guidance conflicts with the word count target, follow Detail guidance. It is acceptable to go shorter when little is known or slightly longer when genuine depth adds value. Keep the narrative tight and spoken-first either way.
+- If Detail guidance conflicts with pacing guidance, follow Detail guidance. It is acceptable to go shorter when little is known or slightly longer when genuine depth adds value. Keep the narrative tight and spoken-first either way.
 
 Critical instructions
 - ${unitSystem} for all measurements
@@ -102,7 +95,5 @@ Critical instructions
 - No lists, bullet points, or headings in the final output
 
 Final reminder
-Keep it conversational, fluid, and natural for listening, not decorated or literary.${isNonEnglish ? `
-
-REMINDER: THE ENTIRE OUTPUT MUST BE IN ${targetLanguage.toUpperCase()}, NOT ENGLISH!` : ''}`;
-2}
+Keep it conversational, fluid, and natural for listening. Use concrete, accurate details instead of flowery language.${isNonEnglish ? ` Remember: use only ${targetLanguage}.` : ''}`;
+}
