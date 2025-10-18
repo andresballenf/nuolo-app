@@ -111,25 +111,30 @@ export const ALL_PRODUCT_IDS = {
   ...LEGACY_PRODUCT_IDS,
 } as const;
 
+const isProductId = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && value.length > 0;
+
 /**
  * Get all active product IDs as array
  */
 export function getActiveProductIds(): string[] {
-  return Object.values(PRODUCT_IDS).filter(Boolean) as string[];
+  return Object.values(PRODUCT_IDS).filter(isProductId);
 }
 
 /**
  * Get all product IDs (including legacy) as array
  */
 export function getAllProductIds(): string[] {
-  return Object.values(ALL_PRODUCT_IDS).filter(Boolean) as string[];
+  return Object.values(ALL_PRODUCT_IDS).filter(isProductId);
 }
 
 /**
  * Check if a product ID is a legacy product
  */
 export function isLegacyProduct(productId: string): boolean {
-  return Object.values(LEGACY_PRODUCT_IDS).includes(productId as any);
+  return Object.values(LEGACY_PRODUCT_IDS)
+    .filter(isProductId)
+    .includes(productId);
 }
 
 /**

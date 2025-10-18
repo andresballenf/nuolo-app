@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { format } from 'date-fns';
 
+import type { MaterialIconName } from '../../types/icons';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { usePurchase } from '../../contexts/PurchaseContext';
@@ -82,7 +83,7 @@ export const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({
     }
   };
 
-  const getStatusIcon = () => {
+  const getStatusIcon = (): MaterialIconName => {
     switch (entitlements.status) {
       case 'unlimited':
         return 'verified';
@@ -131,7 +132,7 @@ export const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({
         <View style={styles.statusHeader}>
           <View style={styles.statusIconContainer}>
             <MaterialIcons 
-              name={getStatusIcon() as any} 
+              name={getStatusIcon()} 
               size={32} 
               color={getStatusColor()} 
             />

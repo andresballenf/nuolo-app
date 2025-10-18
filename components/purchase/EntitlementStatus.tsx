@@ -10,12 +10,33 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { format, isToday, isTomorrow } from 'date-fns';
 
+import type { MaterialIconName } from '../../types/icons';
 import { usePurchase } from '../../contexts/PurchaseContext';
 
 interface EntitlementStatusProps {
   variant?: 'compact' | 'detailed' | 'banner';
   showUpgradeButton?: boolean;
   onUpgrade?: () => void;
+}
+
+type StatusType =
+  | 'expired'
+  | 'expiring'
+  | 'renewing'
+  | 'active'
+  | 'premium'
+  | 'limit_reached'
+  | 'last_free'
+  | 'free';
+
+interface StatusInfo {
+  status: StatusType;
+  title: string;
+  subtitle: string;
+  color: string;
+  backgroundColor: string;
+  icon: MaterialIconName;
+  urgent: boolean;
 }
 
 export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
@@ -28,7 +49,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
     showPaywall,
   } = usePurchase();
 
-  const statusInfo = useMemo(() => {
+  const statusInfo = useMemo<StatusInfo>(() => {
     const now = new Date();
     const hasSubscription = entitlements.status === 'unlimited';
     const hasPremium = entitlements.status === 'premium';
@@ -156,7 +177,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
         activeOpacity={statusInfo.urgent || entitlements.status === 'free' ? 0.7 : 1}
       >
         <MaterialIcons 
-          name={statusInfo.icon as any} 
+          name={statusInfo.icon} 
           size={20} 
           color={statusInfo.color} 
         />
@@ -191,7 +212,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
         >
           <View style={styles.bannerContent}>
             <MaterialIcons 
-              name={statusInfo.icon as any} 
+              name={statusInfo.icon} 
               size={24} 
               color={statusInfo.color} 
             />
@@ -220,7 +241,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
       <View style={styles.detailedHeader}>
         <View style={styles.detailedIconContainer}>
           <MaterialIcons 
-            name={statusInfo.icon as any} 
+            name={statusInfo.icon} 
             size={28} 
             color={statusInfo.color} 
           />
