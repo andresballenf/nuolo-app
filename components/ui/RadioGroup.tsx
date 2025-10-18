@@ -10,25 +10,25 @@ import {
 } from 'react-native';
 // import * as Haptics from 'expo-haptics';
 
-interface RadioOption {
-  value: string;
+export interface RadioOption<T extends string> {
+  value: T;
   label: string;
 }
 
-interface RadioGroupProps {
-  options: RadioOption[];
-  value?: string;
-  onValueChange: (value: string) => void;
+interface RadioGroupProps<T extends string> {
+  options: ReadonlyArray<RadioOption<T>>;
+  value?: T;
+  onValueChange: (value: T) => void;
   style?: ViewStyle;
 }
 
-interface RadioItemProps {
-  option: RadioOption;
+interface RadioItemProps<T extends string> {
+  option: RadioOption<T>;
   selected: boolean;
   onPress: () => void;
 }
 
-const RadioItem: React.FC<RadioItemProps> = ({ option, selected, onPress }) => {
+const RadioItem = <T extends string>({ option, selected, onPress }: RadioItemProps<T>) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const colorAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
   
@@ -75,53 +75,53 @@ const RadioItem: React.FC<RadioItemProps> = ({ option, selected, onPress }) => {
   });
   
   return (
-  <TouchableOpacity
-    onPress={handlePress}
-    activeOpacity={0.9}
-    accessible={true}
-    accessibilityRole="radio"
-    accessibilityLabel={option.label}
-    accessibilityState={{ selected }}
-    accessibilityHint={selected ? "Selected" : "Tap to select"}
-  >
-    <Animated.View
-      style={[
-        styles.radioItem,
-        {
-          transform: [{ scale: scaleAnim }],
-        },
-      ]}
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={0.9}
+      accessible={true}
+      accessibilityRole="radio"
+      accessibilityLabel={option.label}
+      accessibilityState={{ selected }}
+      accessibilityHint={selected ? 'Selected' : 'Tap to select'}
     >
       <Animated.View
         style={[
-          StyleSheet.absoluteFillObject,
+          styles.radioItem,
           {
-            borderRadius: 12,
-            borderWidth: 2,
-            borderColor: animatedBorderColor,
-            backgroundColor: animatedBackgroundColor,
+            transform: [{ scale: scaleAnim }],
           },
         ]}
-      />
-      <View style={styles.radioContent}>
-        <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
-          {selected && <View style={styles.radioInner} />}
+      >
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              borderRadius: 12,
+              borderWidth: 2,
+              borderColor: animatedBorderColor,
+              backgroundColor: animatedBackgroundColor,
+            },
+          ]}
+        />
+        <View style={styles.radioContent}>
+          <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
+            {selected && <View style={styles.radioInner} />}
+          </View>
+          <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
+            {option.label}
+          </Text>
         </View>
-        <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
-          {option.label}
-        </Text>
-      </View>
-    </Animated.View>
-  </TouchableOpacity>
+      </Animated.View>
+    </TouchableOpacity>
   );
 };
 
-export const RadioGroup: React.FC<RadioGroupProps> = ({
+export function RadioGroup<T extends string>({
   options,
   value,
   onValueChange,
   style,
-}) => {
+}: RadioGroupProps<T>) {
   return (
     <View 
       style={[styles.container, style]}
@@ -138,7 +138,7 @@ export const RadioGroup: React.FC<RadioGroupProps> = ({
       ))}
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {

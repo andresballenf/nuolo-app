@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
+import type { Language } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { router } from 'expo-router';
 
@@ -34,7 +35,7 @@ const languages = [
   { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
   { code: 'ko', name: 'Korean', flag: '🇰🇷' },
   { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-] as const;
+] as const satisfies Array<{ code: Language; name: string; flag: string }>;
 
 export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   isVisible,
@@ -91,8 +92,8 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     }
   }, [isVisible]);
 
-  const handleLanguageChange = (languageCode: (typeof languages)[number]['code']) => {
-    setUserPreferences({
+  const handleLanguageChange = (languageCode: Language) => {
+    void setUserPreferences({
       language: languageCode,
     });
   };

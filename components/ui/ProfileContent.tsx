@@ -11,6 +11,12 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
+import type {
+  AudioLength,
+  Language,
+  Theme,
+  VoiceStyle,
+} from '../../contexts/AppContext';
 import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMonetization } from '../../contexts/MonetizationContext';
@@ -33,7 +39,7 @@ const languages = [
   { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
   { code: 'ko', name: 'Korean', flag: '🇰🇷' },
   { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-];
+] as const satisfies Array<{ code: Language; name: string; flag: string }>;
 
 export const ProfileContent: React.FC<ProfileContentProps> = ({
   onResetOnboarding,
@@ -63,29 +69,29 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     { value: 'architecture', label: 'Architecture', icon: '🏗️' },
     { value: 'culture', label: 'Culture', icon: '🎭' },
     { value: 'general', label: 'General', icon: '🌍' },
-  ];
+  ] satisfies Array<{ value: Theme; label: string; icon: string }>;
   
   const audioLengths = [
     { value: 'short', label: 'Short', description: '30-60 seconds' },
     { value: 'medium', label: 'Medium', description: '1-3 minutes' },
     { value: 'deep-dive', label: 'Deep Dive', description: '3-5 minutes' },
-  ];
+  ] satisfies Array<{ value: AudioLength; label: string; description: string }>;
   
   const voiceStyles = [
     { value: 'casual', label: 'Casual', description: 'Friendly and conversational' },
     { value: 'formal', label: 'Formal', description: 'Professional and informative' },
     { value: 'energetic', label: 'Energetic', description: 'Enthusiastic and dynamic' },
     { value: 'calm', label: 'Calm', description: 'Soothing and peaceful' },
-  ];
+  ] satisfies Array<{ value: VoiceStyle; label: string; description: string }>;
   
-  const handleLanguageChange = (code: string) => {
-    setUserPreferences({ language: code as any });
+  const handleLanguageChange = (code: Language) => {
+    void setUserPreferences({ language: code });
   };
   
-  const handleThemeChange = async (theme: string) => {
+  const handleThemeChange = async (theme: Theme) => {
     setIsSaving(true);
     try {
-      await setUserPreferences({ theme: theme as any });
+      await setUserPreferences({ theme });
       setShowThemeModal(false);
       Alert.alert('Success', 'Theme preference updated');
     } catch (error) {
@@ -95,10 +101,10 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     }
   };
   
-  const handleAudioLengthChange = async (length: string) => {
+  const handleAudioLengthChange = async (length: AudioLength) => {
     setIsSaving(true);
     try {
-      await setUserPreferences({ audioLength: length as any });
+      await setUserPreferences({ audioLength: length });
       setShowAudioLengthModal(false);
       Alert.alert('Success', 'Audio length preference updated');
     } catch (error) {
@@ -108,10 +114,10 @@ export const ProfileContent: React.FC<ProfileContentProps> = ({
     }
   };
   
-  const handleVoiceStyleChange = async (style: string) => {
+  const handleVoiceStyleChange = async (style: VoiceStyle) => {
     setIsSaving(true);
     try {
-      await setUserPreferences({ voiceStyle: style as any });
+      await setUserPreferences({ voiceStyle: style });
       setShowVoiceStyleModal(false);
       Alert.alert('Success', 'Voice style preference updated');
     } catch (error) {

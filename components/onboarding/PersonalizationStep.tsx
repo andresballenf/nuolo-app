@@ -3,8 +3,15 @@ import { View, Text, StyleSheet, ScrollView, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../ui/Button';
 import { RadioGroup } from '../ui/RadioGroup';
+import type { RadioOption } from '../ui/RadioGroup';
 import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useApp } from '../../contexts/AppContext';
+import type {
+  AudioLength,
+  Language,
+  Theme,
+  VoiceStyle,
+} from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { PreferencesService } from '../../services/PreferencesService';
 import { Ionicons } from '@expo/vector-icons';
@@ -67,20 +74,20 @@ export const PersonalizationStep: React.FC = () => {
     { value: 'nature', label: 'Nature & Wildlife' },
     { value: 'architecture', label: 'Architecture' },
     { value: 'culture', label: 'Culture & Arts' },
-  ];
+  ] satisfies RadioOption<Theme>[];
 
   const voiceStyles = [
     { value: 'casual', label: 'Casual & Friendly' },
     { value: 'formal', label: 'Professional' },
     { value: 'energetic', label: 'Energetic' },
     { value: 'calm', label: 'Calm & Relaxing' },
-  ];
+  ] satisfies RadioOption<VoiceStyle>[];
 
   const audioLengths = [
     { value: 'short', label: 'Quick (1-2 min)' },
     { value: 'medium', label: 'Standard (3-5 min)' },
     { value: 'deep-dive', label: 'Detailed (5+ min)' },
-  ];
+  ] satisfies RadioOption<AudioLength>[];
 
   const languages = [
     { value: 'en', label: 'English' },
@@ -89,22 +96,22 @@ export const PersonalizationStep: React.FC = () => {
     { value: 'de', label: 'Deutsch' },
     { value: 'zh', label: '中文' },
     { value: 'ja', label: '日本語' },
-  ];
+  ] satisfies RadioOption<Language>[];
 
-  const handleThemeChange = async (value: string) => {
-    await setUserPreferences({ theme: value as any });
+  const handleThemeChange = async (value: Theme) => {
+    await setUserPreferences({ theme: value });
   };
 
-  const handleVoiceStyleChange = async (value: string) => {
-    await setUserPreferences({ voiceStyle: value as any });
+  const handleVoiceStyleChange = async (value: VoiceStyle) => {
+    await setUserPreferences({ voiceStyle: value });
   };
 
-  const handleAudioLengthChange = async (value: string) => {
-    await setUserPreferences({ audioLength: value as any });
+  const handleAudioLengthChange = async (value: AudioLength) => {
+    await setUserPreferences({ audioLength: value });
   };
 
-  const handleLanguageChange = async (value: string) => {
-    await setUserPreferences({ language: value as any });
+  const handleLanguageChange = async (value: Language) => {
+    await setUserPreferences({ language: value });
   };
 
   const handleNext = async () => {
