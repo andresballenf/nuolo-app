@@ -30,6 +30,8 @@ interface PaywallModalProps {
 
 type TabType = 'subscription' | 'packages';
 
+type SubscriptionPlanVariant = SubscriptionPlan & { displayPrice: string; subtitle?: string };
+
 export const PaywallModal: React.FC<PaywallModalProps> = ({
   visible,
   onClose,
@@ -53,7 +55,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
 
   // A/B testing pricing variants
-  const getVariantPricing = (plan: SubscriptionPlan) => {
+  const getVariantPricing = (plan: SubscriptionPlan): SubscriptionPlanVariant => {
     if (pricingVariant === 'B' && plan.period === 'yearly') {
       // Variant B: Show monthly equivalent pricing
       const monthlyEquivalent = (plan.price / 12).toFixed(2);
@@ -189,7 +191,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           variant={plan.popular ? 'primary' : 'outline'}
           loading={isLoading}
           disabled={isLoading}
-          style={[styles.planButton, plan.popular && styles.popularPlanButton]}
+          style={[styles.planButton, ...(plan.popular ? [styles.popularPlanButton] : [])]}
         />
       </TouchableOpacity>
     );
