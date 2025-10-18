@@ -378,6 +378,23 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     
     try {
       await monetizationService.recordAttractionUsage(user.id, attractionId);
+      
+      setEntitlements(prev => {
+        if (!prev) return prev;
+        if (prev.hasUnlimitedAccess) return prev;
+
+        const totalLimit = typeof prev.totalAttractionLimit === 'number' ? prev.totalAttractionLimit : 0;
+        const currentUsed = typeof prev.attractionsUsed === 'number' ? prev.attractionsUsed : 0;
+        const nextUsed = Math.min(totalLimit, currentUsed + 1);
+        const nextRemaining = Math.max(0, totalLimit - nextUsed);
+
+        return {
+          ...prev,
+          attractionsUsed: nextUsed,
+          remainingFreeAttractions: nextRemaining,
+        };
+      });
+
       // Refresh entitlements to update remaining free attractions count
       await refreshEntitlements();
       console.log('Recorded attraction usage:', attractionId);

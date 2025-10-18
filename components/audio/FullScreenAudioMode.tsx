@@ -10,6 +10,7 @@ import {
   ScrollView,
   Image,
   findNodeHandle,
+  UIManager,
 } from 'react-native';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -266,33 +267,37 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
 
   // Auto-scroll to keep active phrase in view
   useEffect(() => {
-    if (!isUserScrollingRef.current && activePhraseIndex >= 0 && activePhraseIndex !== lastScrolledPhraseRef.current) {
-      lastScrolledPhraseRef.current = activePhraseIndex;
-      
-      const phraseRef = phraseRefs.current[activePhraseIndex];
-      const scrollViewNode = scrollViewRef.current ? findNodeHandle(scrollViewRef.current) : null;
-      if (
-        phraseRef &&
-        typeof phraseRef.measureLayout === 'function' &&
-        scrollViewNode != null
-      ) {
-        phraseRef.measureLayout(
+    if (isUserScrollingRef.current) return;
+    if (activePhraseIndex < 0 || activePhraseIndex === lastScrolledPhraseRef.current) return;
+
+    lastScrolledPhraseRef.current = activePhraseIndex;
+    const phraseRef = phraseRefs.current[activePhraseIndex];
+    const phraseNode = phraseRef ? findNodeHandle(phraseRef) : null;
+    const scrollViewNode = scrollViewRef.current ? findNodeHandle(scrollViewRef.current) : null;
+
+    if (phraseNode != null && scrollViewNode != null) {
+      const handleSuccess = (_x: number, y: number, _width: number, measuredHeight: number) => {
+        if (!scrollViewRef.current) return;
+        const scrollToY = Math.max(0, y - VIEWPORT_CENTER + measuredHeight / 2);
+        scrollViewRef.current.scrollTo({
+          y: scrollToY,
+          animated: true,
+        });
+      };
+
+      const handleFailure = () => {
+        lastScrolledPhraseRef.current = -1;
+      };
+
+      if (typeof UIManager.measureLayout === 'function') {
+        UIManager.measureLayout(
+          phraseNode,
           scrollViewNode,
-          (_x, y, _width, measuredHeight) => {
-            if (scrollViewRef.current) {
-              // Calculate position to center the phrase
-              const scrollToY = Math.max(0, y - VIEWPORT_CENTER + measuredHeight / 2);
-              
-              scrollViewRef.current.scrollTo({
-                y: scrollToY,
-                animated: true,
-              });
-            }
-          },
-          () => {
-            // Error callback - fail silently
-          }
+          handleFailure,
+          handleSuccess
         );
+      } else if (phraseRef && typeof (phraseRef as any).measureLayout === 'function') {
+        (phraseRef as any).measureLayout(scrollViewNode, handleSuccess, handleFailure);
       }
     }
   }, [activePhraseIndex]);

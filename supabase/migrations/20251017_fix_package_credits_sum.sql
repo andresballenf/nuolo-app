@@ -52,8 +52,8 @@ BEGIN
   JOIN attraction_packages ap ON upp.package_id = ap.id
   WHERE upp.user_id = user_uuid AND ap.is_active = TRUE;
 
-  -- Get count of attractions used
-  SELECT COUNT(*) INTO used_count
+  -- Get count of attractions used from usage_count column
+  SELECT COALESCE(usage_count, 0) INTO used_count
   FROM user_usage
   WHERE user_id = user_uuid;
 

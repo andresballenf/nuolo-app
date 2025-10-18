@@ -744,24 +744,41 @@ export class MonetizationService {
         return; // Skip recording for premium users
       }
 
-      // Get current usage
+      // Get actual entitlements from database function (calculates SUM of packages)
+      const { data: entitlementsData, error: entitlementsError } = await supabase.rpc(
+        'get_user_package_entitlements',
+        { user_uuid: userId }
+      );
+
+      if (entitlementsError) {
+        console.error('Failed to get user entitlements:', entitlementsError);
+        return;
+      }
+
+      const entitlements = entitlementsData?.[0];
+      if (!entitlements) {
+        console.error('No entitlements found for user:', userId);
+        return;
+      }
+
+      const actualLimit = this.parseNumber(entitlements.total_attraction_limit, 2);
+      const currentCount = this.parseNumber(entitlements.attractions_used, 0);
+      const newCount = currentCount + 1;
+
+      if (newCount > actualLimit) {
+        console.log(`Usage would exceed actual limit (${actualLimit}) for user ${userId}`);
+        return;
+      }
+
+      // Get current usage row for update/insert
       const { data: currentUsage, error: fetchError } = await supabase
         .from('user_usage')
-        .select('usage_count, package_limit')
+        .select('usage_count')
         .eq('user_id', userId)
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
         console.error('Failed to fetch user_usage:', fetchError);
-      }
-
-      const currentCount = this.parseNumber(currentUsage?.usage_count, 0);
-      const packageLimit = this.parseNumber(currentUsage?.package_limit, 2);
-      const newCount = currentCount + 1;
-
-      if (newCount > packageLimit) {
-        console.log(`Usage would exceed package limit (${packageLimit}) for user ${userId}`);
-        return;
       }
 
       // Update or insert usage record
@@ -778,7 +795,7 @@ export class MonetizationService {
         if (updateError) {
           console.error('Failed to update user_usage:', updateError);
         } else {
-          console.log(`Updated attraction usage count: ${newCount}/${packageLimit} for user ${userId}`);
+          console.log(`Updated attraction usage count: ${newCount}/${actualLimit} for user ${userId}`);
         }
       } else {
         const { error: insertError } = await supabase
@@ -786,7 +803,6 @@ export class MonetizationService {
           .insert({
             user_id: userId,
             usage_count: newCount,
-            package_limit: packageLimit,
             package_usage_count: newCount,
             updated_at: new Date().toISOString(),
           });
@@ -794,7 +810,7 @@ export class MonetizationService {
         if (insertError) {
           console.error('Failed to insert user_usage:', insertError);
         } else {
-          console.log(`Created new usage record with count: ${newCount}/${packageLimit} for user ${userId}`);
+          console.log(`Created new usage record with count: ${newCount}/${actualLimit} for user ${userId}`);
         }
       }
     } catch (error: unknown) {

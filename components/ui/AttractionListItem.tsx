@@ -37,10 +37,16 @@ export const AttractionListItem: React.FC<AttractionListItemProps> = ({
   const { subscription, entitlements } = useMonetization();
   
   // Determine if this is a free guide or requires payment
-  const isPremium = subscription.isActive && subscription.type !== 'free';
-  const hasFreeRemaining = entitlements.remainingFreeAttractions > 0;
+  const hasUnlimitedAccess = (subscription.isActive && subscription.type !== 'free') || entitlements.hasUnlimitedAccess;
   const isOwned = entitlements.ownedAttractions.includes(attraction.id);
-  const canAccess = isPremium || hasFreeRemaining || isOwned;
+  const baseFreeAllowance = 2;
+  const totalLimit = Math.max(entitlements.totalAttractionLimit ?? baseFreeAllowance, baseFreeAllowance);
+  const remainingCredits = Math.max(0, entitlements.remainingFreeAttractions ?? 0);
+  const hasCreditsRemaining = remainingCredits > 0;
+  const hasPaidCredits = !hasUnlimitedAccess && totalLimit > baseFreeAllowance;
+  const hasFreeTierCredits = !hasPaidCredits && hasCreditsRemaining;
+  const isOutOfCredits = !hasUnlimitedAccess && !hasCreditsRemaining;
+  const canAccess = hasUnlimitedAccess || hasCreditsRemaining || isOwned;
   
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -141,9 +147,18 @@ export const AttractionListItem: React.FC<AttractionListItemProps> = ({
           </TouchableOpacity>
           
           {/* Entitlement Badge */}
-          {!isPremium && !isOwned && (
-            <View style={styles.entitlementBadge}>
-              {hasFreeRemaining ? (
+          {!hasUnlimitedAccess && !isOwned && (
+            <View style={[
+              styles.entitlementBadge,
+              hasPaidCredits && hasCreditsRemaining && styles.entitlementBadgePaid,
+              isOutOfCredits && styles.entitlementBadgeLocked,
+            ]}>
+              {hasPaidCredits && hasCreditsRemaining ? (
+                <View style={styles.paidBadgeContent}>
+                  <MaterialIcons name="diamond" size={10} color="#FFFFFF" />
+                  <Text style={styles.paidBadgeText}>{remainingCredits}</Text>
+                </View>
+              ) : hasFreeTierCredits ? (
                 <Text style={styles.freeBadgeText}>Free</Text>
               ) : (
                 <MaterialIcons name="lock" size={10} color="#EF4444" />
@@ -270,12 +285,32 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  entitlementBadgePaid: {
+    backgroundColor: '#F59E0B',
+    borderColor: '#FDE68A',
+  },
+  entitlementBadgeLocked: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FECACA',
   },
   freeBadgeText: {
     fontSize: 9,
     fontWeight: '700',
     color: '#84cc16',
     letterSpacing: 0.5,
+  },
+  paidBadgeContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  paidBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   menuButton: {
     width: 32,
