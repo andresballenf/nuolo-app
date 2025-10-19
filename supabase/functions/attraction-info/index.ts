@@ -26,6 +26,7 @@ import {
   endTimer,
   getLogStats
 } from './secureLogger.ts';
+import { redactSpatialSensitiveData } from './spatialRedaction.ts';
 
 // Import new chunking services with error handling
 let AudioStreamGenerator: any;
@@ -199,6 +200,9 @@ serve(async (req) => {
       attractionName,
       attractionAddress,
       userLocation,
+      poiLocation,
+      spatialHints,
+      userHeading,
       preferences = {},
       generateAudio = false,
       streamAudio = false,
@@ -289,6 +293,9 @@ serve(async (req) => {
               attractionName: sanitizedAttractionName,
               attractionAddress: sanitizedAttractionAddress,
               userLocation,
+              poiLocation,
+              spatialHints,
+              userHeading,
               preferences,
               text: '', // Will be generated
               voice: preferences.voiceStyle || 'casual',
@@ -320,6 +327,9 @@ serve(async (req) => {
               attractionName: sanitizedAttractionName,
               attractionAddress: sanitizedAttractionAddress,
               userLocation,
+              poiLocation,
+              spatialHints,
+              userHeading,
               preferences,
             });
           });
@@ -353,6 +363,22 @@ serve(async (req) => {
       }
     } else {
       logInfo('ai', 'Using existing text content');
+    }
+
+    // Apply spatial redaction as a safety net (feature-flag, default ON)
+    try {
+      const enableRedaction = (Deno.env.get('ENABLE_SPATIAL_REDACTION') ?? 'true').toLowerCase() !== 'false';
+      if (enableRedaction && typeof generatedInfo === 'string') {
+        const before = generatedInfo.length;
+        generatedInfo = redactSpatialSensitiveData(generatedInfo);
+        const after = generatedInfo.length;
+        if (before !== after) {
+          logInfo('security', 'Applied spatial redaction to generated text', { before, after });
+        }
+      }
+    } catch (_err) {
+      // Never fail the request due to redaction issues
+      logWarn('security', 'Spatial redaction failed, continuing without redaction');
     }
 
     // Handle chunked audio generation with streaming (if available)

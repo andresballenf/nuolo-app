@@ -7,6 +7,21 @@ export interface AIGenerationOptions {
     lat: number;
     lng: number;
   };
+  // Optional POI location for relative orientation derivation
+  poiLocation?: {
+    lat: number;
+    lng: number;
+  };
+  // Optional pre-derived spatial hints from client
+  spatialHints?: {
+    bearing?: number;
+    cardinal16?: string;
+    cardinal8?: string;
+    distanceMeters?: number;
+    distanceText?: string;
+    relative?: string;
+  };
+  userHeading?: number;
   preferences: {
     theme?: string;
     audioLength?: 'short' | 'medium' | 'deep-dive';
