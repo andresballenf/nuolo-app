@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { AudioTrack } from '../../contexts/AudioContext';
+import { PerfTracer } from '../../utils/perfTrace';
 
 interface MiniAudioPlayerProps {
   isVisible: boolean;
@@ -70,6 +71,7 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
 
   useEffect(() => {
     if (isVisible) {
+      PerfTracer.mark('mini_player_visible');
       // Slide up animation
       Animated.parallel([
         Animated.spring(translateY, {

@@ -8,6 +8,8 @@ import { AudioStreamHandler } from '../services/AudioStreamHandler';
 import { AudioGenerationService, GenerationProgress } from '../services/AudioGenerationService';
 import { mark, measure } from '../utils/tracing';
 import type { PointOfInterest } from '../services/GooglePlacesService';
+import { PerfTracer } from '../utils/perfTrace';
+import { TelemetryService } from '../services/TelemetryService';
 
 export type AudioTheme = 'history' | 'nature' | 'architecture' | 'culture';
 export type AudioLengthPreference = 'short' | 'medium' | 'deep-dive';
@@ -784,6 +786,12 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     text: string,
     preferences: AudioGenerationPreferences
   ) => {
+    const traceId = PerfTracer.start('audio_pipeline', {
+      mode: 'streaming',
+      attractionId: attraction.id,
+      language: preferences.language,
+      voiceStyle: preferences.voiceStyle,
+    });
     try {
       console.log('Starting chunked audio generation for:', attraction.name);
       mark('audio_generate_start');
@@ -907,6 +915,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             // Start playing after first chunk
             if (!firstChunkReceived) {
               firstChunkReceived = true;
+              PerfTracer.mark(traceId, 'first_chunk_ready', { index: chunk.chunkIndex });
               // Mark first playable and compute TTFP
               mark('audio_first_play');
               const ttfp = measure('TTFP', 'audio_generate_start', 'audio_first_play');
@@ -929,6 +938,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           },
           onComplete: () => {
             console.log('Streaming complete');
+            PerfTracer.mark(traceId, 'stream_complete');
+            const ended = PerfTracer.end(traceId, 'success');
+            if (ended) TelemetryService.recordTrace(ended);
             setState(prev => ({
               ...prev,
               isGeneratingAudio: false,
@@ -938,6 +950,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           },
           onError: (error) => {
             console.error('Streaming error:', error);
+            PerfTracer.end(traceId, 'error', String(error));
             setState(prev => ({
               ...prev,
               isGeneratingAudio: false,
@@ -952,6 +965,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     } catch (error: unknown) {
       console.error('Error in streamGenerateAndPlay:', error);
       const message = error instanceof Error ? error.message : 'Failed to generate audio';
+      PerfTracer.end(traceId, 'error', message);
       setState(prev => ({
         ...prev,
         isGeneratingAudio: false,
@@ -968,6 +982,12 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     text: string,
     preferences: AudioGenerationPreferences
   ) => {
+    const traceId = PerfTracer.start('audio_pipeline', {
+      mode: 'chunked',
+      attractionId: attraction.id,
+      language: preferences.language,
+      voiceStyle: preferences.voiceStyle,
+    });
     try {
       console.log('Starting app-orchestrated chunked audio generation for:', attraction.name);
       mark('audio_generate_start');
@@ -1102,6 +1122,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         {
           onFirstChunkReady: async (chunk) => {
             console.log('First chunk ready, starting playback');
+            PerfTracer.mark(traceId, 'first_chunk_ready', { index: chunk.chunkIndex });
             // Mark first playable and compute TTFP
             mark('audio_first_play');
             const ttfp = measure('TTFP', 'audio_generate_start', 'audio_first_play');
@@ -1149,6 +1170,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           },
           onComplete: (successful, total) => {
             console.log(`Generation complete: ${successful}/${total} chunks`);
+            PerfTracer.mark(traceId, 'generation_complete', { successful, total });
+            const ended = PerfTracer.end(traceId, successful > 0 ? 'success' : 'error', successful > 0 ? undefined : 'no_successful_chunks');
+            if (ended) TelemetryService.recordTrace(ended);
             setState(prev => ({
               ...prev,
               isGeneratingAudio: false,
@@ -1168,6 +1192,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     } catch (error: unknown) {
       console.error('Error in generateChunkedAudio:', error);
       const message = error instanceof Error ? error.message : 'Failed to generate audio';
+      PerfTracer.end(traceId, 'error', message);
       setState(prev => ({
         ...prev,
         isGeneratingAudio: false,

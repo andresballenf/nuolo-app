@@ -1,4 +1,5 @@
 import { AudioChunkData } from './AudioChunkManager';
+import { PerfTracer } from '../utils/perfTrace';
 
 export interface StreamResponse {
   type: 'text' | 'metadata' | 'audio_chunk' | 'complete' | 'error';
@@ -53,6 +54,7 @@ export class AudioStreamHandler {
         }),
         signal: this.abortController.signal
       });
+      PerfTracer.mark('backend_stream_opened');
 
       if (!response.ok) {
         throw new Error(`Server error: ${response.status} ${response.statusText}`);
@@ -72,6 +74,7 @@ export class AudioStreamHandler {
       }
 
       console.error('Stream error:', error);
+      PerfTracer.mark('stream_error', { message: String(error?.message || error) });
       if (callbacks.onError) {
         callbacks.onError(error.message || 'Stream processing failed');
       }
@@ -147,11 +150,13 @@ export class AudioStreamHandler {
           if (callbacks.onChunk && response.chunk) {
             // Reset retry count for successful chunk
             this.retryAttempts.delete(response.chunk.chunkIndex);
+            PerfTracer.mark('chunk_received', { index: response.chunk.chunkIndex });
             callbacks.onChunk(response.chunk);
           }
           break;
 
         case 'complete':
+          PerfTracer.mark('stream_complete');
           if (callbacks.onComplete) {
             callbacks.onComplete();
           }

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -17,6 +17,8 @@ import { MonetizationProvider } from '../contexts/MonetizationContext';
 import { MapSettingsProvider } from '../contexts/MapSettingsContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { TelemetryService } from '../services/TelemetryService';
+import { DiagnosticsOverlay } from '../components/diagnostics/DiagnosticsOverlay';
 
 // Keep native splash screen visible until our JS tree has mounted and laid out
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -30,6 +32,40 @@ const queryClient = new QueryClient({
       staleTime: 5 * 60 * 1000, // 5 minutes
     },
   },
+  queryCache: new QueryCache({
+    onSuccess: (_data, query) => {
+      TelemetryService.logReactQueryEvent({
+        type: 'query',
+        key: query.queryHash,
+        status: 'success',
+      });
+    },
+    onError: (error, query) => {
+      TelemetryService.logReactQueryEvent({
+        type: 'query',
+        key: query.queryHash,
+        status: 'error',
+        errorMessage: (error as any)?.message,
+      });
+    },
+  }),
+  mutationCache: new MutationCache({
+    onSuccess: (_data, _vars, _ctx, mutation) => {
+      TelemetryService.logReactQueryEvent({
+        type: 'mutation',
+        key: String(mutation.mutationId),
+        status: 'success',
+      });
+    },
+    onError: (error, _vars, _ctx, mutation) => {
+      TelemetryService.logReactQueryEvent({
+        type: 'mutation',
+        key: String(mutation.mutationId),
+        status: 'error',
+        errorMessage: (error as any)?.message,
+      });
+    },
+  }),
 });
 
 const splashIcon = require('../assets/splash-icon.png');
@@ -174,6 +210,8 @@ export default function RootLayout() {
                             />
                           </View>
                         )}
+
+                        <DiagnosticsOverlay />
                       </View>
                     </MonetizationProvider>
                   </AudioProvider>

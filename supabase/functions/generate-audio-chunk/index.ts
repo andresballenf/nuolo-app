@@ -117,11 +117,13 @@ serve(async (req) => {
   const requestTimer = startTimer('chunk_request');
 
   try {
+    const totalTimer = startTimer('ga_chunk_total');
     const requestData: ChunkRequest = await req.json();
     const { segmentId } = requestData;
     
     // Validate input
     if (!requestData.text || requestData.text.length === 0) {
+      endTimer(totalTimer, 'ga_chunk_total', false);
       const res = {
         error: 'Text is required',
         chunkIndex: requestData.chunkIndex || 0,
@@ -136,6 +138,7 @@ serve(async (req) => {
 
     // Check text length (max 4096 for OpenAI TTS)
     if (requestData.text.length > 4096) {
+      endTimer(totalTimer, 'ga_chunk_total', false);
       const res = {
         error: 'Text exceeds maximum length of 4096 characters',
         chunkIndex: requestData.chunkIndex || 0,
@@ -208,6 +211,7 @@ serve(async (req) => {
     const audioBuffer = await generateAudioChunk(requestData.text, voice, speed);
     const ttsDuration = endTimer(ttsTimer, 'tts_api_call', true);
     const base64Audio = arrayBufferToBase64(audioBuffer);
+>>>>>>> origin/main
 
     logInfo('audio', 'Audio chunk generated', {
       bytes: audioBuffer.byteLength,
@@ -247,8 +251,9 @@ serve(async (req) => {
       cache: 'miss',
       etag: cacheKey
     };
-    
+
     const totalDuration = endTimer(requestTimer, 'chunk_request', true);
+    endTimer(totalTimer, 'ga_chunk_total', true);
     logInfo('audio', 'Chunk request completed', { durationMs: totalDuration, segmentId });
 
     return new Response(JSON.stringify(response), {
@@ -266,7 +271,7 @@ serve(async (req) => {
     logError('audio', 'Error generating audio chunk', { error: error?.message });
     
     return new Response(JSON.stringify({
-      error: error.message || 'Failed to generate audio chunk',
+      error: (error as any)?.message || 'Failed to generate audio chunk',
       chunkIndex: 0,
       totalChunks: 1
     }), {

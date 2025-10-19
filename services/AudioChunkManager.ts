@@ -1,5 +1,6 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import { PerfTracer } from '../utils/perfTrace';
 import { TextChunk } from './TTSChunkService';
 
 export interface AudioChunkData {
@@ -360,7 +361,10 @@ export class AudioChunkManager {
       // Start playing
       await loadedChunk.sound.playAsync();
       console.log(`Playing chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
-      
+      if (chunkIndex === 0) {
+        PerfTracer.mark('first_playback');
+      }
+
       this.emitStateChange();
     } catch (error) {
       console.error(`Error playing chunk ${chunkIndex}:`, error);
