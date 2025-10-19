@@ -19,6 +19,7 @@ import type { AudioTrack } from '../../contexts/AudioContext';
 import { useApp } from '../../contexts/AppContext';
 import * as Haptics from 'expo-haptics';
 import type { TranscriptSegment } from '../../services/AttractionInfoService';
+import type { GenerationProgress } from '../../services/AudioGenerationService';
 
 interface FullScreenAudioModeProps {
   isVisible: boolean;
@@ -39,6 +40,16 @@ interface FullScreenAudioModeProps {
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
   transcriptSegments?: TranscriptSegment[]; // Not used anymore but kept for compatibility
+  // Progressive generation props
+  isGenerating?: boolean;
+  isBuffering?: boolean;
+  isUsingChunks?: boolean;
+  generationMessage?: string;
+  generationError?: string | null;
+  generationProgress?: GenerationProgress;
+  telemetryStatusLabel?: string;
+  onCancel?: () => void;
+  onRetry?: () => void;
 }
 
 const { width, height } = Dimensions.get('window');
@@ -77,6 +88,16 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   playbackRate = 1.0,
   onPlaybackRateChange,
   transcriptSegments,
+  // Progressive generation props
+  isGenerating,
+  isBuffering,
+  isUsingChunks,
+  generationMessage,
+  generationError,
+  generationProgress,
+  telemetryStatusLabel,
+  onCancel,
+  onRetry,
 }) => {
   const { userPreferences } = useApp();
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(null);
@@ -494,6 +515,43 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
 
         {/* Controls */}
         <View style={styles.bottomControls}>
+          {/* Progressive generation banner with cancel/retry actions */}
+          {(isGenerating || isBuffering || generationError) && (
+            <View
+              style={[
+                styles.banner,
+                generationError ? styles.bannerError : styles.bannerInfo,
+              ]}
+            >
+              <Text style={styles.bannerText} numberOfLines={2}>
+                {generationError ? generationError : (telemetryStatusLabel || generationMessage || 'Preparing audio…')}
+              </Text>
+              <View style={styles.bannerActions}>
+                {generationError ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      onRetry?.();
+                    }}
+                    style={styles.bannerActionButton}
+                  >
+                    <MaterialIcons name="refresh" size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      onCancel?.();
+                    }}
+                    style={styles.bannerActionButton}
+                  >
+                    <MaterialIcons name="close" size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
           <View style={styles.progressSection}>
             <View style={styles.timeDisplay}>
               <Text style={styles.timeText}>{formatTime(position)}</Text>
@@ -735,6 +793,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: 'rgba(0, 0, 0, 0.05)',
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  bannerInfo: {
+    backgroundColor: 'rgba(132, 204, 22, 0.9)',
+  },
+  bannerError: {
+    backgroundColor: 'rgba(239, 68, 68, 0.95)',
+  },
+  bannerText: {
+    color: '#ffffff',
+    flex: 1,
+    marginRight: 8,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bannerActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   progressSection: {
     alignItems: 'center',

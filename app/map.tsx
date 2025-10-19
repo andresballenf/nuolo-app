@@ -25,6 +25,7 @@ import { Button } from '../components/ui/Button';
 import { useMapSettings } from '../contexts/MapSettingsContext';
 import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
 import { logger } from '../lib/logger';
+import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
 
 export default function MapScreen() {
   const { isAuthenticated, loading: authLoading } = useAuth();
@@ -33,6 +34,7 @@ export default function MapScreen() {
   const audioContext = useAudio();
   const { showPaywall, setShowPaywall, paywallContext, recordAttractionUsage } = useMonetization();
   const { generateAudioGuideWithValidation } = useContentAccess();
+  const telemetry = useAudioGenerationTelemetry();
 
   // Test location state
   const [isTestModeEnabled, setIsTestModeEnabled] = useState(false);
@@ -915,12 +917,17 @@ export default function MapScreen() {
         }
         isLoading={audioContext.isGeneratingAudio}
         loadingMessage={audioContext.generationMessage || "Loading audio guide..."}
+        statusLabel={telemetry.label}
         track={audioContext.currentTrack}
         isPlaying={audioContext.isPlaying}
         progress={audioContext.duration > 0 ? audioContext.position / audioContext.duration : 0}
         onPlayPause={audioContext.togglePlayPause}
         onSkipBack30={() => audioContext.seek(Math.max(0, audioContext.position - 30000))}
         onExpand={audioContext.enterFullScreen}
+        canCancel={audioContext.isGeneratingAudio}
+        onCancel={audioContext.cancelStreaming}
+        canRetry={!!audioContext.generationError}
+        onRetry={selectedAttraction ? () => handlePlayAudio(selectedAttraction) : undefined}
       />
 
       {/* Full Screen Audio Mode - Enhanced with professional controls */}
@@ -943,6 +950,16 @@ export default function MapScreen() {
         position={audioContext.position}
         duration={audioContext.duration}
         transcriptSegments={transcriptSegments}
+        // Progressive generation props
+        isGenerating={audioContext.isGeneratingAudio}
+        isBuffering={audioContext.isBuffering}
+        isUsingChunks={audioContext.isUsingChunks}
+        generationMessage={audioContext.generationMessage}
+        generationError={audioContext.generationError}
+        generationProgress={audioContext.generationProgress}
+        telemetryStatusLabel={telemetry.label}
+        onCancel={audioContext.cancelStreaming}
+        onRetry={selectedAttraction ? () => handlePlayAudio(selectedAttraction) : undefined}
       />
 
       {/* RevenueCat Native Paywall Modal */}

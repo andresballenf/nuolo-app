@@ -16,26 +16,37 @@ import { AudioTrack } from '../../contexts/AudioContext';
 
 interface MiniAudioPlayerProps {
   isVisible: boolean;
-  isLoading: boolean;
-  loadingMessage?: string;
+  isLoading: boolean; // true while generating/streaming
+  loadingMessage?: string; // fallback message
+  statusLabel?: string; // staged progress label (script / first chunk / buffering)
   track?: AudioTrack | null;
   isPlaying: boolean;
   progress: number; // 0-1
   onPlayPause: () => void;
   onSkipBack30: () => void;
   onExpand: () => void;
+  // Progressive controls
+  canCancel?: boolean;
+  onCancel?: () => void;
+  canRetry?: boolean;
+  onRetry?: () => void;
 }
 
 export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
   isVisible,
   isLoading,
   loadingMessage = 'Loading audio guide...',
+  statusLabel,
   track,
   isPlaying,
   progress,
   onPlayPause,
   onSkipBack30,
   onExpand,
+  canCancel,
+  onCancel,
+  canRetry,
+  onRetry,
 }) => {
   const translateY = useRef(new Animated.Value(100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -55,6 +66,7 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
   // Only show loading when actually generating audio, not when audio is playing
   // Also check if we have a track but it's still being generated (empty audioData with chunks)
   const shouldShowLoading = isLoading || (!!track && !track.audioData && isLoading);
+  const effectiveLoadingText = statusLabel || loadingMessage;
 
   useEffect(() => {
     if (isVisible) {
@@ -166,7 +178,7 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
             {shouldShowLoading ? (
               <View style={styles.loadingTextContainer}>
                 <Text style={styles.loadingTitle}>Generating Audio</Text>
-                <Text style={styles.loadingSubtitle}>{loadingMessage}</Text>
+                <Text style={styles.loadingSubtitle}>{effectiveLoadingText}</Text>
               </View>
             ) : track ? (
               <>
@@ -228,6 +240,36 @@ export const MiniAudioPlayer: React.FC<MiniAudioPlayerProps> = ({
               />
             )}
           </TouchableOpacity>
+
+          {/* Cancel/Retry controls for progressive generation */}
+          {canCancel && shouldShowLoading && (
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onCancel?.();
+              }}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel="Cancel generation"
+            >
+              <MaterialIcons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          {canRetry && !shouldShowLoading && (
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onRetry?.();
+              }}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel="Retry generation"
+            >
+              <MaterialIcons name="refresh" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Animated.View>
