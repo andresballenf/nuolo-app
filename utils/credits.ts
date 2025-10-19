@@ -1,3 +1,5 @@
+import { track } from '../services/analytics';
+
 export interface CreditBucket {
   available: number;
   used: number;
@@ -13,6 +15,7 @@ export interface ConsumeResult {
   buckets: CreditsBuckets;
   fromTrial: number;
   fromPurchased: number;
+  remaining: number;
 }
 
 export interface RefundResult {
@@ -52,25 +55,42 @@ export function getPercentAvailable(b: CreditsBuckets): number {
 // FIFO consumption: trial first, then purchased
 export function consumeCredits(input: CreditsBuckets, requested: number): ConsumeResult {
   const requestedSafe = Math.max(0, Math.floor(requested || 0));
-  if (requestedSafe === 0) return { buckets: cloneBuckets(input), fromTrial: 0, fromPurchased: 0 };
+  if (requestedSafe === 0) return { buckets: cloneBuckets(input), fromTrial: 0, fromPurchased: 0, remaining: 0 };
 
+  const before = cloneBuckets(input);
   const b = cloneBuckets(input);
   const fromTrial = Math.min(requestedSafe, Math.max(0, b.trial.available));
   b.trial.available -= fromTrial;
   b.trial.used += fromTrial;
 
-  const remaining = requestedSafe - fromTrial;
+  let remaining = requestedSafe - fromTrial;
   let fromPurchased = 0;
   if (remaining > 0) {
     fromPurchased = Math.min(remaining, Math.max(0, b.purchased.available));
     b.purchased.available -= fromPurchased;
     b.purchased.used += fromPurchased;
+    remaining = remaining - fromPurchased;
   }
 
   const actuallyConsumed = fromTrial + fromPurchased;
   b.totalUsed = Math.max(0, (b.totalUsed || 0) + actuallyConsumed);
 
-  return { buckets: b, fromTrial, fromPurchased };
+  if (actuallyConsumed > 0) {
+    try {
+      track('job_consumed_credits', {
+        requested: requestedSafe,
+        consumed: actuallyConsumed,
+        fromTrial,
+        fromPurchased,
+        available_before: getAvailable(before),
+        available_after: getAvailable(b),
+        total_used_after: b.totalUsed,
+        remaining,
+      });
+    } catch {}
+  }
+
+  return { buckets: b, fromTrial, fromPurchased, remaining };
 }
 
 // Refund credits back in reverse consumption priority: purchased first, then trial
@@ -98,6 +118,21 @@ export function refundCredits(input: CreditsBuckets, amount: number): RefundResu
   b.totalUsed = Math.max(0, (b.totalUsed || 0) - actuallyRefunded);
 
   return { buckets: b, toPurchased, toTrial };
+}
+
+// Apply refund and emit analytics event
+export function applyRefund(input: CreditsBuckets, amount: number): CreditsBuckets {
+  const { buckets, toPurchased, toTrial } = refundCredits(input, amount);
+  try {
+    track('refund_applied', {
+      amount: Math.max(0, Math.floor(amount || 0)),
+      toPurchased,
+      toTrial,
+      available_after: getAvailable(buckets),
+      total_used_after: buckets.totalUsed,
+    });
+  } catch {}
+  return buckets;
 }
 
 export function createBuckets(

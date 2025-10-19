@@ -2,25 +2,34 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, AccessibilityInfo } from 'react-native';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
-import { TelemetryService } from '../../services/TelemetryService';
-import { 
+import { track } from '../../services/analytics';
+import {
   CreditsBuckets,
   createBuckets,
   getAvailable,
   getTotal,
   getPercentAvailable,
   consumeCredits,
-  refundCredits,
+  applyRefund,
   formatSummary,
 } from '../../utils/credits';
+
+export interface ActivityItem {
+  id: string;
+  label: string;
+  delta: number; // negative for consumption, positive for grants
+  balance: number;
+  iconName?: string; // Ionicons name
+}
 
 export interface CreditPackCardProps {
   trialAvailable: number;
   trialUsed: number;
   purchasedAvailable: number;
   purchasedUsed: number;
-  onBuyMoreCredits?: () => void;
-  onViewHistory?: () => void;
+  activities?: ActivityItem[];
+  onPressBuy?: () => void;
+  onViewHistory?: () => void; // optional external handler for history link
   lowThreshold?: number; // defaults to 20
 }
 
@@ -34,7 +43,8 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
   trialUsed,
   purchasedAvailable,
   purchasedUsed,
-  onBuyMoreCredits,
+  activities,
+  onPressBuy,
   onViewHistory,
   lowThreshold = 20,
 }) => {
@@ -53,31 +63,28 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
   const percent = useMemo(() => getPercentAvailable(buckets), [buckets]);
   const summaryText = useMemo(() => formatSummary(buckets), [buckets]);
 
+  // Analytics: fire once per mount
   useEffect(() => {
-    // Analytics: card viewed
-    TelemetryService.increment('credits_viewed');
-
+    track('credits_viewed', { available, total, percentAvailable: percent });
     if (available < lowThreshold) {
-      TelemetryService.increment('credits_low_warning_shown');
+      track('credits_low_warning_shown', { available, threshold: lowThreshold });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleBuy = () => {
-    TelemetryService.increment('credits_pack_purchased');
-    onBuyMoreCredits?.();
+    track('purchase_cta_clicked', { available, total, percentAvailable: percent });
+    onPressBuy?.();
   };
 
+  // Demo/testing helpers (hidden) use core utils that emit analytics internally
   const handleConsume = (amount: number) => {
-    const { buckets: next, fromTrial, fromPurchased } = consumeCredits(buckets, amount);
-    if (fromTrial + fromPurchased > 0) {
-      TelemetryService.increment('job_consumed_credits', fromTrial + fromPurchased);
-    }
+    const { buckets: next } = consumeCredits(buckets, amount);
     setBuckets(next);
   };
 
   const handleRefund = (amount: number) => {
-    const { buckets: next } = refundCredits(buckets, amount);
-    TelemetryService.increment('refund_applied', amount);
+    const next = applyRefund(buckets, amount);
     setBuckets(next);
   };
 
@@ -85,7 +92,7 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
     ? 'Te quedan pocos créditos. Comprar más'
     : 'Comprar más créditos';
 
-  const trialTooltipText = `${buckets.trial.available + buckets.trial.used} créditos de prueba. Se consumen primero`;
+  const trialTooltipText = `${buckets.trial.available + buckets.trial.used} créditos de prueba. Se consumen primero. Quedan ${buckets.trial.available}`;
   const purchasedTooltipText = `${buckets.purchased.available + buckets.purchased.used} créditos comprados`;
 
   const showTrialLine = buckets.trial.available > 0;
@@ -103,6 +110,35 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
   const used = total - available;
   const availableRatio = total > 0 ? available / total : 0;
   const usedRatio = total > 0 ? used / total : 0;
+
+  const renderActivities = () => {
+    if (!activities || activities.length === 0) return null;
+    const items = activities.slice(0, 2);
+    return (
+      <View style={styles.history}>
+        <Text style={styles.historyTitle}>Últimas actividades</Text>
+        {items.map((a) => {
+          const sign = a.delta >= 0 ? `+${a.delta}` : `${a.delta}`;
+          const isNegative = a.delta < 0;
+          return (
+            <View key={a.id} style={styles.historyRow} accessible accessibilityLabel={`${a.label} ${sign}. Saldo ${a.balance}`}>
+              <Text style={styles.historyText}>{a.label}</Text>
+              <Text style={[styles.historyDelta, isNegative ? styles.historyDeltaNeg : styles.historyDeltaPos]}>{sign}</Text>
+              <Text style={styles.historyBalance}>Saldo {a.balance}</Text>
+            </View>
+          );
+        })}
+        <Pressable
+          onPress={() => { track('credits_history_view_all_clicked'); onViewHistory?.(); }}
+          accessible
+          accessibilityRole="link"
+          accessibilityLabel="Ver todo el historial"
+        >
+          <Text style={styles.historyLink}>Ver todo el historial</Text>
+        </Pressable>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.card} accessible accessibilityLabel={`Credit Pack. ${available} créditos disponibles de ${total}.`}>
@@ -129,12 +165,13 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
                 accessible
                 accessibilityRole="button"
                 accessibilityLabel="Información sobre créditos de prueba"
+                accessibilityHint="Toca para ver detalles"
                 style={styles.infoButton}
               >
                 <Icon name="information-circle-outline" size={16} color="#6B7280" />
               </Pressable>
             </View>
-            <Text style={styles.subValue}>{buckets.trial.available}</Text>
+            <Text style={styles.subValue}>{buckets.trial.available + buckets.trial.used}</Text>
           </View>
           <View style={styles.subItem}>
             <View style={styles.subItemLeft}>
@@ -144,12 +181,13 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
                 accessible
                 accessibilityRole="button"
                 accessibilityLabel="Información sobre créditos comprados"
+                accessibilityHint="Toca para ver detalles"
                 style={styles.infoButton}
               >
                 <Icon name="information-circle-outline" size={16} color="#6B7280" />
               </Pressable>
             </View>
-            <Text style={styles.subValue}>{buckets.purchased.available}</Text>
+            <Text style={styles.subValue}>{buckets.purchased.available + buckets.purchased.used}</Text>
           </View>
         </View>
 
@@ -189,6 +227,7 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
         {showTrialConsumedLine && (
           <Text style={styles.contextText}>Ya usaste tus créditos de prueba. Ahora usas los comprados</Text>
         )}
+        <Text style={styles.contextText}>Tus créditos están siempre disponibles</Text>
         <Text style={styles.contextText}>Los créditos no expiran y puedes usarlos en cualquier momento</Text>
       </View>
 
@@ -202,28 +241,8 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
         />
       </View>
 
-      {/* History */}
-      <View style={styles.history}>
-        <Text style={styles.historyTitle}>Últimas actividades</Text>
-        <View style={styles.historyRow}>
-          <Text style={styles.historyText}>Restaurar foto</Text>
-          <Text style={styles.historyDelta}>−3</Text>
-          <Text style={styles.historyBalance}>Saldo {available}</Text>
-        </View>
-        <View style={styles.historyRow}>
-          <Text style={styles.historyText}>Crear video 8s</Text>
-          <Text style={styles.historyDelta}>−5</Text>
-          <Text style={styles.historyBalance}>Saldo {available + 5}</Text>
-        </View>
-        <Pressable
-          onPress={onViewHistory}
-          accessible
-          accessibilityRole="link"
-          accessibilityLabel="Ver todo el historial"
-        >
-          <Text style={styles.historyLink}>Ver todo el historial</Text>
-        </Pressable>
-      </View>
+      {/* History (optional) */}
+      {renderActivities()}
 
       {/* Example controls for demo/testing only - not visible without testID */}
       <View style={styles.hiddenControls} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -405,10 +424,15 @@ const styles = StyleSheet.create({
   },
   historyDelta: {
     fontSize: 13,
-    color: '#EF4444',
     fontWeight: '700',
     width: 36,
     textAlign: 'right',
+  },
+  historyDeltaNeg: {
+    color: '#EF4444',
+  },
+  historyDeltaPos: {
+    color: '#16a34a',
   },
   historyBalance: {
     fontSize: 12,
