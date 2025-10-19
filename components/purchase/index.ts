@@ -3,6 +3,7 @@ export { PaywallModal } from './PaywallModal';
 export { SubscriptionManager } from './SubscriptionManager';
 export { EntitlementStatus } from './EntitlementStatus';
 export { PurchaseRestoreFlow } from './PurchaseRestoreFlow';
+export { CreditPackCard } from './CreditPackCard';
 export {
   PurchaseLoadingState,
   PurchaseSkeleton,
