@@ -1,4 +1,4 @@
-export function generatePrompt(attractionName, attractionAddress, userLocation, preferences) {
+export function generatePrompt(attractionName, attractionAddress, userLocation, preferences, poiLocation?, spatialHints?) {
   // Map language codes to full language names
   const languageNames = {
     'en': 'English',
@@ -15,6 +15,7 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
   
   const targetLanguage = languageNames[preferences.language] || 'English';
   const isNonEnglish = preferences.language && preferences.language !== 'en';
+  const lang = preferences.language || 'en';
   
   // Adjust pacing guidance based on audio length preference
   const durationGoal = preferences.audioLength === 'short'
@@ -49,21 +50,30 @@ export function generatePrompt(attractionName, attractionAddress, userLocation, 
     ? `LANGUAGE REQUIREMENT: Respond entirely in ${targetLanguage}. Do not include any English words.`
     : '';
 
-  // Provide the listener's vantage point when available
-  const vantagePoint = userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number'
-    ? `Listener vantage point: The listener is presently near latitude ${userLocation.lat.toFixed(4)}, longitude ${userLocation.lng.toFixed(4)}. Describe what they can notice from this spot when possible.`
-    : '';
+  // Orientation hints derived without exposing raw coordinates
+  let orientationHints = '';
+  const hints = spatialHints || null;
+  if (hints && (hints.cardinal8 || hints.cardinal16 || hints.distanceText || hints.relative)) {
+    const cardinal = hints.cardinal8 || hints.cardinal16 || '';
+    const distanceTxt = hints.distanceText ? hints.distanceText : '';
+    const rel = hints.relative ? hints.relative : '';
+    if (lang === 'es') {
+      orientationHints = `Pistas de orientación (no menciones coordenadas ni calles): cardinal=${cardinal || 'N/A'}${distanceTxt ? `, distancia aproximada=${distanceTxt}` : ''}${rel ? `, relativo a tu orientación=${rel}` : ''}.`;
+    } else {
+      orientationHints = `Orientation hints (do not mention coordinates or streets): cardinal=${cardinal || 'N/A'}${distanceTxt ? `, approximate distance=${distanceTxt}` : ''}${rel ? `, relative to heading=${rel}` : ''}.`;
+    }
+  }
 
   // Adjust units based on language/region
   const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language);
   const unitSystem = useMetric ? 'Use metric units (meters, kilometers)' : 'Use imperial units (feet, miles)';
 
-  return `${languageInstruction ? languageInstruction + '\n\n' : ''}${vantagePoint ? vantagePoint + '\n\n' : ''}Create an audio tour narrative for "${attractionName}" targeting ${durationGoal}, but treat this as guidance rather than a quota.
+  return `${languageInstruction ? languageInstruction + '\n\n' : ''}Create an audio tour narrative for "${attractionName}" targeting ${durationGoal}, but treat this as guidance rather than a quota.
 
 Identity resolution
 Use the full address to ensure you describe the correct place, but avoid mentioning the address in the output:
 - Address: ${attractionAddress}
-
+${orientationHints ? `\n${orientationHints}\n` : ''}
 Voice and tone
 ${voiceStyle}
 

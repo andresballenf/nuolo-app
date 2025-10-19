@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { startTimer, endTimer, logInfo, logWarn, logError } from '../attraction-info/secureLogger.ts';
 
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 
@@ -15,8 +16,10 @@ interface ChunkRequest {
   chunkIndex: number;
   totalChunks: number;
   voiceStyle?: string;
+  voice?: string; // direct OpenAI voice (overrides voiceStyle)
   language?: string;
   speed?: number;
+  segmentId?: string;
 }
 
 interface ChunkResponse {
@@ -24,6 +27,8 @@ interface ChunkResponse {
   totalChunks: number;
   audio: string; // Base64
   characterCount: number;
+  estimatedMs?: number;
+  segmentId?: string;
   error?: string;
   cache?: 'hit' | 'miss';
   etag?: string;
@@ -109,16 +114,21 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const requestTimer = startTimer('chunk_request');
+
   try {
     const requestData: ChunkRequest = await req.json();
+    const { segmentId } = requestData;
     
     // Validate input
     if (!requestData.text || requestData.text.length === 0) {
-      return new Response(JSON.stringify({
+      const res = {
         error: 'Text is required',
         chunkIndex: requestData.chunkIndex || 0,
-        totalChunks: requestData.totalChunks || 1
-      }), {
+        totalChunks: requestData.totalChunks || 1,
+        segmentId,
+      };
+      return new Response(JSON.stringify(res), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -126,25 +136,33 @@ serve(async (req) => {
 
     // Check text length (max 4096 for OpenAI TTS)
     if (requestData.text.length > 4096) {
-      return new Response(JSON.stringify({
+      const res = {
         error: 'Text exceeds maximum length of 4096 characters',
         chunkIndex: requestData.chunkIndex || 0,
-        totalChunks: requestData.totalChunks || 1
-      }), {
+        totalChunks: requestData.totalChunks || 1,
+        segmentId,
+      };
+      return new Response(JSON.stringify(res), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    console.log(`Generating audio for chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`);
-    console.log(`Text length: ${requestData.text.length} characters`);
+    logInfo('audio', `Generating audio chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`, {
+      chunkIndex: requestData.chunkIndex,
+      totalChunks: requestData.totalChunks,
+      segmentId,
+      chars: requestData.text.length,
+    });
     
-    // Map voice style
-    const voice = mapVoiceStyle(requestData.voiceStyle);
+    // Voice selection precedence: explicit voice > voiceStyle mapping
+    const voice = (requestData.voice && requestData.voice.length > 0)
+      ? requestData.voice
+      : mapVoiceStyle(requestData.voiceStyle);
     const speed = requestData.speed || 1.0;
     const language = (requestData.language || 'en').toLowerCase();
-    
-    console.log(`Using voice: ${voice}, speed: ${speed}`);
+
+    logInfo('audio', 'Chunk TTS parameters', { voice, speed, segmentId });
 
     // Build content-addressed key and try Supabase Storage cache first
     const descriptor = JSON.stringify({ t: requestData.text.trim(), v: voice, l: language, s: speed.toFixed(2), ver: 1 });
@@ -159,12 +177,15 @@ serve(async (req) => {
       if (blob) {
         const buf = await blob.arrayBuffer();
         const base64Audio = arrayBufferToBase64(buf);
-        console.log(`[CACHE HIT] ${objectPath}`);
+        const estimatedMs = Math.round((requestData.text.length / 15) * (1000 / Math.max(0.5, speed)));
+        logInfo('audio', `[CACHE HIT] ${objectPath}`, { chunkIndex: requestData.chunkIndex, segmentId });
         const response: ChunkResponse & { cache: 'hit'; etag: string } = {
           chunkIndex: requestData.chunkIndex || 0,
           totalChunks: requestData.totalChunks || 1,
           audio: base64Audio,
           characterCount: requestData.text.length,
+          estimatedMs,
+          segmentId,
           cache: 'hit',
           etag: cacheKey
         };
@@ -179,12 +200,20 @@ serve(async (req) => {
         });
       }
     } catch (e) {
-      console.log(`[CACHE MISS] ${objectPath} - proceeding to generate`, e?.message || e);
+      logInfo('audio', `[CACHE MISS] ${objectPath} - proceeding to generate`, { error: e?.message || e });
     }
-    
+
     // Cache miss: Generate audio
+    const ttsTimer = startTimer('tts_api_call');
     const audioBuffer = await generateAudioChunk(requestData.text, voice, speed);
+    const ttsDuration = endTimer(ttsTimer, 'tts_api_call', true);
     const base64Audio = arrayBufferToBase64(audioBuffer);
+
+    logInfo('audio', 'Audio chunk generated', {
+      bytes: audioBuffer.byteLength,
+      segmentId,
+      ttsDurationMs: ttsDuration,
+    });
 
     // Write-through to Supabase Storage for future reuse
     try {
@@ -197,24 +226,31 @@ serve(async (req) => {
           cacheControl: `${TTL_SECONDS}`
         });
       if (uploadError) {
-        console.warn('Failed to upload audio chunk to storage:', uploadError.message || uploadError);
+        logWarn('audio', 'Failed to upload audio chunk to storage', { error: uploadError.message || uploadError });
       } else {
-        console.log(`[CACHE STORE] Uploaded ${objectPath}`);
+        logInfo('audio', `[CACHE STORE] Uploaded ${objectPath}`, { chunkIndex: requestData.chunkIndex });
       }
     } catch (e) {
-      console.warn('Error uploading to storage:', e);
+      logWarn('audio', 'Error uploading to storage', { error: e?.message || e });
     }
-    
-    // Return response
+
+    // Prepare response
+    const estimatedMs = Math.round((requestData.text.length / 15) * (1000 / Math.max(0.5, speed)));
+
     const response: ChunkResponse & { cache: 'miss'; etag: string } = {
       chunkIndex: requestData.chunkIndex || 0,
       totalChunks: requestData.totalChunks || 1,
       audio: base64Audio,
       characterCount: requestData.text.length,
+      estimatedMs,
+      segmentId,
       cache: 'miss',
       etag: cacheKey
     };
     
+    const totalDuration = endTimer(requestTimer, 'chunk_request', true);
+    logInfo('audio', 'Chunk request completed', { durationMs: totalDuration, segmentId });
+
     return new Response(JSON.stringify(response), {
       headers: {
         ...corsHeaders,
@@ -225,8 +261,9 @@ serve(async (req) => {
       }
     });
     
-  } catch (error) {
-    console.error('Error generating audio chunk:', error);
+  } catch (error: any) {
+    endTimer(requestTimer, 'chunk_request', false);
+    logError('audio', 'Error generating audio chunk', { error: error?.message });
     
     return new Response(JSON.stringify({
       error: error.message || 'Failed to generate audio chunk',

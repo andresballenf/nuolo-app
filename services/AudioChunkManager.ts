@@ -1,5 +1,6 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import { TextChunk } from './TTSChunkService';
 
 export interface AudioChunkData {
   chunkIndex: number;
@@ -42,6 +43,11 @@ export class AudioChunkManager {
   private positionUpdateInterval?: ReturnType<typeof setInterval>;
   private totalDuration: number = 0;
   private chunkStartTimes: Map<number, number> = new Map(); // Cumulative start time for each chunk
+  private expectedTotalChunks: number = 0; // Total chunks expected (from metadata)
+  private estimatedChunkDurations: Map<number, number> = new Map(); // seconds estimates per chunk
+  private bufferAheadCount: number = 2; // how many chunks to keep preloaded ahead
+  private isBuffering: boolean = false; // waiting for the next chunk to arrive
+  private waitingForChunkIndex: number | null = null;
 
   constructor() {
     this.configureAudioSession();
@@ -100,17 +106,78 @@ export class AudioChunkManager {
   }
 
   /**
+   * Initialize timeline with expected chunks and their estimated durations.
+   * This enables stable transcript alignment and total duration before audio arrives.
+   */
+  public initializeTimeline(chunks: Pick<TextChunk, 'chunkIndex' | 'totalChunks' | 'estimatedDuration' | 'text'>[]) {
+    if (!chunks || chunks.length === 0) return;
+    // Store expected totals and estimates
+    this.expectedTotalChunks = chunks[0].totalChunks || chunks.length;
+    this.estimatedChunkDurations.clear();
+    for (const c of chunks) {
+      this.estimatedChunkDurations.set(c.chunkIndex, c.estimatedDuration);
+    }
+    // Pre-seed start times based on estimates for all expected indices
+    this.recalculateDurations();
+    this.emitStateChange();
+  }
+
+  /**
+   * Configure how many chunks should be preloaded ahead of the currently playing chunk.
+   */
+  public setBufferAheadCount(count: number) {
+    this.bufferAheadCount = Math.max(0, Math.min(5, Math.floor(count)));
+  }
+
+  /**
+   * Approximate buffer health between 0 and 1 based on how many upcoming chunks
+   * are already preloaded in memory relative to the desired bufferAheadCount.
+   */
+  public getBufferHealth(): number {
+    if (this.bufferAheadCount <= 0) return 1;
+    const start = this.currentChunkIndex >= 0 ? this.currentChunkIndex + 1 : 0;
+    let loadedAhead = 0;
+    for (let i = 0; i < this.bufferAheadCount; i++) {
+      const idx = start + i;
+      if (this.loadedSounds.has(idx)) loadedAhead++;
+    }
+    return Math.max(0, Math.min(1, loadedAhead / this.bufferAheadCount));
+  }
+
+  /**
    * Add a chunk to the manager
    */
   public async addChunk(chunk: AudioChunkData) {
     this.chunks.set(chunk.chunkIndex, chunk);
+
+    // Ensure expected totals and estimates are tracked
+    if (this.expectedTotalChunks === 0 && chunk.totalChunks > 0) {
+      this.expectedTotalChunks = chunk.totalChunks;
+    }
+    if (!this.estimatedChunkDurations.has(chunk.chunkIndex)) {
+      this.estimatedChunkDurations.set(chunk.chunkIndex, chunk.estimatedDuration);
+    }
     
     // Update total duration and chunk start times
     this.recalculateDurations();
     
-    // Pre-load the chunk if it's one of the first 2 chunks
-    if (chunk.chunkIndex < 2) {
+    // Pre-load the chunk if it's within the ahead-of-playback buffer
+    const shouldPreload =
+      (this.currentChunkIndex < 0 && chunk.chunkIndex < this.bufferAheadCount) ||
+      (this.currentChunkIndex >= 0 &&
+        chunk.chunkIndex > this.currentChunkIndex &&
+        chunk.chunkIndex <= this.currentChunkIndex + this.bufferAheadCount);
+    if (shouldPreload) {
       await this.preloadChunk(chunk.chunkIndex);
+    }
+
+    // If we were buffering for this chunk, resume playback
+    if (this.isBuffering && this.waitingForChunkIndex === chunk.chunkIndex) {
+      this.isBuffering = false;
+      this.waitingForChunkIndex = null;
+      if (this.isPlaying) {
+        await this.playChunk(chunk.chunkIndex);
+      }
     }
     
     this.emitStateChange();
@@ -121,14 +188,29 @@ export class AudioChunkManager {
    */
   private recalculateDurations() {
     let cumulativeTime = 0;
+
+    // If we know the expected total chunks, compute timeline over full range with estimates
+    if (this.expectedTotalChunks > 0) {
+      for (let i = 0; i < this.expectedTotalChunks; i++) {
+        this.chunkStartTimes.set(i, cumulativeTime);
+        const chunk = this.chunks.get(i);
+        const durationSec = chunk?.actualDuration
+          || chunk?.estimatedDuration
+          || this.estimatedChunkDurations.get(i)
+          || 0;
+        cumulativeTime += durationSec * 1000;
+      }
+      this.totalDuration = cumulativeTime;
+      return;
+    }
+
+    // Fallback: compute timeline from whatever chunks we have
     const sortedChunks = Array.from(this.chunks.values()).sort((a, b) => a.chunkIndex - b.chunkIndex);
-    
     for (const chunk of sortedChunks) {
       this.chunkStartTimes.set(chunk.chunkIndex, cumulativeTime);
       const duration = chunk.actualDuration || chunk.estimatedDuration;
       cumulativeTime += duration * 1000; // Convert to milliseconds
     }
-    
     this.totalDuration = cumulativeTime;
   }
 
@@ -205,6 +287,20 @@ export class AudioChunkManager {
   }
 
   /**
+   * Pre-load up to bufferAheadCount chunks ahead of the current index if available
+   */
+  private preloadAheadFrom(currentIndex: number) {
+    if (this.bufferAheadCount <= 0) return;
+    for (let i = 1; i <= this.bufferAheadCount; i++) {
+      const idx = currentIndex + i;
+      if (this.chunks.has(idx)) {
+        // Fire and forget
+        this.preloadChunk(idx);
+      }
+    }
+  }
+
+  /**
    * Play audio starting from a specific chunk
    */
   public async play(startChunkIndex: number = 0) {
@@ -225,16 +321,16 @@ export class AudioChunkManager {
    */
   private async playChunk(chunkIndex: number) {
     try {
-      // Load the chunk if not already loaded
+      // Attempt to load the requested chunk. If it's not available yet, buffer and wait.
       const loadedChunk = await this.preloadChunk(chunkIndex);
       if (!loadedChunk) {
-        console.error(`Failed to load chunk ${chunkIndex}`);
-        // Try next chunk
-        if (chunkIndex < this.chunks.size - 1) {
-          await this.playChunk(chunkIndex + 1);
-        } else {
-          this.handleAllChunksComplete();
-        }
+        console.warn(`Chunk ${chunkIndex} not yet available - buffering`);
+        this.isBuffering = true;
+        this.waitingForChunkIndex = chunkIndex;
+        await this.pause();
+        await this.currentSound?.unloadAsync();
+        this.currentSound = null;
+        this.emitStateChange();
         return;
       }
 
@@ -246,11 +342,11 @@ export class AudioChunkManager {
 
       this.currentSound = loadedChunk.sound;
       this.currentChunkIndex = chunkIndex;
+      this.isBuffering = false;
+      this.waitingForChunkIndex = null;
 
-      // Preload next chunk while this one plays
-      if (chunkIndex < this.chunks.size - 1) {
-        this.preloadChunk(chunkIndex + 1);
-      }
+      // Preload several chunks ahead while this one plays
+      this.preloadAheadFrom(chunkIndex);
 
       // Set up playback status update
       loadedChunk.sound.setOnPlaybackStatusUpdate((status) => {
@@ -263,14 +359,15 @@ export class AudioChunkManager {
 
       // Start playing
       await loadedChunk.sound.playAsync();
-      console.log(`Playing chunk ${chunkIndex + 1}/${this.chunks.size}`);
+      console.log(`Playing chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
       
       this.emitStateChange();
     } catch (error) {
       console.error(`Error playing chunk ${chunkIndex}:`, error);
-      // Try next chunk
-      if (chunkIndex < this.chunks.size - 1) {
-        await this.playChunk(chunkIndex + 1);
+      // Try next expected chunk
+      const nextIndex = chunkIndex + 1;
+      if (this.expectedTotalChunks > 0 ? nextIndex < this.expectedTotalChunks : nextIndex < this.chunks.size) {
+        await this.playChunk(nextIndex);
       } else {
         this.handleAllChunksComplete();
       }
@@ -287,9 +384,15 @@ export class AudioChunkManager {
       this.onChunkComplete(chunkIndex);
     }
 
-    // Play next chunk if available and still playing
-    if (this.isPlaying && chunkIndex < this.chunks.size - 1) {
-      await this.playChunk(chunkIndex + 1);
+    // Determine next index based on expected total
+    const nextIndex = chunkIndex + 1;
+    const hasMore = this.expectedTotalChunks > 0
+      ? nextIndex < this.expectedTotalChunks
+      : nextIndex < this.chunks.size;
+
+    // Play next chunk if we expect more and are still playing
+    if (this.isPlaying && hasMore) {
+      await this.playChunk(nextIndex);
     } else {
       this.handleAllChunksComplete();
     }
@@ -442,9 +545,9 @@ export class AudioChunkManager {
     
     return {
       currentChunkIndex: this.currentChunkIndex,
-      totalChunks: this.chunks.size,
+      totalChunks: this.expectedTotalChunks || this.chunks.size,
       isPlaying: this.isPlaying,
-      isLoading: false,
+      isLoading: this.isBuffering,
       currentPosition,
       totalPosition,
       currentDuration,
@@ -487,13 +590,17 @@ export class AudioChunkManager {
     this.chunkStartTimes.clear();
     this.totalDuration = 0;
     this.currentChunkIndex = -1;
+    this.expectedTotalChunks = 0;
+    this.estimatedChunkDurations.clear();
+    this.isBuffering = false;
+    this.waitingForChunkIndex = null;
   }
 
   /**
    * Get total number of chunks
    */
   public getTotalChunks(): number {
-    return this.chunks.size;
+    return this.expectedTotalChunks || this.chunks.size;
   }
 
   /**

@@ -26,6 +26,7 @@ import {
   endTimer,
   getLogStats
 } from './secureLogger.ts';
+import { redactSpatialSensitiveData } from './spatialRedaction.ts';
 
 // Import new chunking services with error handling
 let AudioStreamGenerator: any;
@@ -199,12 +200,16 @@ serve(async (req) => {
       attractionName,
       attractionAddress,
       userLocation,
+      poiLocation,
+      spatialHints,
+      userHeading,
       preferences = {},
       generateAudio = false,
       streamAudio = false,
       testMode = false,
       existingText,
       useChunkedAudio = false, // New flag for chunked audio generation
+      progressive_audio = false, // New flag to enable priority-first progressive streaming
       aiProvider = preferences.aiProvider || 'openai' // AI provider from preferences or top-level field
     } = requestData;
     
@@ -243,6 +248,7 @@ serve(async (req) => {
       testMode,
       streamAudio,
       useChunkedAudio,
+      progressiveAudio: progressive_audio,
       aiProvider,
       voiceStyle: preferences?.voiceStyle || 'casual',
       hasLocation: true,
@@ -287,6 +293,9 @@ serve(async (req) => {
               attractionName: sanitizedAttractionName,
               attractionAddress: sanitizedAttractionAddress,
               userLocation,
+              poiLocation,
+              spatialHints,
+              userHeading,
               preferences,
               text: '', // Will be generated
               voice: preferences.voiceStyle || 'casual',
@@ -318,6 +327,9 @@ serve(async (req) => {
               attractionName: sanitizedAttractionName,
               attractionAddress: sanitizedAttractionAddress,
               userLocation,
+              poiLocation,
+              spatialHints,
+              userHeading,
               preferences,
             });
           });
@@ -353,6 +365,22 @@ serve(async (req) => {
       logInfo('ai', 'Using existing text content');
     }
 
+    // Apply spatial redaction as a safety net (feature-flag, default ON)
+    try {
+      const enableRedaction = (Deno.env.get('ENABLE_SPATIAL_REDACTION') ?? 'true').toLowerCase() !== 'false';
+      if (enableRedaction && typeof generatedInfo === 'string') {
+        const before = generatedInfo.length;
+        generatedInfo = redactSpatialSensitiveData(generatedInfo);
+        const after = generatedInfo.length;
+        if (before !== after) {
+          logInfo('security', 'Applied spatial redaction to generated text', { before, after });
+        }
+      }
+    } catch (_err) {
+      // Never fail the request due to redaction issues
+      logWarn('security', 'Spatial redaction failed, continuing without redaction');
+    }
+
     // Handle chunked audio generation with streaming (if available)
     if (generateAudio && useChunkedAudio && AudioStreamGenerator && TTSChunkService) {
       logInfo('audio', 'Starting chunked audio generation with streaming');
@@ -363,7 +391,10 @@ serve(async (req) => {
         voice: preferences.voiceStyle || 'casual',
         speed: 1.0,
         language: preferences.language || 'en',
-        testMode: testMode
+        testMode: testMode,
+        progressiveAudio: progressive_audio,
+        concurrency: 3,
+        firstChunkTargetSeconds: 12,
       };
 
       // If streaming is requested, return a streaming response
@@ -385,7 +416,12 @@ serve(async (req) => {
               );
 
               // Get chunk statistics first
-              const chunks = TTSChunkService.splitTextIntoChunks(generatedInfo);
+              const chunks = TTSChunkService.splitTextIntoChunks(generatedInfo, {
+                prioritizeFirstChunk: progressive_audio,
+                firstChunkTargetSeconds: 12,
+                avgCharsPerSecond: 15,
+                maxChunkSize: 3900,
+              });
               const stats = TTSChunkService.getChunkStatistics(chunks);
               
               // Send metadata about chunks
