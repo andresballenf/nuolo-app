@@ -1,51 +1,47 @@
-# Logs
-logs
-*.log
+# Node
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# React Native / Expo
-.expo
-.expo-shared
-.expo/web/cache
-.expo/web/development
+# Expo/Metro
+.expo/
+.expo-shared/
+.expo-dev-menu/
+.expo-settings/
+.packager/
 
-# Metro
-.metro-cache
+# Bundler/Cache
+.expo-cache/
+metro-cache/
+.cache/
 
-# Bundler caches
-node_modules/
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+android/
+ios/
+web-build/
+dist/
+build/
 
 # TypeScript
 *.tsbuildinfo
 
-# Android
-android/app/build/
-android/.gradle/
-android/.idea/
-android/local.properties
+# Logs
+*.log
+logs/
 
-# iOS
-ios/Pods/
-ios/build/
-ios/*.xcodeproj/project.xcworkspace/
+# Env
+.env*
+.env.local
 
 # Misc
-.DS_Store
-.env
-.env.*
-
-# Generated assets
-assets/*.mp3
-assets/*.wav
-assets/*.aac
-assets/*.ogg
-
-# Temporary files
-.tmp/
-.cache/
 coverage/
-
-# VSCode
-.vscode/
+.tmp/
+.cypress/
+.idea/
+.vscode/*
+!.vscode/extensions.json
