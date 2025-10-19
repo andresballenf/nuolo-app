@@ -434,6 +434,113 @@ export class MonetizationService {
     }
   }
 
+  /**
+   * Exposes current RevenueCat configuration/offerings status for diagnostics.
+   */
+  getRevenueCatStatus(): {
+    initialized: boolean;
+    configured: boolean;
+    hasCurrentOffering: boolean;
+    currentOfferingIdentifier: string | null;
+    availablePackageCount: number;
+  } {
+    const current = this.currentOfferings?.current ?? null;
+    return {
+      initialized: this.initialized,
+      configured: this.revenueCatConfigured,
+      hasCurrentOffering: Boolean(current && current.availablePackages && current.availablePackages.length > 0),
+      currentOfferingIdentifier: current?.identifier ?? null,
+      availablePackageCount: current?.availablePackages?.length ?? 0,
+    };
+  }
+
+  /**
+   * Ensures Purchases is configured and offerings are available.
+   * Attempts to fetch offerings with a timeout. Returns diagnostics.
+   */
+  async ensurePurchasesReady(timeoutMs = 6000): Promise<{
+    ready: boolean;
+    status: ReturnType<typeof this.getRevenueCatStatus>;
+    offerings?: PurchasesOfferings | null;
+    reason?: string;
+  }> {
+    // If not initialized, try to initialize quickly (non-throwing in dev)
+    if (!this.initialized) {
+      try {
+        await this.initialize();
+      } catch (e) {
+        logger.warn('ensurePurchasesReady: initialize failed', e);
+      }
+    }
+
+    const statusBefore = this.getRevenueCatStatus();
+
+    // If not configured, we're not ready
+    if (!this.revenueCatConfigured) {
+      logger.warn('ensurePurchasesReady: RevenueCat not configured');
+      return { ready: false, status: statusBefore, offerings: this.currentOfferings, reason: 'not_configured' };
+    }
+
+    // Helper to fetch offerings
+    const fetchOfferings = async () => {
+      try {
+        const offerings = await Purchases.getOfferings();
+        this.currentOfferings = offerings;
+        if (offerings?.current) {
+          logger.info('ensurePurchasesReady: offerings fetched', {
+            offeringId: offerings.current.identifier,
+            packageCount: offerings.current.availablePackages.length,
+          });
+        }
+        return offerings;
+      } catch (err) {
+        logger.error('ensurePurchasesReady: fetching offerings failed', err);
+        throw err;
+      }
+    };
+
+    // Race with timeout
+    const result = await Promise.race<Promise<PurchasesOfferings | null>>([
+      fetchOfferings(),
+      new Promise<PurchasesOfferings | null>((_, reject) =>
+        setTimeout(() => reject(new Error('offerings_timeout')), Math.max(1000, timeoutMs))
+      ),
+    ]).catch((e) => {
+      logger.warn('ensurePurchasesReady: offerings fetch timed out or failed', e);
+      return null;
+    });
+
+    const current = result?.current ?? this.currentOfferings?.current ?? null;
+    const hasPackages = Boolean(current && current.availablePackages && current.availablePackages.length > 0);
+
+    const statusAfter = this.getRevenueCatStatus();
+    const ready = this.revenueCatConfigured && hasPackages;
+
+    if (!ready) {
+      logger.warn('ensurePurchasesReady: not ready after fetch', {
+        statusAfter,
+        reason: !this.revenueCatConfigured
+          ? 'not_configured'
+          : !current
+          ? 'no_current_offering'
+          : 'no_packages',
+      });
+    }
+
+    return {
+      ready,
+      status: statusAfter,
+      offerings: this.currentOfferings,
+      reason: ready
+        ? undefined
+        : !this.revenueCatConfigured
+        ? 'not_configured'
+        : !current
+        ? 'no_current_offering'
+        : 'no_packages',
+    };
+  }
+
   async getSubscriptionStatus(userId: string): Promise<SubscriptionStatus> {
     try {
       if (!this.revenueCatConfigured) {

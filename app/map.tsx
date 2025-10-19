@@ -22,6 +22,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { Button } from '../components/ui/Button';
+import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
+import { logger } from '../lib/logger';
 
 export default function MapScreen() {
   const { isAuthenticated, loading: authLoading } = useAuth();
@@ -943,13 +945,23 @@ export default function MapScreen() {
       />
 
       {/* RevenueCat Native Paywall Modal */}
-      <RevenueCatPaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        trigger={paywallContext?.trigger}
-        attractionId={paywallContext?.attractionId}
-        attractionName={paywallContext?.attractionName}
-      />
+      <UIErrorBoundary
+        onError={(error) => {
+          logger.error('Paywall render-time error', {
+            error,
+            visible: showPaywall,
+            paywallContext,
+          });
+        }}
+      >
+        <RevenueCatPaywallModal
+          visible={showPaywall}
+          onClose={() => setShowPaywall(false)}
+          trigger={paywallContext?.trigger}
+          attractionId={paywallContext?.attractionId}
+          attractionName={paywallContext?.attractionName}
+        />
+      </UIErrorBoundary>
     </View>
   );
 }
