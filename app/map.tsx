@@ -23,6 +23,8 @@ import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { Button } from '../components/ui/Button';
 import { useMapSettings } from '../contexts/MapSettingsContext';
+import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
+import { logger } from '../lib/logger';
 
 export default function MapScreen() {
   const { isAuthenticated, loading: authLoading } = useAuth();
@@ -320,7 +322,8 @@ export default function MapScreen() {
           language: userPreferences.language,
           aiProvider: userPreferences.aiProvider,
         },
-        isTestModeEnabled
+        isTestModeEnabled,
+        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
       );
       
       setAttractionInfo(attractionInfo);
@@ -431,7 +434,8 @@ export default function MapScreen() {
           language: userPreferences.language,
           aiProvider: userPreferences.aiProvider,
         },
-        isTestModeEnabled
+        isTestModeEnabled,
+        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
       );
 
       console.log(`Text generated: ${text.length} characters`);
@@ -604,7 +608,8 @@ export default function MapScreen() {
               aiProvider: userPreferences.aiProvider,
             },
             text,
-            isTestModeEnabled
+            isTestModeEnabled,
+            { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
           );
           
           // Create audio track with the old method
@@ -941,13 +946,23 @@ export default function MapScreen() {
       />
 
       {/* RevenueCat Native Paywall Modal */}
-      <RevenueCatPaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        trigger={paywallContext?.trigger}
-        attractionId={paywallContext?.attractionId}
-        attractionName={paywallContext?.attractionName}
-      />
+      <UIErrorBoundary
+        onError={(error) => {
+          logger.error('Paywall render-time error', {
+            error,
+            visible: showPaywall,
+            paywallContext,
+          });
+        }}
+      >
+        <RevenueCatPaywallModal
+          visible={showPaywall}
+          onClose={() => setShowPaywall(false)}
+          trigger={paywallContext?.trigger}
+          attractionId={paywallContext?.attractionId}
+          attractionName={paywallContext?.attractionName}
+        />
+      </UIErrorBoundary>
     </View>
   );
 }

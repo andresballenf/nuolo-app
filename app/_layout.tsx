@@ -3,8 +3,10 @@ import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { useEffect } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import * as Linking from 'expo-linking';
+import * as SplashScreen from 'expo-splash-screen';
+import { View, Image, StyleSheet, Dimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { AppProvider } from '../contexts/AppContext';
 import { AuthProvider } from '../contexts/AuthContext';
@@ -16,6 +18,11 @@ import { MapSettingsProvider } from '../contexts/MapSettingsContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
+// Keep native splash screen visible until our JS tree has mounted and laid out
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // ignore if called multiple times
+});
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -25,11 +32,19 @@ const queryClient = new QueryClient({
   },
 });
 
+const splashIcon = require('../assets/splash-icon.png');
+const iconSource = Image.resolveAssetSource(splashIcon);
+const screenWidth = Dimensions.get('window').width;
+const targetIconWidth = screenWidth * 0.5;
+const targetIconHeight = targetIconWidth * (iconSource.height / iconSource.width);
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
+
+  const [showInAppSplash, setShowInAppSplash] = useState(true);
 
   // Handle deep links from email confirmation and password reset
   useEffect(() => {
@@ -112,7 +127,17 @@ export default function RootLayout() {
     return () => subscription.remove();
   }, []);
 
+  const onLayoutRootView = useCallback(async () => {
+    if (fontsLoaded) {
+      // Hide native splash once our first render has been laid out
+      await SplashScreen.hideAsync();
+      // Keep the in-app splash for a brief moment to avoid perceptible flicker
+      setTimeout(() => setShowInAppSplash(false), 120);
+    }
+  }, [fontsLoaded]);
+
   if (!fontsLoaded) {
+    // Keep native splash on screen until fonts are loaded
     return null;
   }
 
@@ -126,18 +151,30 @@ export default function RootLayout() {
                 <OnboardingProvider>
                   <AudioProvider>
                     <MonetizationProvider>
-                      <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="index" />
-                        <Stack.Screen name="auth" />
-                        <Stack.Screen name="auth/login" />
-                        <Stack.Screen name="auth/signup" />
-                        <Stack.Screen name="auth/reset-password" />
-                        <Stack.Screen name="auth/confirm" />
-                        <Stack.Screen name="auth/update-password" />
-                        <Stack.Screen name="map" />
-                      </Stack>
-                      <OnboardingFlow />
-                      <StatusBar style="light" backgroundColor="#84cc16" />
+                      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+                        <Stack screenOptions={{ headerShown: false }}>
+                          <Stack.Screen name="index" />
+                          <Stack.Screen name="auth" />
+                          <Stack.Screen name="auth/login" />
+                          <Stack.Screen name="auth/signup" />
+                          <Stack.Screen name="auth/reset-password" />
+                          <Stack.Screen name="auth/confirm" />
+                          <Stack.Screen name="auth/update-password" />
+                          <Stack.Screen name="map" />
+                        </Stack>
+                        <OnboardingFlow />
+                        <StatusBar style="light" backgroundColor="#84cc16" />
+
+                        {showInAppSplash && (
+                          <View style={styles.splashContainer}>
+                            <Image
+                              source={splashIcon}
+                              style={{ width: targetIconWidth, height: targetIconHeight }}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        )}
+                      </View>
                     </MonetizationProvider>
                   </AudioProvider>
                 </OnboardingProvider>
@@ -149,3 +186,16 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  splashContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+});

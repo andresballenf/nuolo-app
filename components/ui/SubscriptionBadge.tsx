@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useMonetization } from '../../contexts/MonetizationContext';
@@ -13,13 +14,17 @@ import * as Haptics from 'expo-haptics';
 interface SubscriptionBadgeProps {
   onPress?: () => void;
   style?: any;
+  disabled?: boolean;
+  loading?: boolean;
 }
 
 export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({ 
   onPress,
-  style 
+  style,
+  disabled = false,
+  loading = false,
 }) => {
-  const { subscription, entitlements, loading, initialized, refreshEntitlements } = useMonetization();
+  const { subscription, entitlements, loading: monetizationLoading, initialized, refreshEntitlements } = useMonetization();
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -30,6 +35,8 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
   }, [initialized, refreshEntitlements]);
 
   const handlePress = () => {
+    if (disabled || loading) return;
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     // Animate press
@@ -49,7 +56,7 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
     onPress?.();
   };
 
-  if (loading) {
+  if (monetizationLoading) {
     return null; // Don't show badge while loading
   }
 
@@ -129,13 +136,16 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
       ]}
     >
       <TouchableOpacity
-        style={styles.touchable}
+        style={[styles.touchable, disabled && styles.touchableDisabled]}
         onPress={handlePress}
         activeOpacity={0.8}
+        disabled={disabled || loading}
       >
         {/* Main counter display */}
         <View style={styles.counterContainer}>
-          {displayInfo.isInfinity ? (
+          {loading ? (
+            <ActivityIndicator size="small" color="#374151" />
+          ) : displayInfo.isInfinity ? (
             <MaterialIcons
               name="all-inclusive"
               size={24}
@@ -151,7 +161,7 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
           )}
 
           {/* Lock icon for empty state */}
-          {displayInfo.isEmpty && (
+          {!loading && displayInfo.isEmpty && (
             <View style={styles.lockOverlay}>
               <MaterialIcons name="lock" size={14} color="#EF4444" />
             </View>
@@ -159,14 +169,14 @@ export const SubscriptionBadge: React.FC<SubscriptionBadgeProps> = ({
         </View>
 
         {/* Diamond badge for paid packages */}
-        {displayInfo.isPaidPackage && !displayInfo.isEmpty && (
+        {!loading && displayInfo.isPaidPackage && !displayInfo.isEmpty && (
           <View style={styles.diamondBadge}>
             <MaterialIcons name="diamond" size={12} color="#FFFFFF" />
           </View>
         )}
 
         {/* Free badge overlay */}
-        {displayInfo.showFreeBadge && (
+        {!loading && displayInfo.showFreeBadge && (
           <View style={styles.freeBadge}>
             <Text style={styles.freeBadgeText}>Free</Text>
           </View>
@@ -198,6 +208,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
+  },
+  touchableDisabled: {
+    opacity: 0.6,
   },
   counterContainer: {
     alignItems: 'center',
