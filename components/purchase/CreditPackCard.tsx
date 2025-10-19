@@ -119,7 +119,7 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Details</Text>
         <View style={styles.detailsRow}>
-          <Text style={styles.detailsText}>🧡 {buckets.trial.available} trial</Text>
+          <Text style={styles.detailsText}>💎 {buckets.trial.available} trial</Text>
           <Text style={styles.detailsText}>💎 {summary.purchasedAvailable} purchased</Text>
         </View>
         <View style={styles.detailsRow}>
