@@ -72,6 +72,11 @@ export interface AudioState {
   generationMessage: string;
   generationError: string | null;
   
+  // Timing telemetry for progressive UX
+  scriptStartedAt: number | null; // when we first show generating state (script stage)
+  generationStartedAt: number | null; // when we start TTS chunk generation
+  firstAudioAt: number | null; // when first playable chunk is ready
+  
   // Playlist
   tracks: AudioTrack[];
   currentIndex: number;
@@ -173,6 +178,9 @@ const initialState: AudioState = {
   generatingForId: null,
   generationMessage: '',
   generationError: null,
+  scriptStartedAt: null,
+  generationStartedAt: null,
+  firstAudioAt: null,
   tracks: [],
   currentIndex: -1,
   position: 0,
@@ -668,7 +676,12 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       isUsingChunks: false,
       currentChunkIndex: 0,
       totalChunks: 0,
-      isBuffering: false
+      isBuffering: false,
+      // Reset telemetry when closing
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
+      generationProgress: undefined,
     }));
   }, [pause]);
 
@@ -686,6 +699,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       generatingForId: null,
       generationMessage: '',
       generationError: null,
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
+      generationProgress: undefined,
     }));
   }, []);
 
@@ -699,6 +716,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       generationMessage: `Loading ${name}...`,
       generationError: null,
       showFloatingPlayer: true, // Show mini player immediately
+      // Telemetry: mark start of script generation stage
+      scriptStartedAt: Date.now(),
+      generationStartedAt: null,
+      firstAudioAt: null,
     }));
   }, []);
 
@@ -803,7 +824,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         generationError: null,
         showFloatingPlayer: true,
         isBuffering: true,
-        isUsingChunks: true
+        isUsingChunks: true,
+        // Telemetry: mark start of TTS chunk generation stage for streaming path
+        generationStartedAt: Date.now(),
+        firstAudioAt: null
       }));
       
       let firstChunkReceived = false;
@@ -851,7 +875,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
                 ...prev,
                 isGeneratingAudio: false,
                 generationMessage: '',
-                isBuffering: false
+                isBuffering: false,
+                // Telemetry: first playable audio time for streaming path
+                firstAudioAt: prev.firstAudioAt ?? Date.now()
               }));
               
               // Start playback
@@ -963,6 +989,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         showFloatingPlayer: true,
         isBuffering: true,
         isUsingChunks: true,
+        // Telemetry: mark start of TTS chunk generation stage
+        generationStartedAt: Date.now(),
+        firstAudioAt: null,
         // Create track immediately to keep player visible
         currentTrack: {
           id: attraction.id,
@@ -997,6 +1026,8 @@ export function AudioProvider({ children }: { children: ReactNode }) {
               isGeneratingAudio: false,
               generationMessage: '',
               isBuffering: false,
+              // Telemetry: mark first playable audio time
+              firstAudioAt: prev.firstAudioAt ?? Date.now(),
               // Ensure mini player stays visible
               showFloatingPlayer: true,
               // Keep the existing track which already has the imageUrl set correctly
@@ -1074,7 +1105,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       isGeneratingAudio: false,
       generationMessage: '',
       isBuffering: false,
-      generationProgress: undefined
+      generationProgress: undefined,
+      // Reset telemetry on cancel
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
     }));
   }, []);
 
