@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-audio';
 import { Alert, AppState, AppStateStatus } from 'react-native';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { AudioService } from '../services/AudioService';

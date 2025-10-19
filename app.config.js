@@ -88,12 +88,11 @@ module.exports = {
         }
       ],
       [
-        "expo-av",
+        "expo-audio",
         {
           microphonePermission: "Allow Nuolo to access your microphone for audio features."
         }
       ],
-      "expo-audio",
       "expo-secure-store",
       "expo-font",
       "expo-web-browser",
