@@ -14,6 +14,7 @@ import { OnboardingProvider } from '../contexts/OnboardingContext';
 import { AudioProvider } from '../contexts/AudioContext';
 import { PrivacyProvider } from '../contexts/PrivacyContext';
 import { MonetizationProvider } from '../contexts/MonetizationContext';
+import { MapSettingsProvider } from '../contexts/MapSettingsContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
@@ -145,38 +146,40 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <PrivacyProvider>
           <AppProvider>
-            <AuthProvider>
-              <OnboardingProvider>
-                <AudioProvider>
-                  <MonetizationProvider>
-                    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-                      <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="index" />
-                        <Stack.Screen name="auth" />
-                        <Stack.Screen name="auth/login" />
-                        <Stack.Screen name="auth/signup" />
-                        <Stack.Screen name="auth/reset-password" />
-                        <Stack.Screen name="auth/confirm" />
-                        <Stack.Screen name="auth/update-password" />
-                        <Stack.Screen name="map" />
-                      </Stack>
-                      <OnboardingFlow />
-                      <StatusBar style="light" backgroundColor="#84cc16" />
+            <MapSettingsProvider>
+              <AuthProvider>
+                <OnboardingProvider>
+                  <AudioProvider>
+                    <MonetizationProvider>
+                      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+                        <Stack screenOptions={{ headerShown: false }}>
+                          <Stack.Screen name="index" />
+                          <Stack.Screen name="auth" />
+                          <Stack.Screen name="auth/login" />
+                          <Stack.Screen name="auth/signup" />
+                          <Stack.Screen name="auth/reset-password" />
+                          <Stack.Screen name="auth/confirm" />
+                          <Stack.Screen name="auth/update-password" />
+                          <Stack.Screen name="map" />
+                        </Stack>
+                        <OnboardingFlow />
+                        <StatusBar style="light" backgroundColor="#84cc16" />
 
-                      {showInAppSplash && (
-                        <View style={styles.splashContainer}>
-                          <Image
-                            source={splashIcon}
-                            style={{ width: targetIconWidth, height: targetIconHeight }}
-                            resizeMode="contain"
-                          />
-                        </View>
-                      )}
-                    </View>
-                  </MonetizationProvider>
-                </AudioProvider>
-              </OnboardingProvider>
-            </AuthProvider>
+                        {showInAppSplash && (
+                          <View style={styles.splashContainer}>
+                            <Image
+                              source={splashIcon}
+                              style={{ width: targetIconWidth, height: targetIconHeight }}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        )}
+                      </View>
+                    </MonetizationProvider>
+                  </AudioProvider>
+                </OnboardingProvider>
+              </AuthProvider>
+            </MapSettingsProvider>
           </AppProvider>
         </PrivacyProvider>
       </QueryClientProvider>

@@ -23,10 +23,10 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 interface MapPreferencesMenuProps {
   isVisible: boolean;
   onClose: () => void;
-  mapType: 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid' | 'terrain';
   mapTilt: number;
   zoom?: number;
-  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
+  onMapTypeChange: (type: 'satellite' | 'hybrid' | 'terrain') => void;
   onMapTiltChange: (tilt: number) => void;
 }
 

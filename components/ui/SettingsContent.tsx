@@ -6,29 +6,25 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
+import { Platform } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
+import { useMapSettings } from '../../contexts/MapSettingsContext';
 
 interface SettingsContentProps {
-  mapType: 'satellite' | 'hybrid';
-  mapTilt: number;
-  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
-  onMapTiltChange: (tilt: number) => void;
   onClose?: () => void;
 }
 
-export const SettingsContent: React.FC<SettingsContentProps> = ({
-  mapType,
-  mapTilt,
-  onMapTypeChange,
-  onMapTiltChange,
-  onClose,
-}) => {
+export const SettingsContent: React.FC<SettingsContentProps> = ({ onClose }) => {
   const { userPreferences, setUserPreferences } = useApp();
-  const mapTypes: Array<{ type: 'satellite' | 'hybrid'; label: string; icon: string }> = [
+  const { settings, setSettings, isFeatureSupported } = useMapSettings();
+
+  const allMapTypes: Array<{ type: 'satellite' | 'hybrid' | 'terrain'; label: string; icon: string }> = [
     { type: 'satellite', label: 'Satellite', icon: 'satellite' },
     { type: 'hybrid', label: 'Hybrid', icon: 'layers' },
+    { type: 'terrain', label: 'Terrain (Android)', icon: 'terrain' },
   ];
+  const mapTypes = Platform.OS === 'android' ? allMapTypes : allMapTypes.filter(t => t.type !== 'terrain');
   
   const tiltOptions = [
     { value: 0, label: 'No Tilt' },
@@ -48,18 +44,18 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
               key={item.type}
               style={[
                 styles.mapTypeItem,
-                mapType === item.type && styles.mapTypeItemActive,
+                settings.mapType === item.type && styles.mapTypeItemActive,
               ]}
-              onPress={() => onMapTypeChange(item.type)}
+              onPress={() => setSettings({ mapType: item.type })}
             >
               <MaterialIcons 
                 name={item.icon} 
                 size={32} 
-                color={mapType === item.type ? '#FFFFFF' : '#6B7280'} 
+                color={settings.mapType === item.type ? '#FFFFFF' : '#6B7280'} 
               />
               <Text style={[
                 styles.mapTypeLabel,
-                mapType === item.type && styles.mapTypeLabelActive,
+                settings.mapType === item.type && styles.mapTypeLabelActive,
               ]}>
                 {item.label}
               </Text>
@@ -80,18 +76,18 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
               key={option.value}
               style={[
                 styles.tiltOption,
-                mapTilt === option.value && styles.tiltOptionActive,
+                settings.tilt === option.value && styles.tiltOptionActive,
               ]}
-              onPress={() => onMapTiltChange(option.value)}
+              onPress={() => setSettings({ tilt: option.value })}
             >
               <View style={styles.tiltRadio}>
-                {mapTilt === option.value && (
+                {settings.tilt === option.value && (
                   <View style={styles.tiltRadioInner} />
                 )}
               </View>
               <Text style={[
                 styles.tiltLabel,
-                mapTilt === option.value && styles.tiltLabelActive,
+                settings.tilt === option.value && styles.tiltLabelActive,
               ]}>
                 {option.label}
               </Text>
@@ -191,27 +187,112 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Map Features</Text>
         <View style={styles.featuresList}>
-          <TouchableOpacity style={styles.featureItem}>
+          {/* Traffic */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsTraffic') && setSettings({ showsTraffic: !settings.showsTraffic })}>
             <MaterialIcons name="traffic" size={20} color="#6B7280" />
             <Text style={styles.featureLabel}>Traffic</Text>
-            <View style={styles.featureToggle}>
-              <Text style={styles.featureStatus}>Off</Text>
+            <View style={[styles.featureToggle, settings.showsTraffic && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsTraffic && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsTraffic') ? (settings.showsTraffic ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
             </View>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.featureItem}>
-            <MaterialIcons name="directions-transit" size={20} color="#6B7280" />
-            <Text style={styles.featureLabel}>Transit</Text>
-            <View style={styles.featureToggle}>
-              <Text style={styles.featureStatus}>Off</Text>
+
+          {/* 3D Buildings */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsBuildings') && setSettings({ showsBuildings: !settings.showsBuildings })}>
+            <MaterialIcons name="domain" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>3D Buildings</Text>
+            <View style={[styles.featureToggle, settings.showsBuildings && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsBuildings && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsBuildings') ? (settings.showsBuildings ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
             </View>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.featureItem}>
-            <MaterialIcons name="terrain" size={20} color="#6B7280" />
-            <Text style={styles.featureLabel}>Terrain</Text>
-            <View style={styles.featureToggle}>
-              <Text style={styles.featureStatus}>Off</Text>
+
+          {/* Compass */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsCompass') && setSettings({ showsCompass: !settings.showsCompass })}>
+            <MaterialIcons name="explore" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Compass</Text>
+            <View style={[styles.featureToggle, settings.showsCompass && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsCompass && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsCompass') ? (settings.showsCompass ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Indoors */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsIndoors') && setSettings({ showsIndoors: !settings.showsIndoors })}>
+            <MaterialIcons name="apartment" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Indoor Maps</Text>
+            <View style={[styles.featureToggle, settings.showsIndoors && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsIndoors && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsIndoors') ? (settings.showsIndoors ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Indoor Level Picker (Android) */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsIndoorLevelPicker') && setSettings({ showsIndoorLevelPicker: !settings.showsIndoorLevelPicker })}>
+            <MaterialIcons name="view-list" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Indoor Level Picker</Text>
+            <View style={[styles.featureToggle, settings.showsIndoorLevelPicker && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsIndoorLevelPicker && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsIndoorLevelPicker') ? (settings.showsIndoorLevelPicker ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Points of Interest (iOS) */}
+          <TouchableOpacity style={styles.featureItem} onPress={() => isFeatureSupported('showsPointsOfInterest') && setSettings({ showsPointsOfInterest: !settings.showsPointsOfInterest })}>
+            <MaterialIcons name="place" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Points of Interest</Text>
+            <View style={[styles.featureToggle, settings.showsPointsOfInterest && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.showsPointsOfInterest && styles.audioOptionTitleActive]}>
+                {isFeatureSupported('showsPointsOfInterest') ? (settings.showsPointsOfInterest ? 'On' : 'Off') : 'Unsupported'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </View>
+      
+      {/* Gestures */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Gestures</Text>
+        <View style={styles.featuresList}>
+          <TouchableOpacity style={styles.featureItem} onPress={() => setSettings({ pitchEnabled: !settings.pitchEnabled })}>
+            <MaterialIcons name="pan-tool" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Pitch</Text>
+            <View style={[styles.featureToggle, settings.pitchEnabled && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.pitchEnabled && styles.audioOptionTitleActive]}>
+                {settings.pitchEnabled ? 'On' : 'Off'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem} onPress={() => setSettings({ rotateEnabled: !settings.rotateEnabled })}>
+            <MaterialIcons name="rotate-90-degrees-ccw" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Rotate</Text>
+            <View style={[styles.featureToggle, settings.rotateEnabled && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.rotateEnabled && styles.audioOptionTitleActive]}>
+                {settings.rotateEnabled ? 'On' : 'Off'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem} onPress={() => setSettings({ zoomEnabled: !settings.zoomEnabled })}>
+            <MaterialIcons name="zoom-in" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Zoom</Text>
+            <View style={[styles.featureToggle, settings.zoomEnabled && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.zoomEnabled && styles.audioOptionTitleActive]}>
+                {settings.zoomEnabled ? 'On' : 'Off'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem} onPress={() => setSettings({ scrollEnabled: !settings.scrollEnabled })}>
+            <MaterialIcons name="open-with" size={20} color="#6B7280" />
+            <Text style={styles.featureLabel}>Scroll</Text>
+            <View style={[styles.featureToggle, settings.scrollEnabled && styles.audioOptionActive]}>
+              <Text style={[styles.featureStatus, settings.scrollEnabled && styles.audioOptionTitleActive]}>
+                {settings.scrollEnabled ? 'On' : 'Off'}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>

@@ -36,9 +36,9 @@ interface TopNavigationBarProps {
   onSearchByQuery?: (query: string) => void;
 
   // Map preferences
-  mapType: 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid' | 'terrain';
   mapTilt: number;
-  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
+  onMapTypeChange: (type: 'satellite' | 'hybrid' | 'terrain') => void;
   onMapTiltChange: (tilt: number) => void;
 
   // Profile & Settings
@@ -611,7 +611,7 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
                 onPress={handleCancelSearch}
                 accessibilityLabel="Close search"
               >
-                <MaterialIcons name="chevron-right" size={16} color="#6B7280" />
+                <MaterialIcons name="arrow-back-ios" size={16} color="#6B7280" />
               </TouchableOpacity>
             </Animated.View>
           )}
