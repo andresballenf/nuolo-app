@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PointOfInterest } from '../services/GooglePlacesService';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { Button } from '../components/ui/Button';
+import { useMapSettings } from '../contexts/MapSettingsContext';
 import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
 import { logger } from '../lib/logger';
 import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
@@ -91,9 +92,10 @@ export default function MapScreen() {
   const [sheetState, setSheetState] = useState<SheetState>('hidden');
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Map controls state
-  const [mapType, setMapType] = useState<'satellite' | 'hybrid'>('hybrid');
-  const [mapTilt, setMapTilt] = useState(60);
+  // Map controls state - centralized via MapSettingsContext
+  const { settings: mapSettings, setSettings: setMapSettings } = useMapSettings();
+  const mapType = mapSettings.mapType;
+  const mapTilt = mapSettings.tilt;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [triggerGPS, setTriggerGPS] = useState(0);
@@ -322,7 +324,8 @@ export default function MapScreen() {
           language: userPreferences.language,
           aiProvider: userPreferences.aiProvider,
         },
-        isTestModeEnabled
+        isTestModeEnabled,
+        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
       );
       
       setAttractionInfo(attractionInfo);
@@ -433,7 +436,8 @@ export default function MapScreen() {
           language: userPreferences.language,
           aiProvider: userPreferences.aiProvider,
         },
-        isTestModeEnabled
+        isTestModeEnabled,
+        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
       );
 
       console.log(`Text generated: ${text.length} characters`);
@@ -606,7 +610,8 @@ export default function MapScreen() {
               aiProvider: userPreferences.aiProvider,
             },
             text,
-            isTestModeEnabled
+            isTestModeEnabled,
+            { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
           );
           
           // Create audio track with the old method
@@ -811,13 +816,9 @@ export default function MapScreen() {
   // Memoized content components to prevent re-renders
   const settingsContentMemo = useMemo(() => (
     <SettingsContent
-      mapType={mapType}
-      mapTilt={mapTilt}
-      onMapTypeChange={setMapType}
-      onMapTiltChange={setMapTilt}
       onClose={() => setIsBottomSheetVisible(false)}
     />
-  ), [mapType, mapTilt]);
+  ), []);
 
   const profileContentMemo = useMemo(() => (
     <ProfileContent
@@ -860,9 +861,9 @@ export default function MapScreen() {
         onApplyTestLocation={handleApplyTestLocation}
         onApplyPopularLocation={handleApplyPopularLocation}
         mapType={mapType}
-        onMapTypeChange={setMapType}
+        onMapTypeChange={(type) => setMapSettings({ mapType: type })}
         mapTilt={mapTilt}
-        onMapTiltChange={setMapTilt}
+        onMapTiltChange={(tilt) => setMapSettings({ tilt })}
         popularLocations={popularLocations}
       />
 
@@ -878,8 +879,8 @@ export default function MapScreen() {
         }}
         mapType={mapType}
         mapTilt={mapTilt}
-        onMapTypeChange={setMapType}
-        onMapTiltChange={setMapTilt}
+        onMapTypeChange={(type) => setMapSettings({ mapType: type })}
+        onMapTiltChange={(tilt) => setMapSettings({ tilt })}
         onProfilePress={handleOpenProfile}
         onSettingsPress={handleOpenSettings}
         onEnableGPS={handleEnableGPS}
