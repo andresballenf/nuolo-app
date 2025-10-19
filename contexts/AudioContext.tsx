@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { Alert, AppState, AppStateStatus } from 'react-native';
-import { TranscriptSegment } from '../services/AttractionInfoService';
+import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { AudioService } from '../services/AudioService';
 import { AudioChunkManager, ChunkPlaybackState } from '../services/AudioChunkManager';
 import { AudioStreamHandler } from '../services/AudioStreamHandler';
 import { AudioGenerationService, GenerationProgress } from '../services/AudioGenerationService';
+import { mark, measure } from '../utils/tracing';
 import type { PointOfInterest } from '../services/GooglePlacesService';
 import { PerfTracer } from '../utils/perfTrace';
 import { TelemetryService } from '../services/TelemetryService';
@@ -15,6 +16,9 @@ export type AudioLengthPreference = 'short' | 'medium' | 'deep-dive';
 export type AudioLanguage = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'it' | 'pt' | 'ru' | 'ko';
 export type AudioVoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
 export type AudioAIProvider = 'openai' | 'gemini';
+
+// Feature flag to control progressive chunked playback
+const PROGRESSIVE_AUDIO = process.env.EXPO_PUBLIC_PROGRESSIVE_AUDIO !== 'false';
 
 export interface Coordinates {
   lat: number;
@@ -74,6 +78,11 @@ export interface AudioState {
   generationMessage: string;
   generationError: string | null;
   
+  // Timing telemetry for progressive UX
+  scriptStartedAt: number | null; // when we first show generating state (script stage)
+  generationStartedAt: number | null; // when we start TTS chunk generation
+  firstAudioAt: number | null; // when first playable chunk is ready
+  
   // Playlist
   tracks: AudioTrack[];
   currentIndex: number;
@@ -90,6 +99,12 @@ export interface AudioState {
   currentChunkIndex: number;
   totalChunks: number;
   isBuffering: boolean;
+  
+  // Buffer and tracing
+  bufferHealth?: number;
+  firstPlayableAt?: number | null;
+  ttfpMs?: number | null;
+  ttcMs?: number | null;
   
   // Chunk generation progress
   generationProgress?: GenerationProgress;
@@ -175,6 +190,9 @@ const initialState: AudioState = {
   generatingForId: null,
   generationMessage: '',
   generationError: null,
+  scriptStartedAt: null,
+  generationStartedAt: null,
+  firstAudioAt: null,
   tracks: [],
   currentIndex: -1,
   position: 0,
@@ -184,6 +202,10 @@ const initialState: AudioState = {
   currentChunkIndex: 0,
   totalChunks: 0,
   isBuffering: false,
+  bufferHealth: 0,
+  firstPlayableAt: null,
+  ttfpMs: null,
+  ttcMs: null,
 };
 
 export function AudioProvider({ children }: { children: ReactNode }) {
@@ -670,7 +692,12 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       isUsingChunks: false,
       currentChunkIndex: 0,
       totalChunks: 0,
-      isBuffering: false
+      isBuffering: false,
+      // Reset telemetry when closing
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
+      generationProgress: undefined,
     }));
   }, [pause]);
 
@@ -688,6 +715,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       generatingForId: null,
       generationMessage: '',
       generationError: null,
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
+      generationProgress: undefined,
     }));
   }, []);
 
@@ -701,6 +732,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       generationMessage: `Loading ${name}...`,
       generationError: null,
       showFloatingPlayer: true, // Show mini player immediately
+      // Telemetry: mark start of script generation stage
+      scriptStartedAt: Date.now(),
+      generationStartedAt: null,
+      firstAudioAt: null,
     }));
   }, []);
 
@@ -759,6 +794,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     });
     try {
       console.log('Starting chunked audio generation for:', attraction.name);
+      mark('audio_generate_start');
 
       if (!attraction.userLocation) {
         throw new Error('Attraction userLocation is required for streaming audio generation');
@@ -778,13 +814,16 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             currentChunkIndex: chunkState.currentChunkIndex,
             totalChunks: chunkState.totalChunks,
             isBuffering: chunkState.isLoading,
-            isUsingChunks: true
+            isUsingChunks: true,
+            bufferHealth: chunkManagerRef.current?.getBufferHealth() ?? 0,
           }));
         });
         
         chunkManagerRef.current.setOnAllChunksComplete(() => {
           console.log('All audio chunks completed');
-          setState(prev => ({ ...prev, isPlaying: false }));
+          mark('audio_playback_complete');
+          const ttc = measure('TTC', 'audio_generate_start', 'audio_playback_complete');
+          setState(prev => ({ ...prev, isPlaying: false, ttcMs: ttc ?? prev.ttcMs }));
         });
       }
       
@@ -811,7 +850,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         generationError: null,
         showFloatingPlayer: true,
         isBuffering: true,
-        isUsingChunks: true
+        isUsingChunks: true,
+        // Telemetry: mark start of TTS chunk generation stage for streaming path
+        generationStartedAt: Date.now(),
+        firstAudioAt: null
       }));
       
       let firstChunkReceived = false;
@@ -856,11 +898,18 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             if (!firstChunkReceived) {
               firstChunkReceived = true;
               PerfTracer.mark(traceId, 'first_chunk_ready', { index: chunk.chunkIndex });
+              // Mark first playable and compute TTFP
+              mark('audio_first_play');
+              const ttfp = measure('TTFP', 'audio_generate_start', 'audio_first_play');
               setState(prev => ({
                 ...prev,
                 isGeneratingAudio: false,
                 generationMessage: '',
-                isBuffering: false
+                isBuffering: false,
+                // Telemetry: first playable audio time for streaming path
+                firstAudioAt: prev.firstAudioAt ?? Date.now(),
+                firstPlayableAt: Date.now(),
+                ttfpMs: ttfp ?? prev.ttfpMs,
               }));
               
               // Start playback
@@ -923,9 +972,46 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     });
     try {
       console.log('Starting app-orchestrated chunked audio generation for:', attraction.name);
+      mark('audio_generate_start');
 
       if (!attraction.userLocation) {
         throw new Error('Attraction userLocation is required for chunked audio generation');
+      }
+      
+      // Legacy single-audio path when progressive audio is disabled
+      if (!PROGRESSIVE_AUDIO) {
+        if (text.length > 3900) {
+          throw new Error('Progressive audio is disabled and text exceeds single-chunk limit');
+        }
+        const audioData = await AttractionInfoService.generateAudio(
+          attraction.name,
+          attraction.address || 'Unknown location',
+          attraction.userLocation,
+          {
+            theme: preferences.theme,
+            audioLength: preferences.audioLength,
+            voiceStyle: preferences.voiceStyle,
+            language: preferences.language,
+          },
+          text
+        );
+
+        const track: AudioTrack = {
+          id: attraction.id,
+          title: attraction.name,
+          subtitle: attraction.address || 'Audio Guide',
+          description: text,
+          location: attraction.address,
+          category: preferences.theme,
+          audioData,
+          duration: 0,
+          imageUrl: attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined,
+        };
+        addTrack(track);
+        await setCurrentTrack(track);
+        await play();
+        setState(prev => ({ ...prev, isGeneratingAudio: false, generationMessage: '' }));
+        return;
       }
       
       // Initialize chunk manager if needed
@@ -942,13 +1028,16 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             currentChunkIndex: chunkState.currentChunkIndex,
             totalChunks: chunkState.totalChunks,
             isBuffering: chunkState.isLoading,
-            isUsingChunks: true
+            isUsingChunks: true,
+            bufferHealth: chunkManagerRef.current?.getBufferHealth() ?? 0,
           }));
         });
         
         chunkManagerRef.current.setOnAllChunksComplete(() => {
           console.log('All audio chunks completed');
-          setState(prev => ({ ...prev, isPlaying: false }));
+          mark('audio_playback_complete');
+          const ttc = measure('TTC', 'audio_generate_start', 'audio_playback_complete');
+          setState(prev => ({ ...prev, isPlaying: false, ttcMs: ttc ?? prev.ttcMs }));
         });
       }
       
@@ -983,6 +1072,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         showFloatingPlayer: true,
         isBuffering: true,
         isUsingChunks: true,
+        // Telemetry: mark start of TTS chunk generation stage
+        generationStartedAt: Date.now(),
+        firstAudioAt: null,
         // Create track immediately to keep player visible
         currentTrack: {
           id: attraction.id,
@@ -1013,15 +1105,22 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           onFirstChunkReady: async (chunk) => {
             console.log('First chunk ready, starting playback');
             PerfTracer.mark(traceId, 'first_chunk_ready', { index: chunk.chunkIndex });
+            // Mark first playable and compute TTFP
+            mark('audio_first_play');
+            const ttfp = measure('TTFP', 'audio_generate_start', 'audio_first_play');
             setState(prev => ({
               ...prev,
               isGeneratingAudio: false,
               generationMessage: '',
               isBuffering: false,
+              // Telemetry: mark first playable audio time
+              firstAudioAt: prev.firstAudioAt ?? Date.now(),
               // Ensure mini player stays visible
               showFloatingPlayer: true,
               // Keep the existing track which already has the imageUrl set correctly
               // Don't create a new one that might lose the imageUrl
+              firstPlayableAt: Date.now(),
+              ttfpMs: ttfp ?? prev.ttfpMs,
             }));
             
             // Start playing immediately
@@ -1099,7 +1198,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       isGeneratingAudio: false,
       generationMessage: '',
       isBuffering: false,
-      generationProgress: undefined
+      generationProgress: undefined,
+      // Reset telemetry on cancel
+      scriptStartedAt: null,
+      generationStartedAt: null,
+      firstAudioAt: null,
     }));
   }, []);
 

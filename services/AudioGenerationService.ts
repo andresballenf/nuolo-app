@@ -83,6 +83,19 @@ export class AudioGenerationService {
           estimatedDuration: Math.ceil(text.length / 15)
         };
         
+        // Initialize timeline for single-chunk playback
+        if (this.chunkManager) {
+          this.chunkManager.initializeTimeline([
+            {
+              chunkIndex: 0,
+              totalChunks: 1,
+              text: text,
+              estimatedDuration: singleChunk.estimatedDuration,
+            },
+          ]);
+          this.chunkManager.setBufferAheadCount(1);
+        }
+        
         // Initialize progress
         this.generationProgress = {
           totalChunks: 1,
@@ -155,6 +168,20 @@ export class AudioGenerationService {
       
       // Optimize chunks (merge small ones)
       const optimizedChunks = TTSChunkService.optimizeChunks(textChunks);
+      
+      // Initialize chunk timeline with estimates so UI can reflect duration/progress before audio arrives
+      if (this.chunkManager && optimizedChunks.length > 0) {
+        this.chunkManager.initializeTimeline(
+          optimizedChunks.map(c => ({
+            chunkIndex: c.chunkIndex,
+            totalChunks: c.totalChunks,
+            estimatedDuration: c.estimatedDuration,
+            text: c.text,
+          }))
+        );
+        // Keep a small buffer of upcoming chunks loaded
+        this.chunkManager.setBufferAheadCount(3);
+      }
       
       // Validate chunks
       if (!TTSChunkService.validateChunks(optimizedChunks)) {

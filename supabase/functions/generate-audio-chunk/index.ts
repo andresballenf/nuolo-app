@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { startTimer, endTimer } from './secureLogger.ts';
+import { startTimer, endTimer, logInfo, logWarn, logError } from '../attraction-info/secureLogger.ts';
 
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 
@@ -15,8 +15,10 @@ interface ChunkRequest {
   chunkIndex: number;
   totalChunks: number;
   voiceStyle?: string;
+  voice?: string; // direct OpenAI voice (overrides voiceStyle)
   language?: string;
   speed?: number;
+  segmentId?: string;
 }
 
 interface ChunkResponse {
@@ -24,6 +26,8 @@ interface ChunkResponse {
   totalChunks: number;
   audio: string; // Base64
   characterCount: number;
+  estimatedMs?: number;
+  segmentId?: string;
   error?: string;
 }
 
@@ -95,18 +99,23 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const requestTimer = startTimer('chunk_request');
+
   try {
     const totalTimer = startTimer('ga_chunk_total');
     const requestData: ChunkRequest = await req.json();
+    const { segmentId } = requestData;
     
     // Validate input
     if (!requestData.text || requestData.text.length === 0) {
       endTimer(totalTimer, 'ga_chunk_total', false);
-      return new Response(JSON.stringify({
+      const res = {
         error: 'Text is required',
         chunkIndex: requestData.chunkIndex || 0,
-        totalChunks: requestData.totalChunks || 1
-      }), {
+        totalChunks: requestData.totalChunks || 1,
+        segmentId,
+      };
+      return new Response(JSON.stringify(res), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -115,56 +124,75 @@ serve(async (req) => {
     // Check text length (max 4096 for OpenAI TTS)
     if (requestData.text.length > 4096) {
       endTimer(totalTimer, 'ga_chunk_total', false);
-      return new Response(JSON.stringify({
+      const res = {
         error: 'Text exceeds maximum length of 4096 characters',
         chunkIndex: requestData.chunkIndex || 0,
-        totalChunks: requestData.totalChunks || 1
-      }), {
+        totalChunks: requestData.totalChunks || 1,
+        segmentId,
+      };
+      return new Response(JSON.stringify(res), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    console.log(`Generating audio for chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`);
-    console.log(`Text length: ${requestData.text.length} characters`);
+    logInfo('audio', `Generating audio chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`, {
+      chunkIndex: requestData.chunkIndex,
+      totalChunks: requestData.totalChunks,
+      segmentId,
+      chars: requestData.text.length,
+    });
     
-    // Map voice style
-    const voice = mapVoiceStyle(requestData.voiceStyle);
+    // Voice selection precedence: explicit voice > voiceStyle mapping
+    const voice = (requestData.voice && requestData.voice.length > 0)
+      ? requestData.voice
+      : mapVoiceStyle(requestData.voiceStyle);
     const speed = requestData.speed || 1.0;
     
-    console.log(`Using voice: ${voice}, speed: ${speed}`);
-    
+    logInfo('audio', 'Chunk TTS parameters', { voice, speed, segmentId });
+
     // Generate audio
     const ttsTimer = startTimer('ga_tts_generation');
     const audioBuffer = await generateAudioChunk(requestData.text, voice, speed);
-    endTimer(ttsTimer, 'ga_tts_generation', true);
-    
+    const ttsDuration = endTimer(ttsTimer, 'ga_tts_generation', true);
+
     // Convert to base64
     const convTimer = startTimer('ga_base64_conversion');
     const base64Audio = arrayBufferToBase64(audioBuffer);
     endTimer(convTimer, 'ga_base64_conversion', true);
+
+    logInfo('audio', 'Audio chunk generated', {
+      bytes: audioBuffer.byteLength,
+      segmentId,
+      ttsDurationMs: ttsDuration,
+    });
     
-    console.log(`Audio generated successfully. Size: ${audioBuffer.byteLength} bytes`);
-    
-    // Return response
+    // Prepare response
+    const estimatedMs = Math.round((requestData.text.length / 15) * (1000 / Math.max(0.5, speed)));
+
     const response: ChunkResponse = {
       chunkIndex: requestData.chunkIndex || 0,
       totalChunks: requestData.totalChunks || 1,
       audio: base64Audio,
-      characterCount: requestData.text.length
+      characterCount: requestData.text.length,
+      estimatedMs,
+      segmentId,
     };
-    
-    const res = new Response(JSON.stringify(response), {
+
+    const totalDuration = endTimer(requestTimer, 'chunk_request', true);
+    endTimer(totalTimer, 'ga_chunk_total', true);
+    logInfo('audio', 'Chunk request completed', { durationMs: totalDuration, segmentId });
+
+    return new Response(JSON.stringify(response), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json'
       }
     });
-    endTimer(totalTimer, 'ga_chunk_total', true);
-    return res;
     
-  } catch (error) {
-    console.error('Error generating audio chunk:', error);
+  } catch (error: any) {
+    endTimer(requestTimer, 'chunk_request', false);
+    logError('audio', 'Error generating audio chunk', { error: error?.message });
     
     return new Response(JSON.stringify({
       error: (error as any)?.message || 'Failed to generate audio chunk',

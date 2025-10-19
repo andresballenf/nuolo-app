@@ -55,7 +55,9 @@ export class GeminiProvider implements IAIProvider {
       options.attractionName,
       options.attractionAddress || '',
       options.userLocation,
-      normalizedPreferences
+      normalizedPreferences,
+      options.poiLocation,
+      options.spatialHints
     );
 
     try {
@@ -129,7 +131,9 @@ export class GeminiProvider implements IAIProvider {
       options.attractionName,
       options.attractionAddress || '',
       options.userLocation,
-      normalizedPreferences
+      normalizedPreferences,
+      options.poiLocation,
+      options.spatialHints
     );
 
     try {
@@ -228,7 +232,21 @@ Style constraints
 Immersion rules
 - Keep the feel spontaneous and conversational, as if walking together.
 - Do not mention being an AI or that this is scripted.
-- Use only the requested language. Adapt fluently without naming the language unless asked.${languageInstruction ? '\n\n' + languageInstruction : ''}`;
+- Use only the requested language. Adapt fluently without naming the language unless asked.
+
+Spatial privacy and orientation rules (EN)
+- Never mention coordinates (latitude/longitude), GPS values, DMS formats, street numbers, street names, or exact postal addresses.
+- Use only relative orientation from the listener's position: north/south/east/west, left/right, ahead/behind.
+- You may reference well-known landmarks; avoid street names unless the landmark itself is the reference.
+- If the user's location or heading is unavailable or low-accuracy, avoid specific directional references.
+- Prefer approximate distances ("a few meters", "about 200 m") and avoid excessive precision.
+
+Reglas de privacidad y orientación espacial (ES)
+- No menciones coordenadas, latitud/longitud, formatos DMS, números de calle, nombres de calles ni direcciones postales exactas.
+- Usa orientación relativa respecto a la posición del usuario: norte/sur/este/oeste, izquierda/derecha, delante/detrás.
+- Puedes mencionar hitos/landmarks conocidos; evita nombres de calles salvo que el propio hito sea la referencia.
+- Si la ubicación u orientación del usuario no está disponible o es imprecisa, evita referencias direccionales específicas.
+- Prefiere distancias aproximadas (“a pocos metros”, “a unos 200 m”) y evita precisión excesiva.${languageInstruction ? '\n\n' + languageInstruction : ''}`;
   }
 
   /**

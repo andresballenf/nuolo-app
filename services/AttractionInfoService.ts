@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import { AudioStreamHandler, StreamHandlerCallbacks } from './AudioStreamHandler';
 import { AudioChunkData } from './AudioChunkManager';
 import { PerfTracer } from '../utils/perfTrace';
+import { deriveSpatialHints } from '../utils/geo';
 
 // Timed transcript segment interface used for karaoke-style highlighting
 export interface TranscriptWordTiming {
@@ -35,6 +36,18 @@ interface AttractionInfoRequest {
   attractionAddress: string;
   userLocation: UserLocation;
   preferences: UserPreferences;
+  // Optional POI location to derive relative orientation (will not be exposed in text)
+  poiLocation?: UserLocation;
+  // Derived hints to help LLM with orientation without exposing raw coords
+  spatialHints?: {
+    bearing?: number;
+    cardinal16?: string;
+    cardinal8?: string;
+    distanceMeters?: number;
+    distanceText?: string;
+    relative?: string;
+  };
+  userHeading?: number;
   generateAudio?: boolean;
   streamAudio?: boolean;
   testMode?: boolean;
@@ -82,12 +95,24 @@ export class AttractionInfoService {
       testMode?: boolean;
       existingText?: string;
       retryAttempt?: number;
+      poiLocation?: UserLocation;
+      userHeading?: number;
     } = {}
   ): Promise<AttractionInfoResponse> {
     const currentAttempt = options.retryAttempt || 0;
     const maxRetries = 2; // Allow up to 2 retries for timeout issues
     
     try {
+      // Derive spatial hints if POI location is provided
+      const spatialHints = options.poiLocation
+        ? deriveSpatialHints({
+            user: userLocation,
+            poi: options.poiLocation,
+            lang: (preferences.language || 'en') as 'en' | 'es',
+            heading: options.userHeading,
+          })
+        : undefined;
+
       const requestData: AttractionInfoRequest = {
         attractionName,
         attractionAddress,
@@ -96,6 +121,9 @@ export class AttractionInfoService {
           ...preferences,
           language: preferences.language || 'en', // Default to English if not specified
         },
+        poiLocation: options.poiLocation,
+        spatialHints,
+        userHeading: options.userHeading,
         generateAudio: options.generateAudio || false,
         streamAudio: options.streamAudio || false,
         testMode: options.testMode || false,
@@ -216,14 +244,15 @@ export class AttractionInfoService {
     attractionAddress: string,
     userLocation: UserLocation,
     preferences: UserPreferences,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<string> {
     const response = await this.generateAttractionInfo(
       attractionName,
       attractionAddress,
       userLocation,
       preferences,
-      { testMode }
+      { testMode, ...(extras || {}) }
     );
 
     if (response.error) {
@@ -246,7 +275,8 @@ export class AttractionInfoService {
     userLocation: UserLocation,
     preferences: UserPreferences,
     existingText: string,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<string> {
     const response = await this.generateAttractionInfo(
       attractionName,
@@ -258,6 +288,7 @@ export class AttractionInfoService {
         streamAudio: true,
         testMode,
         existingText,
+        ...(extras || {})
       }
     );
 
@@ -285,7 +316,8 @@ export class AttractionInfoService {
     attractionAddress: string,
     userLocation: UserLocation,
     preferences: UserPreferences,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<{ text: string; audio: string; transcriptSegments?: TranscriptSegment[] }> {
     const response = await this.generateAttractionInfo(
       attractionName,
@@ -296,6 +328,7 @@ export class AttractionInfoService {
         generateAudio: true,
         streamAudio: true,
         testMode,
+        ...(extras || {})
       }
     );
 
@@ -331,7 +364,8 @@ export class AttractionInfoService {
     attractionAddress: string,
     userLocation: UserLocation,
     preferences: UserPreferences,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<{ text: string; audio: string; transcriptSegments?: TranscriptSegment[] }> {
     const result = await this.generateAttractionInfo(
       attractionName,
@@ -342,6 +376,7 @@ export class AttractionInfoService {
         generateAudio: true,
         streamAudio: true,
         testMode,
+        ...(extras || {})
       }
     );
 
@@ -369,10 +404,20 @@ export class AttractionInfoService {
     userLocation: UserLocation,
     preferences: UserPreferences,
     callbacks: StreamHandlerCallbacks,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<void> {
     const streamHandler = this.getStreamHandler();
     
+    const spatialHints = extras?.poiLocation
+      ? deriveSpatialHints({
+          user: userLocation,
+          poi: extras.poiLocation,
+          lang: (preferences.language || 'en') as 'en' | 'es',
+          heading: extras.userHeading,
+        })
+      : undefined;
+
     const requestData: AttractionInfoRequest = {
       attractionName,
       attractionAddress,
@@ -381,6 +426,9 @@ export class AttractionInfoService {
         ...preferences,
         language: preferences.language || 'en',
       },
+      poiLocation: extras?.poiLocation,
+      spatialHints,
+      userHeading: extras?.userHeading,
       generateAudio: true,
       streamAudio: true,
       testMode,
@@ -424,7 +472,8 @@ export class AttractionInfoService {
     attractionAddress: string,
     userLocation: UserLocation,
     preferences: UserPreferences,
-    testMode: boolean = false
+    testMode: boolean = false,
+    extras?: { poiLocation?: UserLocation; userHeading?: number }
   ): Promise<{
     text: string;
     chunks: AudioChunkData[];
@@ -432,6 +481,15 @@ export class AttractionInfoService {
   }> {
     const streamHandler = this.getStreamHandler();
     
+    const spatialHints = extras?.poiLocation
+      ? deriveSpatialHints({
+          user: userLocation,
+          poi: extras.poiLocation,
+          lang: (preferences.language || 'en') as 'en' | 'es',
+          heading: extras.userHeading,
+        })
+      : undefined;
+
     const requestData: AttractionInfoRequest = {
       attractionName,
       attractionAddress,
@@ -440,6 +498,9 @@ export class AttractionInfoService {
         ...preferences,
         language: preferences.language || 'en',
       },
+      poiLocation: extras?.poiLocation,
+      spatialHints,
+      userHeading: extras?.userHeading,
       generateAudio: true,
       streamAudio: false, // Batch mode
       testMode,

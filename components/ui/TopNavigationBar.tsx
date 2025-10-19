@@ -36,9 +36,9 @@ interface TopNavigationBarProps {
   onSearchByQuery?: (query: string) => void;
 
   // Map preferences
-  mapType: 'satellite' | 'hybrid';
+  mapType: 'satellite' | 'hybrid' | 'terrain';
   mapTilt: number;
-  onMapTypeChange: (type: 'satellite' | 'hybrid') => void;
+  onMapTypeChange: (type: 'satellite' | 'hybrid' | 'terrain') => void;
   onMapTiltChange: (tilt: number) => void;
 
   // Profile & Settings
