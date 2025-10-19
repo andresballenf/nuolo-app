@@ -205,6 +205,7 @@ serve(async (req) => {
       testMode = false,
       existingText,
       useChunkedAudio = false, // New flag for chunked audio generation
+      progressive_audio = false, // New flag to enable priority-first progressive streaming
       aiProvider = preferences.aiProvider || 'openai' // AI provider from preferences or top-level field
     } = requestData;
     
@@ -243,6 +244,7 @@ serve(async (req) => {
       testMode,
       streamAudio,
       useChunkedAudio,
+      progressiveAudio: progressive_audio,
       aiProvider,
       voiceStyle: preferences?.voiceStyle || 'casual',
       hasLocation: true,
@@ -363,7 +365,10 @@ serve(async (req) => {
         voice: preferences.voiceStyle || 'casual',
         speed: 1.0,
         language: preferences.language || 'en',
-        testMode: testMode
+        testMode: testMode,
+        progressiveAudio: progressive_audio,
+        concurrency: 3,
+        firstChunkTargetSeconds: 12,
       };
 
       // If streaming is requested, return a streaming response
@@ -385,7 +390,12 @@ serve(async (req) => {
               );
 
               // Get chunk statistics first
-              const chunks = TTSChunkService.splitTextIntoChunks(generatedInfo);
+              const chunks = TTSChunkService.splitTextIntoChunks(generatedInfo, {
+                prioritizeFirstChunk: progressive_audio,
+                firstChunkTargetSeconds: 12,
+                avgCharsPerSecond: 15,
+                maxChunkSize: 3900,
+              });
               const stats = TTSChunkService.getChunkStatistics(chunks);
               
               // Send metadata about chunks
