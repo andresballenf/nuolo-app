@@ -12,6 +12,9 @@ import {
   Keyboard,
   Dimensions,
   FlatList,
+  InteractionManager,
+  AppState,
+  Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +25,9 @@ import { Tooltip } from './Tooltip';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMonetization } from '../../contexts/MonetizationContext';
 import { useApp } from '../../contexts/AppContext';
+import Constants from 'expo-constants';
+import { monetizationService } from '../../services/MonetizationService';
+import { logger } from '../../lib/logger';
 
 interface TopNavigationBarProps {
   // Search functionality
@@ -75,12 +81,31 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
 }) => {
   // Get auth context
   const { user, isAuthenticated } = useAuth();
-  const { setShowPaywall } = useMonetization();
+  const { setShowPaywall, showPaywall } = useMonetization();
   const { gpsStatus } = useApp();
   
   // State for menus
   const [showMapPreferences, setShowMapPreferences] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  
+  // Single-flight guard and diagnostics state for opening paywall
+  const isOpeningPaywallRef = useRef(false);
+  const [isOpeningPaywall, setIsOpeningPaywall] = useState(false);
+  const appForegroundedAtRef = useRef<number>(Date.now());
+  
+  const appStateRef = useRef<'active' | 'background' | 'inactive' | 'unknown'>('active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      appStateRef.current = state as any;
+      if (state === 'active') {
+        appForegroundedAtRef.current = Date.now();
+      }
+    });
+    return () => {
+      isOpeningPaywallRef.current = false;
+      sub.remove();
+    };
+  }, []);
   
   // Animation values for button presses
   const searchButtonScale = useRef(new Animated.Value(1)).current;
@@ -309,6 +334,92 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
     setToolbarWidth(event.nativeEvent.layout.width);
   }, []);
 
+  const handleOpenPaywallPress = useCallback(async () => {
+    // Android: no special handling needed
+    if (Platform.OS !== 'ios') {
+      setShowPaywall(true, { trigger: 'manual' });
+      return;
+    }
+
+    if (isOpeningPaywallRef.current) {
+      logger.debug('Paywall open suppressed by single-flight guard');
+      return;
+    }
+
+    isOpeningPaywallRef.current = true;
+    setIsOpeningPaywall(true);
+
+    const rcStatus = monetizationService.getRevenueCatStatus();
+    const diagnostics = {
+      rcConfigured: rcStatus.configured,
+      rcInitialized: rcStatus.initialized,
+      hasCurrentOffering: rcStatus.hasCurrentOffering,
+      offeringId: rcStatus.currentOfferingIdentifier,
+      packageCount: rcStatus.availablePackageCount,
+      appUserId: user?.id ?? null,
+      os: Platform.OS,
+      osVersion: Platform.Version,
+      deviceModel: (Constants as any)?.deviceName || 'unknown',
+      buildNumber:
+        (Constants?.expoConfig as any)?.ios?.buildNumber ||
+        (Constants?.nativeBuildVersion as any) ||
+        (Constants?.expoConfig as any)?.version ||
+        'unknown',
+      networkReachability: 'unknown',
+      timeSinceAppForegroundedMs: Date.now() - appForegroundedAtRef.current,
+      isOpeningPaywall: isOpeningPaywallRef.current,
+      navState: { isFocused: true },
+      appOwnership: (Constants as any)?.appOwnership,
+      executionEnvironment: (Constants as any)?.executionEnvironment,
+    };
+
+    logger.info('Subscriptions badge tapped - attempting to open paywall', diagnostics);
+
+    try {
+      const ensure = await monetizationService.ensurePurchasesReady(6000);
+      logger.debug('ensurePurchasesReady result', ensure);
+
+      if (!ensure.ready) {
+        logger.warn('Blocking paywall navigation: purchases not ready', {
+          diagnostics,
+          ensure,
+        });
+        Alert.alert(
+          'Please Try Again',
+          'The store is still getting ready. Please try again in a moment.'
+        );
+        return;
+      }
+
+      // Defer until interactions have finished to avoid transition conflicts
+      await new Promise<void>((resolve) => {
+        InteractionManager.runAfterInteractions(() => resolve());
+      });
+
+      // Ensure app is in foreground
+      if (appStateRef.current !== 'active') {
+        logger.warn('Aborting paywall navigation: app not active', {
+          appState: appStateRef.current,
+        });
+        return;
+      }
+
+      // Avoid duplicate modal
+      if (showPaywall) {
+        logger.debug('Paywall already visible - skipping duplicate presentation');
+        return;
+      }
+
+      setShowPaywall(true, { trigger: 'manual' });
+    } catch (error) {
+      logger.error('Error while opening paywall', { error, diagnostics });
+      Alert.alert('Something went wrong', 'Unable to open the store just yet. Please try again.');
+    } finally {
+      isOpeningPaywallRef.current = false;
+      setIsOpeningPaywall(false);
+    }
+  }, [setShowPaywall, showPaywall, user?.id]);
+
   return (
     <View style={styles.container}>
       <View style={styles.buttonContainer} onLayout={handleTopRowLayout}>
@@ -347,7 +458,9 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
 
         {/* Subscription Badge */}
         <SubscriptionBadge
-          onPress={() => setShowPaywall(true, { trigger: 'manual' })}
+          onPress={handleOpenPaywallPress}
+          disabled={isOpeningPaywall}
+          loading={isOpeningPaywall}
           style={styles.subscriptionBadge}
         />
 
