@@ -12,6 +12,7 @@ import { OnboardingProvider } from '../contexts/OnboardingContext';
 import { AudioProvider } from '../contexts/AudioContext';
 import { PrivacyProvider } from '../contexts/PrivacyContext';
 import { MonetizationProvider } from '../contexts/MonetizationContext';
+import { MapSettingsProvider } from '../contexts/MapSettingsContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
@@ -120,26 +121,28 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <PrivacyProvider>
           <AppProvider>
-            <AuthProvider>
-              <OnboardingProvider>
-                <AudioProvider>
-                  <MonetizationProvider>
-                    <Stack screenOptions={{ headerShown: false }}>
-                      <Stack.Screen name="index" />
-                      <Stack.Screen name="auth" />
-                      <Stack.Screen name="auth/login" />
-                      <Stack.Screen name="auth/signup" />
-                      <Stack.Screen name="auth/reset-password" />
-                      <Stack.Screen name="auth/confirm" />
-                      <Stack.Screen name="auth/update-password" />
-                      <Stack.Screen name="map" />
-                    </Stack>
-                    <OnboardingFlow />
-                    <StatusBar style="light" backgroundColor="#84cc16" />
-                  </MonetizationProvider>
-                </AudioProvider>
-              </OnboardingProvider>
-            </AuthProvider>
+            <MapSettingsProvider>
+              <AuthProvider>
+                <OnboardingProvider>
+                  <AudioProvider>
+                    <MonetizationProvider>
+                      <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="index" />
+                        <Stack.Screen name="auth" />
+                        <Stack.Screen name="auth/login" />
+                        <Stack.Screen name="auth/signup" />
+                        <Stack.Screen name="auth/reset-password" />
+                        <Stack.Screen name="auth/confirm" />
+                        <Stack.Screen name="auth/update-password" />
+                        <Stack.Screen name="map" />
+                      </Stack>
+                      <OnboardingFlow />
+                      <StatusBar style="light" backgroundColor="#84cc16" />
+                    </MonetizationProvider>
+                  </AudioProvider>
+                </OnboardingProvider>
+              </AuthProvider>
+            </MapSettingsProvider>
           </AppProvider>
         </PrivacyProvider>
       </QueryClientProvider>

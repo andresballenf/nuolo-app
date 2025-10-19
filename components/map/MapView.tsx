@@ -20,6 +20,7 @@ import {
   MarkerPosition,
   LabelPlacement 
 } from '../../utils/markerOverlap';
+import { useMapSettings } from '../../contexts/MapSettingsContext';
 
 export type SearchAreaHandle = {
   searchThisArea: () => Promise<void>;
@@ -30,7 +31,7 @@ interface MapViewComponentProps {
   onPointsOfInterestUpdate?: (pois: PointOfInterest[], isManualSearch?: boolean) => void;
   onMarkerPress?: (poi: PointOfInterest) => void;
   testLocation?: { latitude: number; longitude: number } | null;
-  mapType?: 'satellite' | 'hybrid';
+  mapType?: 'standard' | 'satellite' | 'hybrid' | 'terrain';
   initialTilt?: number;
   initialZoom?: number;
   triggerGPS?: number;
@@ -62,6 +63,7 @@ export default function MapViewComponent({
   mapRef: externalMapRef,
 }: MapViewComponentProps) {
   const { gpsStatus, setGpsStatus } = useApp();
+  const { settings: mapSettings, isFeatureSupported } = useMapSettings();
   // Use user location for initial region if available, otherwise use default
   const [initialRegion] = useState<Region>(() => {
     if (gpsStatus.active && gpsStatus.latitude && gpsStatus.longitude) {
@@ -184,6 +186,53 @@ export default function MapViewComponent({
       console.log('Initial search button state - ready to search');
     }
   }, [showSearchButton]);
+
+  // Animate camera when tilt setting changes (single animation, no continuous drift)
+  const prevTiltRef = useRef<number>(mapSettings.tilt);
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (mapSettings.tilt === prevTiltRef.current) return;
+
+    const centerLat = gpsStatus.latitude || initialRegion.latitude;
+    const centerLng = gpsStatus.longitude || initialRegion.longitude;
+
+    try {
+      mapRef.current.animateCamera({
+        center: { latitude: centerLat, longitude: centerLng },
+        pitch: mapSettings.tilt,
+        heading: 0,
+        altitude: 800,
+        zoom: 17,
+      }, { duration: 500 });
+      prevTiltRef.current = mapSettings.tilt;
+    } catch (e) {
+      // Ignore animation errors if map not ready
+    }
+  }, [mapSettings.tilt, gpsStatus.latitude, gpsStatus.longitude, initialRegion.latitude, initialRegion.longitude, mapRef]);
+
+  // Animate camera to/from 3D when buildings toggle changes
+  const prevBuildingsRef = useRef<boolean>(mapSettings.showsBuildings);
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (mapSettings.showsBuildings === prevBuildingsRef.current) return;
+
+    const centerLat = gpsStatus.latitude || initialRegion.latitude;
+    const centerLng = gpsStatus.longitude || initialRegion.longitude;
+    const targetPitch = mapSettings.showsBuildings ? Math.max(mapSettings.tilt, 45) : 0;
+
+    try {
+      mapRef.current.animateCamera({
+        center: { latitude: centerLat, longitude: centerLng },
+        pitch: targetPitch,
+        heading: 0,
+        altitude: 800,
+        zoom: 17,
+      }, { duration: 500 });
+      prevBuildingsRef.current = mapSettings.showsBuildings;
+    } catch (e) {
+      // Ignore animation errors if map not ready
+    }
+  }, [mapSettings.showsBuildings, mapSettings.tilt, gpsStatus.latitude, gpsStatus.longitude, initialRegion.latitude, initialRegion.longitude, mapRef]);
 
   // React to test location changes
   useEffect(() => {
@@ -484,16 +533,18 @@ export default function MapViewComponent({
         onRegionChangeComplete={handleRegionChangeComplete}
         showsUserLocation={gpsStatus.active}
         showsMyLocationButton={true}
-        showsBuildings={true}  // Enable 3D buildings
-        showsIndoors={true}    // Enable indoor maps
-        showsIndoorLevelPicker={false}  // Don't show indoor level picker
-        showsTraffic={false}   // Keep map clean
-        showsCompass={true}    // Show compass for orientation
+        showsBuildings={mapSettings.showsBuildings && isFeatureSupported('showsBuildings')}
+        showsIndoors={mapSettings.showsIndoors && isFeatureSupported('showsIndoors')}
+        showsIndoorLevelPicker={mapSettings.showsIndoorLevelPicker && isFeatureSupported('showsIndoorLevelPicker')}
+        showsTraffic={mapSettings.showsTraffic && isFeatureSupported('showsTraffic')}
+        showsCompass={mapSettings.showsCompass && isFeatureSupported('showsCompass')}
+        showsScale={mapSettings.showsScale && isFeatureSupported('showsScale')}
+        showsPointsOfInterest={mapSettings.showsPointsOfInterest && isFeatureSupported('showsPointsOfInterest')}
         mapType={mapType}
-        pitchEnabled={true}
-        rotateEnabled={true}
-        scrollEnabled={true}
-        zoomEnabled={true}
+        pitchEnabled={mapSettings.pitchEnabled}
+        rotateEnabled={mapSettings.rotateEnabled}
+        scrollEnabled={mapSettings.scrollEnabled}
+        zoomEnabled={mapSettings.zoomEnabled}
         toolbarEnabled={false}  // Disable default toolbar for cleaner UI
         // Removed camera prop to prevent continuous updates and drift
       >

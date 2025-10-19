@@ -29,8 +29,8 @@ interface TestLocationControlsProps {
   onTestLongitudeChange: (value: string) => void;
   onApplyTestLocation: () => void;
   onApplyPopularLocation: (location: PopularLocation) => void;
-  mapType?: 'satellite' | 'hybrid';
-  onMapTypeChange?: (type: 'satellite' | 'hybrid') => void;
+  mapType?: 'satellite' | 'hybrid' | 'terrain';
+  onMapTypeChange?: (type: 'satellite' | 'hybrid' | 'terrain') => void;
   mapTilt?: number;
   onMapTiltChange?: (tilt: number) => void;
   popularLocations?: PopularLocation[];
