@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { TTSChunkService, TextChunk } from './TTSChunkService';
 import { AudioChunkManager, AudioChunkData } from './AudioChunkManager';
+import { AudioCacheService } from './AudioCacheService';
+import { TelemetryService } from './TelemetryService';
 
 export interface GenerationProgress {
   totalChunks: number;
@@ -40,6 +42,9 @@ export class AudioGenerationService {
   private readonly RETRY_ATTEMPTS = 3;
   private readonly RETRY_DELAY = 1000; // Start with 1 second
   private readonly FIRST_CHUNK_PRIORITY_RETRIES = 5; // Extra retries for first chunk
+
+  // De-duplicate in-flight requests by content-addressed key
+  private static inFlightRequests: Map<string, Promise<AudioChunkData | null>> = new Map();
 
   private chunkManager: AudioChunkManager | null = null;
   private abortController: AbortController | null = null;
@@ -356,6 +361,45 @@ export class AudioGenerationService {
     
     console.log(`Starting chunk generation with ${retries} max retries (requested: ${maxRetries})`);
 
+    // Build content-addressed cache key and consult local cache first
+    const cacheService = AudioCacheService.getInstance();
+    const cacheKey = await cacheService.buildKey({
+      text: chunk.text,
+      voiceStyle,
+      language,
+      speed: 1.0
+    });
+
+    // Join any in-flight request for the same key
+    const existing = AudioGenerationService.inFlightRequests.get(cacheKey);
+    if (existing) {
+      console.log('Joining in-flight audio generation for key (prefix):', cacheKey.substring(0, 8));
+      return await existing;
+    }
+
+    const cachedUri = await cacheService.getCachedUri(cacheKey);
+    if (cachedUri) {
+      console.log(`Client cache hit for chunk ${chunk.chunkIndex}`);
+      TelemetryService.increment('audio_cache_client_hit');
+      const audioChunk: AudioChunkData = {
+        chunkIndex: chunk.chunkIndex,
+        totalChunks: chunk.totalChunks,
+        text: chunk.text,
+        audio: '',
+        characterCount: chunk.characterCount,
+        estimatedDuration: chunk.estimatedDuration,
+        fileUri: cachedUri
+      };
+      return audioChunk;
+    } else {
+      TelemetryService.increment('audio_cache_client_miss');
+    }
+
+    // Register this generation as in-flight so parallel callers dedupe
+    let resolveInFlight: ((val: AudioChunkData | null) => void) | null = null;
+    const inFlightPromise = new Promise<AudioChunkData | null>((resolve) => { resolveInFlight = resolve; });
+    AudioGenerationService.inFlightRequests.set(cacheKey, inFlightPromise);
+
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         // Exponential backoff for retries
@@ -495,7 +539,32 @@ export class AudioGenerationService {
           estimatedDuration: chunk.estimatedDuration
         };
 
+        // Persist to local cache for offline playback
+        try {
+          const saved = await cacheService.saveByParams(
+            { text: chunk.text, voiceStyle, language, speed: 1.0 },
+            data.audio,
+            undefined,
+            (data as any).etag
+          );
+          audioChunk.fileUri = saved.fileUri;
+        } catch (e) {
+          console.warn('Failed to save audio chunk to cache:', e);
+        }
+
+        // Instrument Supabase cache status if provided
+        const supaCache = (data as any).cache;
+        if (supaCache === 'hit') {
+          TelemetryService.increment('supabase_chunk_cache_hit');
+        } else if (supaCache === 'miss') {
+          TelemetryService.increment('supabase_chunk_cache_miss');
+        }
+
         console.log(`Chunk ${chunk.chunkIndex + 1} generated successfully`);
+        if (resolveInFlight) {
+          resolveInFlight(audioChunk);
+          AudioGenerationService.inFlightRequests.delete(cacheKey);
+        }
         return audioChunk;
 
       } catch (error: any) {
@@ -530,6 +599,10 @@ export class AudioGenerationService {
 
     const errorMessage = lastError?.message || 'Unknown error occurred';
     console.error(`Failed to generate chunk ${chunk.chunkIndex} after ${retries} attempts:`, errorMessage);
+    if (resolveInFlight) {
+      resolveInFlight(null);
+      AudioGenerationService.inFlightRequests.delete(cacheKey);
+    }
     return null;
   }
 

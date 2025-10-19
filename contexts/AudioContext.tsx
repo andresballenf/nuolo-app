@@ -841,6 +841,24 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           onChunk: async (chunk) => {
             console.log(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
             
+            // Persist chunk to cache for offline playback and provide fileUri to the manager
+            try {
+              const { AudioCacheService } = await import('../services/AudioCacheService');
+              const cache = AudioCacheService.getInstance();
+              const saved = await cache.saveByParams(
+                {
+                  text: chunk.text,
+                  voiceStyle: preferences.voiceStyle,
+                  language: preferences.language,
+                  speed: 1.0
+                },
+                chunk.audio
+              );
+              (chunk as any).fileUri = saved.fileUri;
+            } catch (e) {
+              console.warn('Failed to cache streamed chunk:', e);
+            }
+            
             // Add chunk to manager
             await chunkManagerRef.current?.addChunk(chunk);
             

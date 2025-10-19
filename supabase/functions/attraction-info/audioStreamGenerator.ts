@@ -1,4 +1,5 @@
 import { TTSChunkService, TextChunk } from './ttsChunkService.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 export interface AudioChunk {
   chunkIndex: number;
@@ -29,6 +30,12 @@ export class AudioStreamGenerator {
   private static readonly OPENAI_API_URL = 'https://api.openai.com/v1/audio/speech';
   private static readonly DEFAULT_SPEED = 1.0;
   
+  // Supabase Storage config
+  private static readonly SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+  private static readonly SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  private static readonly AUDIO_BUCKET = Deno.env.get('AUDIO_CHUNKS_BUCKET') ?? 'audio-chunks';
+  private static readonly TTL_SECONDS = parseInt(Deno.env.get('AUDIO_CHUNK_TTL') ?? '1209600', 10);
+  
   // Voice mapping from user preferences to OpenAI voices
   private static readonly VOICE_MAP: VoiceMapping = {
     casual: 'alloy',
@@ -37,6 +44,21 @@ export class AudioStreamGenerator {
     calm: 'shimmer'
   };
 
+  private static async sha256Hex(input: string): Promise<string> {
+    const data = new TextEncoder().encode(input);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    const bytes = new Uint8Array(hash);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private static getSupabase() {
+    return createClient(this.SUPABASE_URL, this.SERVICE_ROLE_KEY);
+  }
+
+  private static buildObjectPath(language: string, voice: string, speed: number, key: string): string {
+    return `v1/${language}/${voice}/${speed.toFixed(2)}/${key}.mp3`;
+  }
+
   /**
    * Generate audio for a single text chunk
    */
@@ -44,11 +66,38 @@ export class AudioStreamGenerator {
     chunk: TextChunk,
     voice: string,
     openAiApiKey: string,
-    speed: number = this.DEFAULT_SPEED
+    speed: number = this.DEFAULT_SPEED,
+    language: string = 'en'
   ): Promise<AudioChunk> {
     try {
       console.log(`Generating audio for chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
       console.log(`Chunk size: ${chunk.characterCount} characters`);
+
+      // Content-addressed cache lookup in Supabase Storage
+      const normalizedLang = (language || 'en').toLowerCase();
+      const descriptor = JSON.stringify({ t: chunk.text.trim(), v: voice, l: normalizedLang, s: speed.toFixed(2), ver: 1 });
+      const cacheKey = await this.sha256Hex(descriptor);
+      const objectPath = this.buildObjectPath(normalizedLang, voice, speed, cacheKey);
+      try {
+        const { data: blob } = await this.getSupabase().storage.from(this.AUDIO_BUCKET).download(objectPath);
+        if (blob) {
+          const buf = await blob.arrayBuffer();
+          const base64Audio = this.arrayBufferToBase64(buf);
+          const actualDuration = Math.round(buf.byteLength / 16000);
+          console.log(`[CACHE HIT] ${objectPath}`);
+          return {
+            chunkIndex: chunk.chunkIndex,
+            totalChunks: chunk.totalChunks,
+            text: chunk.text,
+            audio: base64Audio,
+            characterCount: chunk.characterCount,
+            estimatedDuration: chunk.estimatedDuration,
+            actualDuration
+          };
+        }
+      } catch (e) {
+        console.log(`[CACHE MISS] ${objectPath}, proceeding with TTS`, e?.message || e);
+      }
       
       const candidateModels = ['gpt-4o-mini-tts', 'gpt-4o-audio-preview', 'tts-1'];
       let lastError: Error | null = null;
@@ -83,6 +132,22 @@ export class AudioStreamGenerator {
 
         const base64Audio = this.arrayBufferToBase64(audioBuffer);
         const actualDuration = Math.round(audioBuffer.byteLength / 16000);
+
+        // Write-through to Supabase Storage for future reuse
+        try {
+          const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+          const objectPath = this.buildObjectPath((language || 'en').toLowerCase(), voice, speed, await this.sha256Hex(JSON.stringify({ t: chunk.text.trim(), v: voice, l: (language || 'en').toLowerCase(), s: speed.toFixed(2), ver: 1 })));
+          const { error: uploadError } = await this.getSupabase()
+            .storage.from(this.AUDIO_BUCKET)
+            .upload(objectPath, blob, { upsert: true, contentType: 'audio/mpeg', cacheControl: `${this.TTL_SECONDS}` });
+          if (uploadError) {
+            console.warn('Failed to upload audio chunk to storage:', uploadError);
+          } else {
+            console.log(`[CACHE STORE] Uploaded ${objectPath}`);
+          }
+        } catch (e) {
+          console.warn('Error uploading to storage:', e);
+        }
 
         return {
           chunkIndex: chunk.chunkIndex,
@@ -144,7 +209,8 @@ export class AudioStreamGenerator {
           chunk,
           openAiVoice,
           openAiApiKey,
-          speed
+          speed,
+          options.language || 'en'
         );
         
         yield audioChunk;

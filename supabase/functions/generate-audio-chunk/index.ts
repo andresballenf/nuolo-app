@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 
@@ -24,6 +25,8 @@ interface ChunkResponse {
   audio: string; // Base64
   characterCount: number;
   error?: string;
+  cache?: 'hit' | 'miss';
+  etag?: string;
 }
 
 // Map user voice preferences to OpenAI voices
@@ -88,6 +91,18 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(hash);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const AUDIO_BUCKET = Deno.env.get('AUDIO_CHUNKS_BUCKET') ?? 'audio-chunks';
+const TTL_SECONDS = parseInt(Deno.env.get('AUDIO_CHUNK_TTL') ?? '1209600', 10); // default 14 days
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -127,29 +142,86 @@ serve(async (req) => {
     // Map voice style
     const voice = mapVoiceStyle(requestData.voiceStyle);
     const speed = requestData.speed || 1.0;
+    const language = (requestData.language || 'en').toLowerCase();
     
     console.log(`Using voice: ${voice}, speed: ${speed}`);
+
+    // Build content-addressed key and try Supabase Storage cache first
+    const descriptor = JSON.stringify({ t: requestData.text.trim(), v: voice, l: language, s: speed.toFixed(2), ver: 1 });
+    const cacheKey = await sha256Hex(descriptor);
+    const objectPath = `v1/${language}/${voice}/${speed.toFixed(2)}/${cacheKey}.mp3`;
+
+    const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    // Attempt cache lookup
+    try {
+      const { data: blob } = await sb.storage.from(AUDIO_BUCKET).download(objectPath);
+      if (blob) {
+        const buf = await blob.arrayBuffer();
+        const base64Audio = arrayBufferToBase64(buf);
+        console.log(`[CACHE HIT] ${objectPath}`);
+        const response: ChunkResponse & { cache: 'hit'; etag: string } = {
+          chunkIndex: requestData.chunkIndex || 0,
+          totalChunks: requestData.totalChunks || 1,
+          audio: base64Audio,
+          characterCount: requestData.text.length,
+          cache: 'hit',
+          etag: cacheKey
+        };
+        return new Response(JSON.stringify(response), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': `public, max-age=${TTL_SECONDS}`,
+            'ETag': cacheKey,
+            'X-Cache': 'HIT'
+          }
+        });
+      }
+    } catch (e) {
+      console.log(`[CACHE MISS] ${objectPath} - proceeding to generate`, e?.message || e);
+    }
     
-    // Generate audio
+    // Cache miss: Generate audio
     const audioBuffer = await generateAudioChunk(requestData.text, voice, speed);
-    
-    // Convert to base64
     const base64Audio = arrayBufferToBase64(audioBuffer);
-    
-    console.log(`Audio generated successfully. Size: ${audioBuffer.byteLength} bytes`);
+
+    // Write-through to Supabase Storage for future reuse
+    try {
+      const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+      const { error: uploadError } = await sb.storage
+        .from(AUDIO_BUCKET)
+        .upload(objectPath, blob, {
+          upsert: true,
+          contentType: 'audio/mpeg',
+          cacheControl: `${TTL_SECONDS}`
+        });
+      if (uploadError) {
+        console.warn('Failed to upload audio chunk to storage:', uploadError.message || uploadError);
+      } else {
+        console.log(`[CACHE STORE] Uploaded ${objectPath}`);
+      }
+    } catch (e) {
+      console.warn('Error uploading to storage:', e);
+    }
     
     // Return response
-    const response: ChunkResponse = {
+    const response: ChunkResponse & { cache: 'miss'; etag: string } = {
       chunkIndex: requestData.chunkIndex || 0,
       totalChunks: requestData.totalChunks || 1,
       audio: base64Audio,
-      characterCount: requestData.text.length
+      characterCount: requestData.text.length,
+      cache: 'miss',
+      etag: cacheKey
     };
     
     return new Response(JSON.stringify(response), {
       headers: {
         ...corsHeaders,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${TTL_SECONDS}`,
+        'ETag': cacheKey,
+        'X-Cache': 'MISS'
       }
     });
     
