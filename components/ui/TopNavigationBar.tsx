@@ -611,7 +611,7 @@ export const TopNavigationBar: React.FC<TopNavigationBarProps> = ({
                 onPress={handleCancelSearch}
                 accessibilityLabel="Close search"
               >
-                <MaterialIcons name="arrow-back-ios" size={16} color="#6B7280" />
+                <MaterialIcons name="chevron-right" size={16} color="#6B7280" />
               </TouchableOpacity>
             </Animated.View>
           )}
