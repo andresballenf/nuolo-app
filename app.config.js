@@ -101,6 +101,9 @@ module.exports = {
         {
           android: {
             kotlinVersion: "2.1.20"
+          },
+          ios: {
+            useFrameworks: "static"
           }
         }
       ]
