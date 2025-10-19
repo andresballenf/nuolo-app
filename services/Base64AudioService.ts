@@ -1,8 +1,8 @@
-import { Audio } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
+import { Audio, type AudioSoundInstance } from '../lib/ExpoAudioCompat';
 
 export interface AudioLoadResult {
-  sound: Audio.Sound;
+  sound: AudioSoundInstance;
   duration: number;
 }
 

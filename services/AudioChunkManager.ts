@@ -1,5 +1,11 @@
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
+import {
+  Audio,
+  InterruptionModeAndroid,
+  InterruptionModeIOS,
+  type AudioSoundInstance,
+  type PlaybackStatus,
+} from '../lib/ExpoAudioCompat';
 import { PerfTracer } from '../utils/perfTrace';
 import { TextChunk } from './TTSChunkService';
 
@@ -27,7 +33,7 @@ export interface ChunkPlaybackState {
 
 interface LoadedChunk {
   chunk: AudioChunkData;
-  sound: Audio.Sound;
+  sound: AudioSoundInstance;
   fileUri: string;
   duration: number;
 }
@@ -35,7 +41,7 @@ interface LoadedChunk {
 export class AudioChunkManager {
   private chunks: Map<number, AudioChunkData> = new Map();
   private loadedSounds: Map<number, LoadedChunk> = new Map();
-  private currentSound: Audio.Sound | null = null;
+  private currentSound: AudioSoundInstance | null = null;
   private currentChunkIndex: number = -1;
   private isPlaying: boolean = false;
   private onStateChange?: (state: ChunkPlaybackState) => void;
@@ -350,7 +356,7 @@ export class AudioChunkManager {
       this.preloadAheadFrom(chunkIndex);
 
       // Set up playback status update
-      loadedChunk.sound.setOnPlaybackStatusUpdate((status) => {
+      loadedChunk.sound.setOnPlaybackStatusUpdate((status: PlaybackStatus) => {
         if (status.isLoaded) {
           if (status.didJustFinish) {
             this.handleChunkComplete(chunkIndex);

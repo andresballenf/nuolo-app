@@ -117,17 +117,33 @@ class TelemetryServiceImpl {
   }
 
   // Simple in-memory counter methods from main branch
+  increment(name: string, by: number = 1) {
+    TelemetryServiceImpl.increment(name, by);
+  }
+
   static increment(name: string, by: number = 1) {
     if (!name) return;
     TelemetryServiceImpl.counters[name] = (TelemetryServiceImpl.counters[name] || 0) + by;
+  }
+
+  get(name: string): number {
+    return TelemetryServiceImpl.get(name);
   }
 
   static get(name: string): number {
     return TelemetryServiceImpl.counters[name] || 0;
   }
 
+  getAll(): CounterMap {
+    return TelemetryServiceImpl.getAll();
+  }
+
   static getAll(): CounterMap {
     return { ...TelemetryServiceImpl.counters };
+  }
+
+  reset() {
+    TelemetryServiceImpl.reset();
   }
 
   static reset() {

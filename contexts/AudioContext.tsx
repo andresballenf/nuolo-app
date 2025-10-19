@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-audio';
 import { Alert, AppState, AppStateStatus } from 'react-native';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AudioSoundInstance } from '../lib/ExpoAudioCompat';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
 import { AudioService } from '../services/AudioService';
 import { AudioChunkManager, ChunkPlaybackState } from '../services/AudioChunkManager';
@@ -210,7 +210,7 @@ const initialState: AudioState = {
 
 export function AudioProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AudioState>(initialState);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioSoundInstance | null>(null);
   const positionUpdateRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkManagerRef = useRef<AudioChunkManager | null>(null);
   const streamHandlerRef = useRef<AudioStreamHandler | null>(null);
