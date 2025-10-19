@@ -182,7 +182,7 @@ Reglas de privacidad y orientación espacial (ES)
 - Usa orientación relativa respecto a la posición del usuario: norte/sur/este/oeste, izquierda/derecha, delante/detrás.
 - Puedes mencionar hitos/landmarks conocidos; evita nombres de calles salvo que el propio hito sea la referencia.
 - Si la ubicación u orientación del usuario no está disponible o es imprecisa, evita referencias direccionales específicas.
-- Prefiere distancias aproximadas (“a pocos metros”, “a unos 200 m”) y evita precisión excesiva.${languageInstruction ? '\n\n' + languageInstruction : ''}`,}
+    - Prefiere distancias aproximadas (“a pocos metros”, “a unos 200 m”) y evita precisión excesiva.${languageInstruction ? '\n\n' + languageInstruction : ''}`,
           },
           { role: 'user', content: prompt },
         ],

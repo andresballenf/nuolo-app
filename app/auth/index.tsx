@@ -1,9 +1,9 @@
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Image, Dimensions, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
-import { Icon } from '../components/ui/Icon';
-import { useAuth } from '../contexts/AuthContext';
+import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
+import { Icon } from '../../components/ui/Icon';
+import { useAuth } from '../../contexts/AuthContext';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,7 +45,7 @@ export default function AuthScreen() {
           {/* Logo */}
           <View style={styles.logoContainer}>
             <Image 
-              source={require('../assets/images/nuolo-logo.png')}
+              source={require('../../assets/images/nuolo-logo.png')}
               style={[
                 styles.logo,
                 { width: styles.logo.width * 0.7, height: styles.logo.height * 0.7 }
@@ -57,7 +57,7 @@ export default function AuthScreen() {
           {/* Hero Image */}
           <View style={styles.heroImageContainer}>
             <Image 
-              source={require('../assets/images/florence-hero.jpg')}
+              source={require('../../assets/images/florence-hero.jpg')}
               style={styles.heroImage}
               resizeMode="cover"
             />

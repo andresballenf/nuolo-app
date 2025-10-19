@@ -26,7 +26,7 @@ export default function IndexScreen() {
     return <Redirect href="/map" />;
   }
 
-  // Otherwise go to auth
+  // Otherwise go to auth landing screen
   return <Redirect href="/auth" />;
 }
 

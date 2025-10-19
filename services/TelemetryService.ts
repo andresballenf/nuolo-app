@@ -25,11 +25,15 @@ class TelemetryServiceImpl {
 
   recordTrace(trace: PerfTraceRecord) {
     if (!getFeatureFlag('telemetry_enabled')) return;
+    const durationMs =
+      trace.metrics?.durationMs ??
+      (trace.endTime != null ? trace.endTime - trace.startTime : null);
+
     const row: AudioMetricRow = {
       name: trace.name,
       ttfp_ms: trace.metrics?.ttfpMs ?? null,
       ttc_ms: trace.metrics?.ttcMs ?? null,
-      duration_ms: trace.metrics?.durationMs ?? (trace.endTime && (trace.endTime - trace.startTime)) || 0,
+      duration_ms: durationMs ?? 0,
       success: trace.status === 'success',
       error_message: trace.errorMessage || null,
       device: null,
