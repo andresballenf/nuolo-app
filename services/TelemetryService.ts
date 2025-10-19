@@ -15,10 +15,13 @@ interface AudioMetricRow {
   app_version?: string | null;
 }
 
+type CounterMap = Record<string, number>;
+
 class TelemetryServiceImpl {
   private buffer: AudioMetricRow[] = [];
   private maxBuffer = 20;
   private flushing = false;
+  private static counters: CounterMap = {};
 
   recordTrace(trace: PerfTraceRecord) {
     if (!getFeatureFlag('telemetry_enabled')) return;
@@ -107,6 +110,24 @@ class TelemetryServiceImpl {
       p95: percentile(0.95),
       samples: durations.length,
     };
+  }
+
+  // Simple in-memory counter methods from main branch
+  static increment(name: string, by: number = 1) {
+    if (!name) return;
+    TelemetryServiceImpl.counters[name] = (TelemetryServiceImpl.counters[name] || 0) + by;
+  }
+
+  static get(name: string): number {
+    return TelemetryServiceImpl.counters[name] || 0;
+  }
+
+  static getAll(): CounterMap {
+    return { ...TelemetryServiceImpl.counters };
+  }
+
+  static reset() {
+    TelemetryServiceImpl.counters = {};
   }
 }
 

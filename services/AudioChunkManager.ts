@@ -11,6 +11,7 @@ export interface AudioChunkData {
   characterCount: number;
   estimatedDuration: number;
   actualDuration?: number;
+  fileUri?: string; // Optional: local file URI for cached audio
 }
 
 export interface ChunkPlaybackState {
@@ -232,15 +233,22 @@ export class AudioChunkManager {
     try {
       console.log(`Pre-loading chunk ${chunkIndex + 1}/${chunk.totalChunks}`);
       
-      // Save base64 to file
-      const filename = `audio_chunk_${Date.now()}_${chunkIndex}.mp3`;
-      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      
-      // Clean base64 and write to file
-      const cleanBase64 = chunk.audio.replace(/^data:audio\/[^;]+;base64,/, '');
-      await FileSystem.writeAsStringAsync(fileUri, cleanBase64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      // Determine audio file source: prefer provided cached fileUri if available
+      let fileUri: string;
+      if (chunk.fileUri) {
+        fileUri = chunk.fileUri;
+        console.log(`Using cached file for chunk ${chunkIndex}: ${fileUri}`);
+      } else {
+        // Save base64 to a temporary cache file
+        const filename = `audio_chunk_${Date.now()}_${chunkIndex}.mp3`;
+        fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        
+        // Clean base64 and write to file
+        const cleanBase64 = chunk.audio.replace(/^data:audio\/[^;]+;base64,/, '');
+        await FileSystem.writeAsStringAsync(fileUri, cleanBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
 
       // Create sound object
       const { sound } = await Audio.Sound.createAsync(
@@ -571,8 +579,11 @@ export class AudioChunkManager {
     for (const loadedChunk of this.loadedSounds.values()) {
       try {
         await loadedChunk.sound.unloadAsync();
-        // Delete cached file
-        await FileSystem.deleteAsync(loadedChunk.fileUri, { idempotent: true });
+        // Delete only temporary cache files; keep persistent cached files in documentDirectory
+        const cacheDir = FileSystem.cacheDirectory || '';
+        if (loadedChunk.fileUri.startsWith(cacheDir)) {
+          await FileSystem.deleteAsync(loadedChunk.fileUri, { idempotent: true });
+        }
       } catch (error) {
         console.error('Error cleaning up chunk:', error);
       }
