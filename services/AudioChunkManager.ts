@@ -1,4 +1,4 @@
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 import { PerfTracer } from '../utils/perfTrace';
 import { TextChunk } from './TTSChunkService';
