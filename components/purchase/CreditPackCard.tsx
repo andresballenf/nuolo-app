@@ -1,18 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, AccessibilityInfo } from 'react-native';
 import { Button } from '../ui/Button';
-import { Icon } from '../ui/Icon';
 import { TelemetryService } from '../../services/TelemetryService';
-import { 
-  CreditsBuckets,
+import {
+  type CreditBuckets,
   createBuckets,
-  getAvailable,
-  getTotal,
-  getPercentAvailable,
-  consumeCredits,
-  refundCredits,
-  formatSummary,
-} from '../../utils/credits';
+  getCreditSummary,
+  consumeCredits as consumeCreditsService,
+  refundCredits as refundCreditsService,
+} from '../../services/CreditService';
+import { useMonetization } from '../../contexts/MonetizationContext';
 
 export interface CreditPackCardProps {
   trialAvailable: number;
@@ -24,11 +21,6 @@ export interface CreditPackCardProps {
   lowThreshold?: number; // defaults to 20
 }
 
-interface TooltipState {
-  trial: boolean;
-  purchased: boolean;
-}
-
 export const CreditPackCard: React.FC<CreditPackCardProps> = ({
   trialAvailable,
   trialUsed,
@@ -38,158 +30,103 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
   onViewHistory,
   lowThreshold = 20,
 }) => {
-  const [buckets, setBuckets] = useState<CreditsBuckets>(() =>
+  const [buckets, setBuckets] = useState<CreditBuckets>(() =>
     createBuckets(trialAvailable, trialUsed, purchasedAvailable, purchasedUsed)
   );
+  const { setShowPaywall } = useMonetization();
 
   useEffect(() => {
     setBuckets(createBuckets(trialAvailable, trialUsed, purchasedAvailable, purchasedUsed));
   }, [trialAvailable, trialUsed, purchasedAvailable, purchasedUsed]);
 
-  const [tooltip, setTooltip] = useState<TooltipState>({ trial: false, purchased: false });
-
-  const available = useMemo(() => getAvailable(buckets), [buckets]);
-  const total = useMemo(() => getTotal(buckets), [buckets]);
-  const percent = useMemo(() => getPercentAvailable(buckets), [buckets]);
-  const summaryText = useMemo(() => formatSummary(buckets), [buckets]);
+  const summary = useMemo(() => getCreditSummary(buckets), [buckets]);
 
   useEffect(() => {
     // Analytics: card viewed
     TelemetryService.increment('credits_viewed');
 
-    if (available < lowThreshold) {
+    if (summary.available < lowThreshold) {
       TelemetryService.increment('credits_low_warning_shown');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleBuy = () => {
-    TelemetryService.increment('credits_pack_purchased');
-    onBuyMoreCredits?.();
+    TelemetryService.increment('credits_pack_cta');
+    if (onBuyMoreCredits) {
+      onBuyMoreCredits();
+    } else {
+      setShowPaywall(true, { trigger: 'manual' });
+    }
   };
 
   const handleConsume = (amount: number) => {
-    const { buckets: next, fromTrial, fromPurchased } = consumeCredits(buckets, amount);
-    if (fromTrial + fromPurchased > 0) {
-      TelemetryService.increment('job_consumed_credits', fromTrial + fromPurchased);
+    try {
+      const next = consumeCreditsService(amount, buckets);
+      TelemetryService.increment('job_consumed_credits', amount);
+      setBuckets(next);
+    } catch (e) {
+      // insufficient credits - ignore
     }
-    setBuckets(next);
   };
 
   const handleRefund = (amount: number) => {
-    const { buckets: next } = refundCredits(buckets, amount);
+    const next = refundCreditsService(amount, buckets);
     TelemetryService.increment('refund_applied', amount);
     setBuckets(next);
   };
 
-  const ctaText = available < lowThreshold
-    ? 'Te quedan pocos créditos. Comprar más'
-    : 'Comprar más créditos';
-
-  const trialTooltipText = `${buckets.trial.available + buckets.trial.used} créditos de prueba. Se consumen primero`;
-  const purchasedTooltipText = `${buckets.purchased.available + buckets.purchased.used} créditos comprados`;
-
-  const showTrialLine = buckets.trial.available > 0;
-  const showTrialConsumedLine = buckets.trial.available === 0 && buckets.trial.used > 0;
+  const ctaText = summary.available < lowThreshold
+    ? 'Low balance: Buy more credits'
+    : 'Buy More Credits';
 
   // Accessibility announce low credits
   useEffect(() => {
-    if (available === 0) {
-      AccessibilityInfo.announceForAccessibility?.('No tienes créditos disponibles. Puedes comprar más.');
-    } else if (available < lowThreshold) {
-      AccessibilityInfo.announceForAccessibility?.('Te quedan pocos créditos. Puedes comprar más.');
+    if (summary.available === 0) {
+      AccessibilityInfo.announceForAccessibility?.('You have 0 credits available. You can buy more credits.');
+    } else if (summary.available < lowThreshold) {
+      AccessibilityInfo.announceForAccessibility?.('Your balance is low. Consider buying more credits.');
     }
-  }, [available, lowThreshold]);
+  }, [summary.available, lowThreshold]);
 
-  const used = total - available;
-  const availableRatio = total > 0 ? available / total : 0;
-  const usedRatio = total > 0 ? used / total : 0;
+  const availableRatio = summary.total > 0 ? summary.available / summary.total : 0;
+  const used = summary.used;
+  const usedRatio = summary.total > 0 ? used / summary.total : 0;
 
   return (
-    <View style={styles.card} accessible accessibilityLabel={`Credit Pack. ${available} créditos disponibles de ${total}.`}>
+    <View style={styles.card} accessible accessibilityLabel={`Credit Pack. ${summary.available} credits available out of ${summary.total}.`}>
       {/* Header */}
       <View style={styles.headerRow}>
         <Text style={styles.title}>Credit Pack</Text>
-        <View style={[styles.badge, available > 0 ? styles.badgeGreen : styles.badgeGray]}>
-          <Text style={styles.badgeText}>{available} créditos disponibles</Text>
+        <View style={[styles.badge, summary.available > 0 ? styles.badgeGreen : styles.badgeGray]}>
+          <Text style={styles.badgeText}>💎 {summary.available} credits available</Text>
         </View>
       </View>
 
-      {/* Summary rows */}
-      <View style={styles.summary}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Disponibles</Text>
-          <Text style={styles.value}>{available}</Text>
+      {/* Current Balance Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Current Balance</Text>
+        {/* Progress */}
+        <View style={styles.barContainer} accessibilityRole="progressbar" accessible accessibilityLabel={`${summary.percentAvailable}% available`}>
+          <View style={[styles.barSegmentUsed, { flex: usedRatio }]} />
+          <View style={[styles.barSegmentAvailable, { flex: availableRatio }]} />
         </View>
-        <View style={styles.subrow}>
-          <View style={styles.subItem}>
-            <View style={styles.subItemLeft}>
-              <Text style={styles.subLabel}>Trial</Text>
-              <Pressable
-                onPress={() => setTooltip(s => ({ ...s, trial: !s.trial }))}
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel="Información sobre créditos de prueba"
-                style={styles.infoButton}
-              >
-                <Icon name="information-circle-outline" size={16} color="#6B7280" />
-              </Pressable>
-            </View>
-            <Text style={styles.subValue}>{buckets.trial.available}</Text>
-          </View>
-          <View style={styles.subItem}>
-            <View style={styles.subItemLeft}>
-              <Text style={styles.subLabel}>Comprados</Text>
-              <Pressable
-                onPress={() => setTooltip(s => ({ ...s, purchased: !s.purchased }))}
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel="Información sobre créditos comprados"
-                style={styles.infoButton}
-              >
-                <Icon name="information-circle-outline" size={16} color="#6B7280" />
-              </Pressable>
-            </View>
-            <Text style={styles.subValue}>{buckets.purchased.available}</Text>
-          </View>
-        </View>
-
-        {tooltip.trial && (
-          <View style={styles.tooltip} accessibilityRole="text" accessible>
-            <Text style={styles.tooltipText}>{trialTooltipText}</Text>
-          </View>
-        )}
-        {tooltip.purchased && (
-          <View style={styles.tooltip} accessibilityRole="text" accessible>
-            <Text style={styles.tooltipText}>{purchasedTooltipText}</Text>
-          </View>
-        )}
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Usados</Text>
-          <Text style={styles.value}>{used}</Text>
-        </View>
-        <View style={[styles.row, styles.rowLast]}>
-          <Text style={styles.label}>Total acumulado</Text>
-          <Text style={styles.value}>{total}</Text>
-        </View>
+        <Text style={styles.barLabel}>{summary.percentAvailable}% available</Text>
+        <Text style={styles.contextText}>Includes 2 free trial credits (consumed first)</Text>
       </View>
 
-      {/* Stacked bar */}
-      <View style={styles.barContainer} accessibilityRole="progressbar" accessible accessibilityLabel={`Barra de créditos: ${summaryText}`}>
-        <View style={[styles.barSegmentUsed, { flex: usedRatio }]} />
-        <View style={[styles.barSegmentAvailable, { flex: availableRatio }]} />
-      </View>
-      <Text style={styles.barLabel}>{summaryText}</Text>
-
-      {/* Context lines */}
-      <View style={styles.contextLines}>
-        {showTrialLine && (
-          <Text style={styles.contextText}>Incluye {buckets.trial.available} créditos de prueba</Text>
-        )}
-        {showTrialConsumedLine && (
-          <Text style={styles.contextText}>Ya usaste tus créditos de prueba. Ahora usas los comprados</Text>
-        )}
-        <Text style={styles.contextText}>Los créditos no expiran y puedes usarlos en cualquier momento</Text>
+      {/* Details Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Details</Text>
+        <View style={styles.detailsRow}>
+          <Text style={styles.detailsText}>🧡 {buckets.trial.available} trial</Text>
+          <Text style={styles.detailsText}>💎 {summary.purchasedAvailable} purchased</Text>
+        </View>
+        <View style={styles.detailsRow}>
+          <Text style={styles.detailsText}>Used: {summary.used}</Text>
+          <Text style={styles.detailsText}>Total: {summary.total}</Text>
+        </View>
+        <Text style={[styles.contextText, { marginTop: 6 }]}>Your credits are always available and never expire.</Text>
       </View>
 
       {/* CTA */}
@@ -202,30 +139,16 @@ export const CreditPackCard: React.FC<CreditPackCardProps> = ({
         />
       </View>
 
-      {/* History */}
-      <View style={styles.history}>
-        <Text style={styles.historyTitle}>Últimas actividades</Text>
-        <View style={styles.historyRow}>
-          <Text style={styles.historyText}>Restaurar foto</Text>
-          <Text style={styles.historyDelta}>−3</Text>
-          <Text style={styles.historyBalance}>Saldo {available}</Text>
+      {/* Optional: History link placeholder (kept for compatibility) */}
+      {onViewHistory && (
+        <View style={styles.history}>
+          <Pressable onPress={onViewHistory} accessible accessibilityRole="link" accessibilityLabel="View history">
+            <Text style={styles.historyLink}>View full history</Text>
+          </Pressable>
         </View>
-        <View style={styles.historyRow}>
-          <Text style={styles.historyText}>Crear video 8s</Text>
-          <Text style={styles.historyDelta}>−5</Text>
-          <Text style={styles.historyBalance}>Saldo {available + 5}</Text>
-        </View>
-        <Pressable
-          onPress={onViewHistory}
-          accessible
-          accessibilityRole="link"
-          accessibilityLabel="Ver todo el historial"
-        >
-          <Text style={styles.historyLink}>Ver todo el historial</Text>
-        </Pressable>
-      </View>
+      )}
 
-      {/* Example controls for demo/testing only - not visible without testID */}
+      {/* Hidden controls for testing */}
       <View style={styles.hiddenControls} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Pressable testID="consume-1" onPress={() => handleConsume(1)}>
           <Text>consume-1</Text>
@@ -276,80 +199,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  summary: {
-    marginTop: 4,
+  section: {
+    marginTop: 8,
     marginBottom: 12,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
   },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  rowLast: {
-    borderBottomWidth: 0,
-  },
-  label: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  value: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  subrow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-    gap: 12,
-  },
-  subItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  subItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  subLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginRight: 6,
-  },
-  subValue: {
+  sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: '#111827',
-  },
-  infoButton: {
-    padding: 2,
-  },
-  tooltip: {
-    backgroundColor: '#111827',
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    marginTop: 6,
-  },
-  tooltipText: {
-    color: '#FFFFFF',
-    fontSize: 12,
+    marginBottom: 8,
   },
   barContainer: {
     flexDirection: 'row',
@@ -369,55 +227,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
   },
-  contextLines: {
-    marginTop: 8,
-    gap: 4,
-  },
   contextText: {
     fontSize: 12,
     color: '#374151',
+    marginTop: 4,
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  detailsText: {
+    fontSize: 13,
+    color: '#1F2937',
   },
   ctaRow: {
     marginTop: 12,
   },
   history: {
-    marginTop: 16,
+    marginTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     paddingTop: 12,
   },
-  historyTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  historyText: {
-    fontSize: 13,
-    color: '#1F2937',
-    flex: 1,
-  },
-  historyDelta: {
-    fontSize: 13,
-    color: '#EF4444',
-    fontWeight: '700',
-    width: 36,
-    textAlign: 'right',
-  },
-  historyBalance: {
-    fontSize: 12,
-    color: '#6B7280',
-    width: 96,
-    textAlign: 'right',
-  },
   historyLink: {
-    marginTop: 8,
     fontSize: 13,
     color: '#2563EB',
     fontWeight: '600',
