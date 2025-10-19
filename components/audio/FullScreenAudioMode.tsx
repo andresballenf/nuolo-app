@@ -19,6 +19,7 @@ import type { AudioTrack } from '../../contexts/AudioContext';
 import { useApp } from '../../contexts/AppContext';
 import * as Haptics from 'expo-haptics';
 import type { TranscriptSegment } from '../../services/AttractionInfoService';
+import { PerfTracer } from '../../utils/perfTrace';
 
 interface FullScreenAudioModeProps {
   isVisible: boolean;
@@ -364,6 +365,7 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
       presentationStyle="fullScreen"
       statusBarTranslucent
       onShow={() => {
+        PerfTracer.mark('full_player_open');
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }}
     >

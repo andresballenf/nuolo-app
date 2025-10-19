@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { TTSChunkService, TextChunk } from './TTSChunkService';
 import { AudioChunkManager, AudioChunkData } from './AudioChunkManager';
+import { PerfTracer } from '../utils/perfTrace';
 
 export interface GenerationProgress {
   totalChunks: number;
@@ -96,6 +97,7 @@ export class AudioGenerationService {
         }
         
         // Generate single chunk with priority retries
+        PerfTracer.mark('chunks_split', { totalChunks: 1 });
         const audioChunk = await this.generateSingleChunk(
           singleChunk,
           voiceStyle,
@@ -105,6 +107,7 @@ export class AudioGenerationService {
         
         if (audioChunk) {
           generatedChunks.push(audioChunk);
+          PerfTracer.mark('first_chunk_generated', { index: 0 });
           this.updateProgress({ 
             chunksGenerated: 1,
             chunksLoading: 0,
@@ -126,6 +129,7 @@ export class AudioGenerationService {
           if (callbacks?.onComplete) {
             callbacks.onComplete(1, 1);
           }
+          PerfTracer.mark('chunks_generation_complete');
         } else {
           this.updateProgress({ 
             chunksFailed: 1,
@@ -159,6 +163,7 @@ export class AudioGenerationService {
 
       const stats = TTSChunkService.getChunkStatistics(optimizedChunks);
       console.log('Chunk statistics:', stats);
+      PerfTracer.mark('chunks_split', { totalChunks: stats.totalChunks, totalCharacters: stats.totalCharacters });
 
       // Initialize progress
       this.generationProgress = {
@@ -187,6 +192,7 @@ export class AudioGenerationService {
 
         if (firstChunk) {
           generatedChunks.push(firstChunk);
+          PerfTracer.mark('first_chunk_generated', { index: firstChunk.chunkIndex });
           this.updateProgress({ 
             chunksGenerated: 1, 
             chunksLoading: this.generationProgress.chunksLoading - 1 
@@ -234,6 +240,7 @@ export class AudioGenerationService {
 
       // Mark as complete
       this.updateProgress({ isComplete: true });
+      PerfTracer.mark('chunks_generation_complete');
       
       if (callbacks?.onComplete) {
         callbacks.onComplete(

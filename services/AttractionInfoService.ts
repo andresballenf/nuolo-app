@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { AudioStreamHandler, StreamHandlerCallbacks } from './AudioStreamHandler';
 import { AudioChunkData } from './AudioChunkManager';
+import { PerfTracer } from '../utils/perfTrace';
 
 // Timed transcript segment interface used for karaoke-style highlighting
 export interface TranscriptWordTiming {
@@ -123,11 +124,14 @@ export class AttractionInfoService {
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
+        PerfTracer.mark('edge_call_start', { fn: 'attraction-info' });
+        const callStart = Date.now();
         const { data, error } = await supabase.functions.invoke('attraction-info', {
           body: JSON.stringify(requestData),
         });
 
         clearTimeout(timeoutId);
+        PerfTracer.mark('edge_call_end', { fn: 'attraction-info', durationMs: Date.now() - callStart });
 
         if (error) {
           console.error('Supabase edge function error:', error);
@@ -448,10 +452,13 @@ export class AttractionInfoService {
       const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
       const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
       
+      PerfTracer.mark('edge_fetch_chunks_start');
+      const fetchStart = Date.now();
       const result = await streamHandler.fetchAudioChunks(
         `${supabaseUrl}/functions/v1/attraction-info`,
         { ...requestData, supabaseAnonKey }
       );
+      PerfTracer.mark('edge_fetch_chunks_end', { durationMs: Date.now() - fetchStart });
       
       return result;
     } catch (error) {

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { startTimer, endTimer } from './secureLogger.ts';
 
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 
@@ -95,10 +96,12 @@ serve(async (req) => {
   }
 
   try {
+    const totalTimer = startTimer('ga_chunk_total');
     const requestData: ChunkRequest = await req.json();
     
     // Validate input
     if (!requestData.text || requestData.text.length === 0) {
+      endTimer(totalTimer, 'ga_chunk_total', false);
       return new Response(JSON.stringify({
         error: 'Text is required',
         chunkIndex: requestData.chunkIndex || 0,
@@ -111,6 +114,7 @@ serve(async (req) => {
 
     // Check text length (max 4096 for OpenAI TTS)
     if (requestData.text.length > 4096) {
+      endTimer(totalTimer, 'ga_chunk_total', false);
       return new Response(JSON.stringify({
         error: 'Text exceeds maximum length of 4096 characters',
         chunkIndex: requestData.chunkIndex || 0,
@@ -131,10 +135,14 @@ serve(async (req) => {
     console.log(`Using voice: ${voice}, speed: ${speed}`);
     
     // Generate audio
+    const ttsTimer = startTimer('ga_tts_generation');
     const audioBuffer = await generateAudioChunk(requestData.text, voice, speed);
+    endTimer(ttsTimer, 'ga_tts_generation', true);
     
     // Convert to base64
+    const convTimer = startTimer('ga_base64_conversion');
     const base64Audio = arrayBufferToBase64(audioBuffer);
+    endTimer(convTimer, 'ga_base64_conversion', true);
     
     console.log(`Audio generated successfully. Size: ${audioBuffer.byteLength} bytes`);
     
@@ -146,18 +154,20 @@ serve(async (req) => {
       characterCount: requestData.text.length
     };
     
-    return new Response(JSON.stringify(response), {
+    const res = new Response(JSON.stringify(response), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json'
       }
     });
+    endTimer(totalTimer, 'ga_chunk_total', true);
+    return res;
     
   } catch (error) {
     console.error('Error generating audio chunk:', error);
     
     return new Response(JSON.stringify({
-      error: error.message || 'Failed to generate audio chunk',
+      error: (error as any)?.message || 'Failed to generate audio chunk',
       chunkIndex: 0,
       totalChunks: 1
     }), {

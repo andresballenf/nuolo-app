@@ -373,6 +373,7 @@ serve(async (req) => {
         // Create a readable stream for the response
         const stream = new ReadableStream({
           async start(controller) {
+            const tId = startTimer('stream_audio_generation');
             try {
               // First, send the text content
               const textResponse = {
@@ -426,6 +427,7 @@ serve(async (req) => {
               );
               
               controller.close();
+              endTimer(tId, 'stream_audio_generation', true);
             } catch (error) {
               const secureError = createSecureError(
                 error as Error, 
@@ -443,6 +445,7 @@ serve(async (req) => {
                 new TextEncoder().encode(JSON.stringify(errorResponse) + '\n')
               );
               controller.close();
+              endTimer(tId, 'stream_audio_generation', false);
             }
           }
         });
@@ -462,12 +465,14 @@ serve(async (req) => {
         console.log("Generating all audio chunks...");
         
         try {
+          const batchTimer = startTimer('batch_chunk_generation');
           const audioChunks = await timeoutOpenAIAudioGeneration(async () => {
             return AudioStreamGenerator.generateAllAudioChunks(
               audioOptions,
               openAiApiKey
             );
           });
+          endTimer(batchTimer, 'batch_chunk_generation', true);
           
           const metadata = AudioStreamGenerator.getAudioMetadata(audioChunks);
           
@@ -512,6 +517,7 @@ serve(async (req) => {
     if (generateAudio && !useChunkedAudio && !audioResult) {
       console.log("Generating audio separately from text...");
       try {
+        const audioTimer = startTimer('audio_generation');
         const audioGenResult = await timeoutOpenAIAudioGeneration(async () => {
           return provider.generateAudio(generatedInfo, {
             text: generatedInfo,
@@ -521,6 +527,7 @@ serve(async (req) => {
             testMode,
           });
         });
+        endTimer(audioTimer, 'audio_generation', true);
 
         audioResult = {
           audio: audioGenResult.audioBase64,
@@ -548,6 +555,11 @@ serve(async (req) => {
           }
         });
       } catch (audioError) {
+        // Close audio_generation timer as failed
+        // Note: if the failure happened before the timer was created, this is a no-op
+        try {
+          endTimer('audio_generation', 'audio_generation', false);
+        } catch (_) {}
         const secureError = createSecureError(
           audioError as Error,
           'audio_generation',
