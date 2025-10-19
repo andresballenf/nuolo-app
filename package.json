@@ -20,7 +20,6 @@
     "expo-asset": "~11.1.7",
     "expo-audio": "~0.4.9",
     "expo-auth-session": "~6.2.1",
-    "expo-av": "~15.1.7",
     "expo-blur": "~14.1.5",
     "expo-build-properties": "^1.0.9",
     "expo-constants": "~17.1.7",
