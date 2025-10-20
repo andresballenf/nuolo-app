@@ -27,6 +27,7 @@ import {
   getLogStats
 } from './secureLogger.ts';
 import { redactSpatialSensitiveData } from './spatialRedaction.ts';
+import { deriveSituationalContext, validateSituationalContext } from './situationalContext.ts';
 
 // Import new chunking services with error handling
 let AudioStreamGenerator: any;
@@ -242,6 +243,34 @@ serve(async (req) => {
     const sanitizedAttractionName = attractionName.replace(/[<>]/g, '').trim();
     const sanitizedAttractionAddress = attractionAddress ? attractionAddress.replace(/[<>]/g, '').trim() : '';
 
+    // Derive situational context automatically (with optional client overrides)
+    let derivedSituationalContext = null;
+    try {
+      // Validate and sanitize client-provided context first
+      const clientContext = requestData.situationalContext
+        ? validateSituationalContext(requestData.situationalContext)
+        : null;
+
+      derivedSituationalContext = await deriveSituationalContext({
+        userLocation,
+        date: new Date(),
+        clientProvidedContext: clientContext || undefined
+      });
+
+      logInfo('context', 'Derived situational context', {
+        season: derivedSituationalContext.season,
+        timeOfDay: derivedSituationalContext.timeOfDay,
+        // Note: crowdLevel not yet implemented
+        hasEvents: !!derivedSituationalContext.recentEvents,
+        source: clientContext ? 'client-enhanced' : 'auto-derived'
+      });
+    } catch (error) {
+      logWarn('context', 'Failed to derive situational context, proceeding without', {
+        error: (error as Error).message
+      });
+      // Continue without context - it's optional
+    }
+
     logInfo('request', 'Request parameters validated and sanitized', {
       attractionName: '[ATTRACTION_NAME]', // Don't log actual attraction name for privacy
       language: preferences?.language || 'en',
@@ -295,6 +324,7 @@ serve(async (req) => {
               userLocation,
               poiLocation,
               spatialHints,
+              situationalContext: derivedSituationalContext || undefined,
               userHeading,
               preferences,
               text: '', // Will be generated
@@ -329,6 +359,7 @@ serve(async (req) => {
               userLocation,
               poiLocation,
               spatialHints,
+              situationalContext: derivedSituationalContext || undefined,
               userHeading,
               preferences,
             });

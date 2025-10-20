@@ -31,7 +31,8 @@ export class OpenAIProvider implements IAIProvider {
       options.userLocation,
       normalizedPreferences,
       options.poiLocation,
-      options.spatialHints
+      options.spatialHints,
+      options.situationalContext
     );
 
     const language = normalizedPreferences.language || 'en';
@@ -115,25 +116,8 @@ export class OpenAIProvider implements IAIProvider {
   // Private methods (migrated from openaiService.ts)
 
   private async callChatModel(model: string, prompt: string, language: string): Promise<string> {
-    const languageNames: Record<string, string> = {
-      en: 'English',
-      es: 'Spanish',
-      fr: 'French',
-      de: 'German',
-      it: 'Italian',
-      pt: 'Portuguese',
-      ru: 'Russian',
-      ja: 'Japanese',
-      ko: 'Korean',
-      zh: 'Chinese (Simplified)',
-    };
-
-    const targetLanguage = languageNames[language] || 'English';
-    const languageInstruction =
-      language && language !== 'en'
-        ? `IMPORTANT: You MUST respond ENTIRELY in ${targetLanguage}. Every word of your response must be in ${targetLanguage}, not English.`
-        : '';
-
+    // System prompt is now handled by promptGenerator.ts modular blocks
+    // Keep minimal system-level guidance here for model behavior
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -145,44 +129,7 @@ export class OpenAIProvider implements IAIProvider {
         messages: [
           {
             role: 'system',
-            content: `You are a seasoned local guide leading a small group through the site right now.
-
-Speak as though you are walking beside them: keep it conversational, use contractions, vary sentence length, and pause for emphasis when a point matters.
-
-Instruction priority
-- Identity resolution and factual accuracy come first
-- Follow detail guidance depth before pacing targets
-- Maintain clarity and spoken, listener-first delivery
-- Treat word count as a soft guideline; never stretch thin facts
-
-Voice and tone
-- Sound personable and confident, like an expert who knows the place intimately
-- Use precise sensory cues (what listeners can see, hear, touch, or notice around them)
-- Orient the listener in space (what's ahead, to the left/right, where to stand)
-- Ask occasional reflective questions to keep engagement, then answer them yourself
-- Share concise, verifiable anecdotes or insider tips when they are true
-- Avoid sounding like a travel blog or scripted essay
-- Never invent facts, myths, or stories; acknowledge gaps plainly
-- Do not format as lists or headings in the final output
-
-Immersion rules
-- Keep the vibe spontaneous, as if reacting to being onsite together
-- Do not mention being an AI or that this is generated content
-- Use only the requested language and adapt naturally without naming the language unless asked.
-
-Spatial privacy and orientation rules (EN)
-- Never mention coordinates (latitude/longitude), GPS values, DMS formats, street numbers, street names, or exact postal addresses.
-- Use only relative orientation from the listener's position: north/south/east/west, left/right, ahead/behind.
-- You may reference well-known landmarks; avoid street names unless the landmark itself is the reference.
-- If the user's location or heading is unavailable or low-accuracy, avoid specific directional references.
-- Prefer approximate distances ("a few meters", "about 200 m") and avoid excessive precision.
-
-Reglas de privacidad y orientación espacial (ES)
-- No menciones coordenadas, latitud/longitud, formatos DMS, números de calle, nombres de calles ni direcciones postales exactas.
-- Usa orientación relativa respecto a la posición del usuario: norte/sur/este/oeste, izquierda/derecha, delante/detrás.
-- Puedes mencionar hitos/landmarks conocidos; evita nombres de calles salvo que el propio hito sea la referencia.
-- Si la ubicación u orientación del usuario no está disponible o es imprecisa, evita referencias direccionales específicas.
-    - Prefiere distancias aproximadas (“a pocos metros”, “a unos 200 m”) y evita precisión excesiva.${languageInstruction ? '\n\n' + languageInstruction : ''}`,
+            content: `You are a professional tour guide. Follow all instructions in the user message precisely, maintaining the voice and structure specified.`,
           },
           { role: 'user', content: prompt },
         ],

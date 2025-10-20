@@ -22,6 +22,13 @@ export interface AIGenerationOptions {
     relative?: string;
   };
   userHeading?: number;
+  // Optional situational context for richer narration
+  situationalContext?: {
+    season?: 'spring' | 'summer' | 'fall' | 'winter';
+    timeOfDay?: 'morning' | 'afternoon' | 'evening' | 'night';
+    crowdLevel?: 'quiet' | 'moderate' | 'busy';
+    recentEvents?: string;
+  };
   preferences: {
     theme?: string;
     audioLength?: 'short' | 'medium' | 'deep-dive';

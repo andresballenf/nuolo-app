@@ -1,109 +1,282 @@
-export function generatePrompt(attractionName, attractionAddress, userLocation, preferences, poiLocation?, spatialHints?) {
-  // Map language codes to full language names
-  const languageNames = {
-    'en': 'English',
-    'es': 'Spanish',
-    'fr': 'French',
-    'de': 'German',
-    'it': 'Italian',
-    'pt': 'Portuguese',
-    'ru': 'Russian',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'zh': 'Chinese (Simplified)',
-  };
-  
-  const targetLanguage = languageNames[preferences.language] || 'English';
-  const isNonEnglish = preferences.language && preferences.language !== 'en';
-  const lang = preferences.language || 'en';
-  
-  // Adjust pacing guidance based on audio length preference
-  const durationGoal = preferences.audioLength === 'short'
-    ? 'about 2 minutes of spoken narration'
-    : preferences.audioLength === 'medium'
-      ? 'around 4 minutes of spoken narration'
-      : 'roughly 7 minutes of spoken narration';
+// Attraction Info Prompt Generator V2
+// Modular block architecture for natural, tour-guide-like narration
 
-  // Map theme preferences to content focus
-  const themeGuide = {
-    'history': 'historical events, timelines, important figures, and how this place shaped the area',
-    'nature': 'natural features, ecology, flora/fauna, environmental significance, and seasonal changes',
-    'architecture': 'architectural style, design elements, construction techniques, architects, and structural innovations',
-    'culture': 'cultural significance, local traditions, community impact, festivals, and social importance',
-    'general': 'a balanced mix of history, culture, architecture, and interesting facts'
-  };
-  
-  const themeFocus = themeGuide[preferences.theme] || themeGuide['general'];
+export type AttractionTheme = 'history' | 'nature' | 'architecture' | 'culture' | 'general';
+export type SupportedLanguage = 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'ru' | 'ja' | 'ko' | 'zh';
 
-  // Map voice style to narrative tone
-  const voiceInstructions = {
-    'casual': 'Write in a friendly, conversational tone like chatting with a friend. Use relatable language, contractions, and occasional humor.',
-    'formal': 'Write like a confident museum curator speaking on-site: precise, welcoming, and clearly structured without sounding stiff.',
-    'energetic': 'Write with enthusiasm and excitement! Use dynamic language, vivid descriptions, and convey genuine passion for the place.',
-    'calm': 'Write in a soothing, contemplative tone. Use peaceful language, gentle pacing, and reflective observations.'
-  };
-  
-  const voiceStyle = voiceInstructions[preferences.voiceStyle] || voiceInstructions['casual'];
-  
-  // Language-specific instruction
-  const languageInstruction = isNonEnglish 
-    ? `LANGUAGE REQUIREMENT: Respond entirely in ${targetLanguage}. Do not include any English words.`
+export interface AttractionPreferences {
+  theme?: AttractionTheme;
+  audioLength?: 'short' | 'medium' | 'deep-dive';
+  language?: SupportedLanguage;
+  voiceStyle?: 'casual' | 'formal' | 'energetic' | 'calm';
+}
+
+interface ThemeWeighting {
+  history: number;
+  architecture: number;
+  culture: number;
+  nature: number;
+  tips: number;
+}
+
+interface DurationGuidance {
+  targetMinutes: string;
+  wordCountRange: string;
+  avgWordsPerMinute: number;
+}
+
+// Language name mapping
+const languageNames: Record<string, string> = {
+  'en': 'English',
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh': 'Chinese (Simplified)',
+};
+
+/**
+ * Block 1: System Persona
+ * Cast the model as an experienced on-site tour guide
+ */
+function buildSystemPersona(language: string): string {
+  const targetLanguage = languageNames[language] || 'English';
+  const isNonEnglish = language && language !== 'en';
+
+  const languageInstruction = isNonEnglish
+    ? `CRITICAL LANGUAGE REQUIREMENT: You MUST respond ENTIRELY in ${targetLanguage}. Every single word of your response must be in ${targetLanguage}, not English. This is non-negotiable.`
     : '';
 
-  // Orientation hints derived without exposing raw coordinates
-  let orientationHints = '';
-  const hints = spatialHints || null;
-  if (hints && (hints.cardinal8 || hints.cardinal16 || hints.distanceText || hints.relative)) {
-    const cardinal = hints.cardinal8 || hints.cardinal16 || '';
-    const distanceTxt = hints.distanceText ? hints.distanceText : '';
-    const rel = hints.relative ? hints.relative : '';
+  return `${languageInstruction ? languageInstruction + '\n\n' : ''}You are an experienced tour guide who has led visitors through this city for years. You're standing on-site right now, speaking live to a small group.
+
+Your responsibilities:
+- Weave historical facts with personal insights from your years of guiding
+- Stay truthful—cite sources implicitly ("local archives note...", "park rangers confirm...")
+- Acknowledge uncertainty clearly when facts are unverified
+- Deliver narration as if speaking naturally, with pauses, callbacks, and smooth transitions
+- Never sound scripted or like a travel blog—imagine you're having a real conversation
+
+Speaking style:
+- Use contractions, varied sentence lengths, and occasional rhetorical questions
+- Reference earlier points naturally ("Remember what I mentioned about...")
+- Pause for emphasis when a point matters
+- Sound personable and confident, like someone who truly knows this place`;
+}
+
+/**
+ * Block 2: Context Injection
+ * Behind-the-scenes notes about location and situation
+ */
+function buildContextBlock(
+  attractionAddress: string,
+  spatialHints: any,
+  lang: string,
+  situationalContext?: any
+): string {
+  let block = `\nIdentity resolution (internal notes—don't mention in narration):
+- Full address for verification: ${attractionAddress}`;
+
+  // Spatial orientation hints
+  if (spatialHints && (spatialHints.cardinal8 || spatialHints.cardinal16 || spatialHints.distanceText || spatialHints.relative)) {
+    const cardinal = spatialHints.cardinal8 || spatialHints.cardinal16 || '';
+    const distanceTxt = spatialHints.distanceText || '';
+    const rel = spatialHints.relative || '';
+
     if (lang === 'es') {
-      orientationHints = `Pistas de orientación (no menciones coordenadas ni calles): cardinal=${cardinal || 'N/A'}${distanceTxt ? `, distancia aproximada=${distanceTxt}` : ''}${rel ? `, relativo a tu orientación=${rel}` : ''}.`;
+      block += `\n- Pistas de orientación espacial (no menciones coordenadas): dirección cardinal=${cardinal || 'N/A'}${distanceTxt ? `, distancia aproximada=${distanceTxt}` : ''}${rel ? `, relativo a orientación=${rel}` : ''}`;
     } else {
-      orientationHints = `Orientation hints (do not mention coordinates or streets): cardinal=${cardinal || 'N/A'}${distanceTxt ? `, approximate distance=${distanceTxt}` : ''}${rel ? `, relative to heading=${rel}` : ''}.`;
+      block += `\n- Spatial orientation hints (never mention coordinates): cardinal direction=${cardinal || 'N/A'}${distanceTxt ? `, approximate distance=${distanceTxt}` : ''}${rel ? `, relative to heading=${rel}` : ''}`;
     }
   }
 
-  // Adjust units based on language/region
-  const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language);
-  const unitSystem = useMetric ? 'Use metric units (meters, kilometers)' : 'Use imperial units (feet, miles)';
+  // Optional situational context
+  if (situationalContext) {
+    const contextParts: string[] = [];
+    if (situationalContext.season) contextParts.push(`season: ${situationalContext.season}`);
+    if (situationalContext.timeOfDay) contextParts.push(`time: ${situationalContext.timeOfDay}`);
+    // Note: crowd level feature not yet implemented
+    // if (situationalContext.crowdLevel) contextParts.push(`crowd level: ${situationalContext.crowdLevel}`);
+    if (situationalContext.recentEvents) contextParts.push(`recent: ${situationalContext.recentEvents}`);
 
-  return `${languageInstruction ? languageInstruction + '\n\n' : ''}Create an audio tour narrative for "${attractionName}" targeting ${durationGoal}, but treat this as guidance rather than a quota.
+    if (contextParts.length > 0) {
+      block += `\n- Situational context: ${contextParts.join(', ')}`;
+    }
+  }
 
-Identity resolution
-Use the full address to ensure you describe the correct place, but avoid mentioning the address in the output:
-- Address: ${attractionAddress}
-${orientationHints ? `\n${orientationHints}\n` : ''}
-Voice and tone
-${voiceStyle}
+  return block;
+}
 
-Theme guidance
-Emphasize ${themeFocus} if verifiable details exist, but keep a balanced mix of history, culture, architecture, and practical details. Do not force the theme if information is lacking.
+/**
+ * Block 3: Audience & Preferences
+ * Translate abstract preferences into concrete behaviors
+ */
+function buildAudienceBlock(preferences: AttractionPreferences): string {
+  // Theme weighting percentages
+  const themeWeightings: Record<AttractionTheme, ThemeWeighting> = {
+    'history': { history: 50, architecture: 20, culture: 15, nature: 5, tips: 10 },
+    'nature': { history: 10, architecture: 5, culture: 15, nature: 60, tips: 10 },
+    'architecture': { history: 20, architecture: 50, culture: 10, nature: 5, tips: 15 },
+    'culture': { history: 15, architecture: 10, culture: 55, nature: 10, tips: 10 },
+    'general': { history: 25, architecture: 20, culture: 25, nature: 15, tips: 15 }
+  };
 
-Narrative ingredients
-Blend naturally (order can vary):
-- Begin by orienting the listener to where they are standing and what to look at first
-- Paint one vivid sensory moment using sight, sound, or texture grounded in reality
-- Share core factual details, spotlighting the theme if possible
-- Offer authentic local color or trivia only when verified
-- Explain why locals care or how it fits daily life today
-- Give one insider tip or next-step suggestion for visitors
+  const theme = preferences.theme || 'general';
+  const weighting = themeWeightings[theme];
 
-Detail guidance
-- If this place has strong, verifiable facts, share several specific details that teach the listener something new. Prefer concrete names, dates, design features, cultural context, or cause and effect. Vary angles to avoid repetition.
-- Do not force a specific count of facts. Let available evidence determine depth.
-- If little is documented or the place is ordinary, say so briefly with a line like "Not much is documented about this spot, but…" then share only what is truly known or what locals notice day to day.
-- Never pad with filler to meet a length target.
+  // Duration guidance with word counts
+  const durationMap: Record<string, DurationGuidance> = {
+    'short': { targetMinutes: '1.5–2.5', wordCountRange: '225-375 words', avgWordsPerMinute: 150 },
+    'medium': { targetMinutes: '3.5–4.5', wordCountRange: '525-675 words', avgWordsPerMinute: 150 },
+    'deep-dive': { targetMinutes: '5–8', wordCountRange: '750-1,200 words', avgWordsPerMinute: 150 }
+  };
 
-Precedence rule
-- If Detail guidance conflicts with pacing guidance, follow Detail guidance. It is acceptable to go shorter when little is known or slightly longer when genuine depth adds value. Keep the narrative tight and spoken-first either way.
+  const audioLength = preferences.audioLength || 'medium';
+  const duration = durationMap[audioLength];
 
-Critical instructions
-- ${unitSystem} for all measurements
+  // Voice style pacing guidance
+  const voiceInstructions: Record<string, string> = {
+    'casual': 'Friendly and conversational, like chatting with a friend. Use relatable language, contractions, occasional humor. Average sentence length: 12-18 words.',
+    'formal': 'Confident museum curator speaking on-site: precise, welcoming, clearly structured without stiffness. Average sentence length: 15-22 words.',
+    'energetic': 'Dynamic and enthusiastic! Vivid descriptions, genuine passion. Vary pacing dramatically. Average sentence length: 10-16 words.',
+    'calm': 'Soothing and contemplative. Peaceful language, gentle pacing, reflective observations. Average sentence length: 14-20 words.'
+  };
+
+  const voiceStyle = preferences.voiceStyle || 'casual';
+  const voicePacing = voiceInstructions[voiceStyle];
+
+  // Unit system based on language
+  const useMetric = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh'].includes(preferences.language || 'en');
+  const unitSystem = useMetric ? 'metric units (meters, kilometers)' : 'imperial units (feet, miles)';
+
+  return `\nAudience preferences:
+- Content weighting: ${Object.entries(weighting).map(([k, v]) => `${k} ${v}%`).join(', ')}
+- Duration target: ${duration.targetMinutes} minutes (approximately ${duration.wordCountRange})
+  * This is a SOFT target—never pad with filler if information runs short
+  * If you don't have enough verified information, wrap early and say so
+- Voice style: ${voicePacing}
+- Unit system: Use ${unitSystem} for all measurements`;
+}
+
+/**
+ * Block 4: Narrative Orchestration
+ * Flexible directive system replacing rigid checklists
+ */
+function buildNarrativeOrchestration(audioLength: string): string {
+  const isDeepDive = audioLength === 'deep-dive';
+
+  const baseDirectives = `\nNarrative structure (flexible beats—adapt order to strongest available facts):
+
+Opening beat:
+- Orient the listener with vivid situational awareness tailored to spatial hints
+- Answer "where am I standing and what should I notice first?"
+
+Core beats (3-5 organically connected):
+- Historical context: timeline, important figures, how this place shaped the area
+- Human stories: micro-anecdotes from locals, restoration tales, cultural lore
+  * Flag legends as "according to local legend..." if unverified
+- Sensory cues: what listeners can see, hear, touch, or notice around them
+- Insider tip: practical advice tied to user preferences (best time, photo spot, nearby café)
+- Modern relevance: why locals care today, how it fits into daily life
+
+Transitions:
+- Reference previous beats naturally ("After picturing that skyline, let's rewind...")
+- Create narrative momentum through callbacks and segues
+
+Closing beat:
+- Forward-looking suggestion tied to preferences (where to walk next, best timing, local secret)`;
+
+  if (isDeepDive) {
+    return baseDirectives + `\n
+Deep-dive enhancements:
+- Build a longer arc: introduction → origin story → pivotal era → modern relevance → pro tips
+- Include 2-3 mini-scenes or character spotlights to sustain engagement
+- Vary paragraph lengths for natural breathing room
+- Insert transitional phrases that imply pauses ("Now, here's what's remarkable...")
+- Target 750-1,200 words, but wrap early if verified info runs short—signal this to listener`;
+  }
+
+  return baseDirectives;
+}
+
+/**
+ * Block 5: Accuracy & Trust
+ * Safeguards for fact-checking and myth-busting
+ */
+function buildAccuracyBlock(): string {
+  return `\nAccuracy and trust protocols:
+
+Handling uncertainty:
+- If facts are unverified, acknowledge explicitly: "Local legend says...", "Historians debate whether..."
+- Never speculate or invent details to fill gaps
+- If little is documented, say so: "Not much is recorded about this spot, but here's what we do know..."
+
+Myth-busting:
+- If this attraction has common misconceptions, gently correct them
+- Example: "Many believe X, but archives actually show Y"
+
+Source citation:
+- Cite sources implicitly: "Park rangers confirm...", "City records from 1847 note...", "According to the restoration team..."
+- Never mention AI, being generated, or scripted content
+
+Measurement handling:
+- Use consistent units (metric or imperial based on audience)
+- When converting, mention both if helpful: "about 50 meters—that's roughly 165 feet"`;
+}
+
+/**
+ * Block 6: Critical Instructions
+ * Non-negotiable constraints
+ */
+function buildCriticalInstructions(language: string): string {
+  const targetLanguage = languageNames[language] || 'English';
+  const isNonEnglish = language && language !== 'en';
+
+  return `\nCritical constraints (non-negotiable):
 - Speak directly to the listener using "you"
 - Keep paragraphs short and varied for easy listening
-- No lists, bullet points, or headings in the final output
+- NO lists, bullet points, or headings in the final output—this is spoken narration
+- Never mention coordinates (latitude/longitude), GPS values, street numbers, or exact addresses
+- Use only relative orientation: north/south/east/west, left/right, ahead/behind
+- Prefer approximate distances ("a few meters", "about 200m") over excessive precision
+- Do not mention being an AI or that this is generated content
+- Keep it conversational, fluid, and natural for listening—use concrete, accurate details instead of flowery language${isNonEnglish ? `\n- REMINDER: Every word must be in ${targetLanguage}` : ''}`;
+}
 
-Final reminder
-Keep it conversational, fluid, and natural for listening. Use concrete, accurate details instead of flowery language.${isNonEnglish ? ` Remember: use only ${targetLanguage}.` : ''}`;
+/**
+ * Main prompt generation function
+ * Assembles modular blocks dynamically
+ */
+export function generatePrompt(
+  attractionName: string,
+  attractionAddress: string,
+  userLocation: any,
+  preferences: AttractionPreferences,
+  poiLocation?: any,
+  spatialHints?: any,
+  situationalContext?: any
+): string {
+  const lang = preferences.language || 'en';
+  const audioLength = preferences.audioLength || 'medium';
+
+  // Assemble blocks
+  const blocks: string[] = [
+    buildSystemPersona(lang),
+    buildContextBlock(attractionAddress, spatialHints, lang, situationalContext),
+    buildAudienceBlock(preferences),
+    buildNarrativeOrchestration(audioLength),
+    buildAccuracyBlock(),
+    buildCriticalInstructions(lang)
+  ];
+
+  // Add user request
+  const userRequest = `\nYour task:
+Create an audio tour narrative for "${attractionName}".
+Follow the guidance above, but remember: authenticity and clarity trump hitting exact word counts.
+If you don't have enough verified information, it's better to deliver a shorter, truthful narration than to pad with generic filler.`;
+
+  return blocks.join('\n') + userRequest;
 }

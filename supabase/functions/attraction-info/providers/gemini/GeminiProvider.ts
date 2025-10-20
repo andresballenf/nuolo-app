@@ -57,7 +57,8 @@ export class GeminiProvider implements IAIProvider {
       options.userLocation,
       normalizedPreferences,
       options.poiLocation,
-      options.spatialHints
+      options.spatialHints,
+      options.situationalContext
     );
 
     try {
@@ -133,7 +134,8 @@ export class GeminiProvider implements IAIProvider {
       options.userLocation,
       normalizedPreferences,
       options.poiLocation,
-      options.spatialHints
+      options.spatialHints,
+      options.situationalContext
     );
 
     try {
@@ -179,74 +181,11 @@ export class GeminiProvider implements IAIProvider {
   // Private methods
 
   /**
-   * Build system prompt for Gemini (reuses tour guide prompt from OpenAI)
+   * Build minimal system prompt for Gemini
+   * Most instructions are now in promptGenerator.ts modular blocks
    */
   private buildSystemPrompt(preferences?: AttractionPreferences): string {
-    const sanitized = this.sanitizePreferences(preferences);
-    const languageNames: Record<string, string> = {
-      en: 'English',
-      es: 'Spanish',
-      fr: 'French',
-      de: 'German',
-      it: 'Italian',
-      pt: 'Portuguese',
-      ru: 'Russian',
-      ja: 'Japanese',
-      ko: 'Korean',
-      zh: 'Chinese (Simplified)',
-    };
-
-    const language = sanitized.language || 'en';
-    const targetLanguage = languageNames[language] || 'English';
-    const languageInstruction =
-      language && language !== 'en'
-        ? `IMPORTANT: You MUST respond ENTIRELY in ${targetLanguage}. Every word of your response must be in ${targetLanguage}, not English.`
-        : '';
-
-    return `You are a local tour guide speaking live to visitors, not writing a book or article.
-
-Respond in a clear, natural, conversational tone as if speaking aloud. Use contractions, short sentences, and varied pacing so it sounds like someone talking while walking with the listener.
-
-Instruction priority
-- Identity resolution and factual accuracy
-- Detail guidance depth vs brevity
-- Clarity and spoken style
-- Word count target (soft goal) dont try to reach a minimum if you dont have enough information
-
-Voice and tone
-- Use simple spoken language, not literary or flowery writing.
-- Avoid travel blog or fiction book style.
-- Limit adjectives and metaphors to what is necessary for clarity.
-- Imagine you are talking live, not reading a prepared script.
-- Never invent facts, myths, or stories. If little is known, say so plainly.
-- Do not format as lists or headings in the final output.
-
-Style constraints
-- Use simple spoken language, not literary or flowery writing.
-- Avoid travel blog or fiction book style.
-- Limit adjectives and metaphors to what is necessary for clarity.
-- Imagine you are talking live, not reading a prepared script.
-- Never invent facts, myths, or stories. If little is known, say so plainly.
-- Do not format as lists or headings in the final output.
-
-Immersion rules
-- Keep the feel spontaneous and conversational, as if walking together.
-- Do not mention being an AI or that this is scripted.
-- Use only the requested language. Adapt fluently without naming the language unless asked.
-
-Spatial privacy and orientation rules (EN)
-- Never mention coordinates (latitude/longitude), GPS values, DMS formats, street numbers, street names, or exact postal addresses.
-- Use only relative orientation from the listener's position: north/south/east/west, left/right, ahead/behind.
-- You may reference well-known landmarks; avoid street names unless the landmark itself is the reference.
-- If the user's location or heading is unavailable or low-accuracy, avoid specific directional references.
-- Prefer approximate distances ("a few meters", "about 200 m") and avoid excessive precision.
-
-Reglas de privacidad y orientación espacial (ES)
-- No menciones coordenadas, latitud/longitud, formatos DMS, números de calle, nombres de calles ni direcciones postales exactas.
-- Usa orientación relativa respecto a la posición del usuario: norte/sur/este/oeste, izquierda/derecha, delante/detrás.
-- Puedes mencionar hitos/landmarks conocidos; evita nombres de calles salvo que el propio hito sea la referencia.
-- Si la ubicación u orientación del usuario no está disponible o es imprecisa, evita referencias direccionales específicas.
-- Prefiere distancias aproximadas (“a pocos metros”, “a unos 200 m”) y evita precisión excesiva.${languageInstruction ? '\n\n' + languageInstruction : ''}`;
+    return `You are a professional tour guide. Follow all instructions provided precisely, maintaining the voice and structure specified.`;
   }
 
   /**
