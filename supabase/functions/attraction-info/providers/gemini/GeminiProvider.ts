@@ -58,7 +58,8 @@ export class GeminiProvider implements IAIProvider {
       normalizedPreferences,
       options.poiLocation,
       options.spatialHints,
-      options.situationalContext
+      options.situationalContext,
+      options.wikipediaData
     );
 
     try {
@@ -135,7 +136,8 @@ export class GeminiProvider implements IAIProvider {
       normalizedPreferences,
       options.poiLocation,
       options.spatialHints,
-      options.situationalContext
+      options.situationalContext,
+      options.wikipediaData
     );
 
     try {

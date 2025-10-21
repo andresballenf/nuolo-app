@@ -26,8 +26,8 @@ import {
   endTimer,
   getLogStats
 } from './secureLogger.ts';
-import { redactSpatialSensitiveData } from './spatialRedaction.ts';
 import { deriveSituationalContext, validateSituationalContext } from './situationalContext.ts';
+import { isWikipediaEnabled, enrichWithWikipedia } from './wikipediaService.ts';
 
 // Import new chunking services with error handling
 let AudioStreamGenerator: any;
@@ -271,6 +271,42 @@ serve(async (req) => {
       // Continue without context - it's optional
     }
 
+    // Fetch Wikipedia content guide (optional enhancement - feature flagged)
+    let wikipediaData = null;
+    const wikipediaEnabled = isWikipediaEnabled();
+
+    if (wikipediaEnabled) {
+      try {
+        logInfo('wikipedia', 'Wikipedia integration enabled, fetching content guide', {
+          attraction: '[REDACTED]'  // Don't log attraction name for privacy
+        });
+
+        const wikiTimer = startTimer();
+        wikipediaData = await enrichWithWikipedia(
+          sanitizedAttractionName,
+          sanitizedAttractionAddress
+        );
+        endTimer(wikiTimer, 'wikipedia_fetch');
+
+        if (wikipediaData && wikipediaData.found) {
+          logInfo('wikipedia', 'Wikipedia data retrieved', {
+            pageTitle: wikipediaData.pageTitle,
+            sections: wikipediaData.sections.length,
+            extracts: Object.keys(wikipediaData.extracts).length
+          });
+        } else {
+          logInfo('wikipedia', 'No Wikipedia page found, proceeding without');
+        }
+      } catch (error) {
+        logWarn('wikipedia', 'Failed to fetch Wikipedia data, proceeding without', {
+          error: (error as Error).message
+        });
+        // Continue without Wikipedia - it's optional
+      }
+    } else {
+      logInfo('wikipedia', 'Wikipedia integration disabled via feature flag');
+    }
+
     logInfo('request', 'Request parameters validated and sanitized', {
       attractionName: '[ATTRACTION_NAME]', // Don't log actual attraction name for privacy
       language: preferences?.language || 'en',
@@ -325,6 +361,7 @@ serve(async (req) => {
               poiLocation,
               spatialHints,
               situationalContext: derivedSituationalContext || undefined,
+              wikipediaData: wikipediaData || undefined,
               userHeading,
               preferences,
               text: '', // Will be generated
@@ -360,6 +397,7 @@ serve(async (req) => {
               poiLocation,
               spatialHints,
               situationalContext: derivedSituationalContext || undefined,
+              wikipediaData: wikipediaData || undefined,
               userHeading,
               preferences,
             });
@@ -394,22 +432,6 @@ serve(async (req) => {
       }
     } else {
       logInfo('ai', 'Using existing text content');
-    }
-
-    // Apply spatial redaction as a safety net (feature-flag, default ON)
-    try {
-      const enableRedaction = (Deno.env.get('ENABLE_SPATIAL_REDACTION') ?? 'true').toLowerCase() !== 'false';
-      if (enableRedaction && typeof generatedInfo === 'string') {
-        const before = generatedInfo.length;
-        generatedInfo = redactSpatialSensitiveData(generatedInfo);
-        const after = generatedInfo.length;
-        if (before !== after) {
-          logInfo('security', 'Applied spatial redaction to generated text', { before, after });
-        }
-      }
-    } catch (_err) {
-      // Never fail the request due to redaction issues
-      logWarn('security', 'Spatial redaction failed, continuing without redaction');
     }
 
     // Handle chunked audio generation with streaming (if available)

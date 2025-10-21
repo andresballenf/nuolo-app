@@ -1,5 +1,19 @@
 // AI Provider Interface - Abstraction layer for different AI services
 
+export interface WikipediaSection {
+  title: string;
+  level: number;  // 1=top-level, 2=subsection, etc.
+  index: number;  // Section index in Wikipedia article
+}
+
+export interface WikipediaData {
+  found: boolean;
+  pageTitle?: string;
+  pageUrl?: string;
+  sections: WikipediaSection[];
+  extracts: Record<string, string>;  // sectionTitle → extract text
+}
+
 export interface AIGenerationOptions {
   attractionName: string;
   attractionAddress?: string;
@@ -29,6 +43,8 @@ export interface AIGenerationOptions {
     crowdLevel?: 'quiet' | 'moderate' | 'busy';
     recentEvents?: string;
   };
+  // Optional Wikipedia content guide (feature flagged)
+  wikipediaData?: WikipediaData;
   preferences: {
     theme?: string;
     audioLength?: 'short' | 'medium' | 'deep-dive';

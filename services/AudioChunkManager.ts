@@ -343,6 +343,8 @@ export class AudioChunkManager {
 
       // Stop current sound if playing
       if (this.currentSound) {
+        // Detach status updates before stopping to avoid duplicate completion events
+        this.currentSound.setOnPlaybackStatusUpdate(undefined);
         await this.currentSound.stopAsync();
         await this.currentSound.unloadAsync();
       }
@@ -356,11 +358,20 @@ export class AudioChunkManager {
       this.preloadAheadFrom(chunkIndex);
 
       // Set up playback status update
-      loadedChunk.sound.setOnPlaybackStatusUpdate((status: PlaybackStatus) => {
-        if (status.isLoaded) {
-          if (status.didJustFinish) {
-            this.handleChunkComplete(chunkIndex);
-          }
+      loadedChunk.sound.setOnPlaybackStatusUpdate(async (status: PlaybackStatus) => {
+        if (!status.isLoaded || !status.didJustFinish) {
+          return;
+        }
+        // Ignore stale callbacks from previously playing chunks
+        if (this.currentChunkIndex !== chunkIndex) {
+          return;
+        }
+        // Detach callback to prevent re-entrancy before awaiting completion
+        loadedChunk.sound.setOnPlaybackStatusUpdate(undefined);
+        try {
+          await this.handleChunkComplete(chunkIndex);
+        } catch (error) {
+          console.error('Error completing chunk playback:', error);
         }
       });
 

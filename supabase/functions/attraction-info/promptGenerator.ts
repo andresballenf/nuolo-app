@@ -39,6 +39,24 @@ const languageNames: Record<string, string> = {
   'zh': 'Chinese (Simplified)',
 };
 
+function deriveGeneralLocale(address: string | undefined | null): string | null {
+  if (!address) return null;
+  const parts = address
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  if (parts.length <= 2) {
+    return parts.join(', ');
+  }
+
+  return parts.slice(-2).join(', ');
+}
+
 /**
  * Block 1: System Persona
  * Cast the model as an experienced on-site tour guide
@@ -77,8 +95,18 @@ function buildContextBlock(
   lang: string,
   situationalContext?: any
 ): string {
-  let block = `\nIdentity resolution (internal notes—don't mention in narration):
-- Full address for verification: ${attractionAddress}`;
+  const generalLocale = deriveGeneralLocale(attractionAddress);
+  let block = `\nLocation context (internal notes—don't mention in narration):`;
+
+  if (generalLocale) {
+    block += lang === 'es'
+      ? `\n- Referencia general del lugar: ${generalLocale} (mantén la dirección exacta en privado)`
+      : `\n- General locale reference: ${generalLocale} (keep the exact address private)`;
+  }
+
+  block += lang === 'es'
+    ? `\n- Recordatorio de privacidad: jamás menciones coordenadas, números exactos de calle ni direcciones completas. Describe la zona de forma general usando puntos de referencia.`
+    : `\n- Privacy reminder: never mention coordinates, exact street numbers, or full addresses. Describe the area in general terms using well-known landmarks.`;
 
   // Spatial orientation hints
   if (spatialHints && (spatialHints.cardinal8 || spatialHints.cardinal16 || spatialHints.distanceText || spatialHints.relative)) {
@@ -247,6 +275,46 @@ function buildCriticalInstructions(language: string): string {
 }
 
 /**
+ * Block 2.5: Wikipedia Content Guide (optional)
+ * Provides structured topic guide and reference material from Wikipedia
+ */
+function buildWikipediaGuideBlock(wikipediaData: any): string {
+  // Return empty if no Wikipedia data or disabled
+  if (!wikipediaData || !wikipediaData.found) {
+    return '';
+  }
+
+  let block = `\nContent structure guide (from Wikipedia):`;
+  block += `\nThis attraction has a Wikipedia page with the following documented topics:`;
+
+  // Add section structure
+  if (wikipediaData.sections && wikipediaData.sections.length > 0) {
+    block += `\n\nMain topics covered:`;
+    wikipediaData.sections.forEach((section: any) => {
+      const indent = '  '.repeat(section.level - 1);
+      block += `\n${indent}- ${section.title}`;
+    });
+  }
+
+  // Add reference snippets
+  if (wikipediaData.extracts && Object.keys(wikipediaData.extracts).length > 0) {
+    block += `\n\nReference material (paraphrase, don't quote directly):`;
+    Object.entries(wikipediaData.extracts).forEach(([title, extract]) => {
+      block += `\n- ${title}: ${extract}`;
+    });
+  }
+
+  block += `\n\nGuidance:`;
+  block += `\n- Use these topics as a structural guide for your narration`;
+  block += `\n- Expand on points that match the user's theme preference`;
+  block += `\n- Paraphrase reference material in your own words—never quote Wikipedia directly`;
+  block += `\n- Feel free to skip sections that aren't relevant to the audio length`;
+  block += `\n- Prioritize topics that would interest a visitor standing at this location`;
+
+  return block;
+}
+
+/**
  * Main prompt generation function
  * Assembles modular blocks dynamically
  */
@@ -257,7 +325,8 @@ export function generatePrompt(
   preferences: AttractionPreferences,
   poiLocation?: any,
   spatialHints?: any,
-  situationalContext?: any
+  situationalContext?: any,
+  wikipediaData?: any
 ): string {
   const lang = preferences.language || 'en';
   const audioLength = preferences.audioLength || 'medium';
@@ -266,11 +335,12 @@ export function generatePrompt(
   const blocks: string[] = [
     buildSystemPersona(lang),
     buildContextBlock(attractionAddress, spatialHints, lang, situationalContext),
+    buildWikipediaGuideBlock(wikipediaData),
     buildAudienceBlock(preferences),
     buildNarrativeOrchestration(audioLength),
     buildAccuracyBlock(),
     buildCriticalInstructions(lang)
-  ];
+  ].filter(block => block.length > 0); // Filter out empty blocks
 
   // Add user request
   const userRequest = `\nYour task:

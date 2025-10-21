@@ -32,7 +32,8 @@ export class OpenAIProvider implements IAIProvider {
       normalizedPreferences,
       options.poiLocation,
       options.spatialHints,
-      options.situationalContext
+      options.situationalContext,
+      options.wikipediaData
     );
 
     const language = normalizedPreferences.language || 'en';
