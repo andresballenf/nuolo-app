@@ -55,9 +55,39 @@ export class AudioChunkManager {
   private bufferAheadCount: number = 2; // how many chunks to keep preloaded ahead
   private isBuffering: boolean = false; // waiting for the next chunk to arrive
   private waitingForChunkIndex: number | null = null;
+  private shouldResumeAfterBuffer: boolean = false;
+  private playbackLock: Promise<void> = Promise.resolve();
 
   constructor() {
     this.configureAudioSession();
+  }
+
+  private async acquirePlaybackLock(label: string): Promise<() => void> {
+    console.log(`[AudioChunkManager] Waiting for playback lock (${label})`);
+    let releaseLock!: () => void;
+    const nextLock = new Promise<void>(resolve => {
+      releaseLock = resolve;
+    });
+    const previousLock = this.playbackLock;
+    this.playbackLock = previousLock.then(() => nextLock);
+    await previousLock;
+    console.log(`[AudioChunkManager] Acquired playback lock (${label})`);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      console.log(`[AudioChunkManager] Released playback lock (${label})`);
+      releaseLock();
+    };
+  }
+
+  private async withPlaybackLock<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    const release = await this.acquirePlaybackLock(label);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -178,16 +208,27 @@ export class AudioChunkManager {
       await this.preloadChunk(chunk.chunkIndex);
     }
 
-    // If we were buffering for this chunk, resume playback
+    let emittedFromResume = false;
+
     if (this.isBuffering && this.waitingForChunkIndex === chunk.chunkIndex) {
-      this.isBuffering = false;
-      this.waitingForChunkIndex = null;
-      if (this.isPlaying) {
-        await this.playChunk(chunk.chunkIndex);
-      }
+      await this.withPlaybackLock(`buffer-resolved-${chunk.chunkIndex}`, async () => {
+        this.isBuffering = false;
+        this.waitingForChunkIndex = null;
+
+        if (this.shouldResumeAfterBuffer) {
+          await this.playChunkInternal(chunk.chunkIndex);
+          emittedFromResume = true;
+          return;
+        }
+
+        await this.emitStateChange();
+        emittedFromResume = true;
+      });
     }
     
-    this.emitStateChange();
+    if (!emittedFromResume) {
+      await this.emitStateChange();
+    }
   }
 
   /**
@@ -231,9 +272,19 @@ export class AudioChunkManager {
       return null;
     }
 
-    // Check if already loaded
-    if (this.loadedSounds.has(chunkIndex)) {
-      return this.loadedSounds.get(chunkIndex)!;
+    const existing = this.loadedSounds.get(chunkIndex);
+    if (existing) {
+      try {
+        existing.sound.setOnPlaybackStatusUpdate(undefined);
+        const status = await existing.sound.getStatusAsync();
+        if (status.isLoaded) {
+          return existing;
+        }
+        await existing.sound.unloadAsync();
+      } catch (error) {
+        console.warn(`Existing sound for chunk ${chunkIndex} was not reusable:`, error);
+      }
+      this.loadedSounds.delete(chunkIndex);
     }
 
     try {
@@ -307,6 +358,101 @@ export class AudioChunkManager {
     }
   }
 
+  private async stopAndUnloadCurrentSound() {
+    if (!this.currentSound) {
+      return;
+    }
+
+    const activeChunkIndex = this.currentChunkIndex;
+
+    try {
+      this.currentSound.setOnPlaybackStatusUpdate(undefined);
+    } catch (error) {
+      console.warn('Error detaching playback status listener:', error);
+    }
+
+    try {
+      const status = await this.currentSound.getStatusAsync();
+      if (status.isLoaded) {
+        await this.currentSound.stopAsync();
+      }
+    } catch (error) {
+      console.error('Error stopping current sound:', error);
+    }
+
+    try {
+      await this.currentSound.unloadAsync();
+    } catch (error) {
+      console.error('Error unloading current sound:', error);
+    }
+
+    this.currentSound = null;
+
+    if (activeChunkIndex >= 0) {
+      this.loadedSounds.delete(activeChunkIndex);
+    }
+
+    console.log(`[AudioChunkManager] Current sound stopped and unloaded (chunk ${activeChunkIndex})`);
+  }
+
+  private async pauseInternal() {
+    if (this.currentSound) {
+      try {
+        const status = await this.currentSound.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
+          await this.currentSound.pauseAsync();
+        }
+      } catch (error) {
+        console.error('Error pausing playback:', error);
+      }
+    }
+    this.isPlaying = false;
+    this.shouldResumeAfterBuffer = false;
+    this.stopPositionTracking();
+  }
+
+  private async resumeInternal(): Promise<boolean> {
+    if (this.currentSound) {
+      try {
+        const status = await this.currentSound.getStatusAsync();
+        if (status.isLoaded && !status.isPlaying) {
+          await this.currentSound.playAsync();
+          this.isPlaying = true;
+          this.shouldResumeAfterBuffer = true;
+          this.startPositionTracking();
+          return true;
+        }
+        if (status.isLoaded && status.isPlaying) {
+          this.isPlaying = true;
+          this.shouldResumeAfterBuffer = true;
+          this.startPositionTracking();
+          return true;
+        }
+        console.log('[AudioChunkManager] Current sound not loaded, reloading chunk');
+      } catch (error) {
+        console.error('Error resuming playback:', error);
+      }
+    }
+
+    if (this.chunks.size === 0) {
+      return false;
+    }
+
+    const targetChunk = this.currentChunkIndex >= 0 ? this.currentChunkIndex : 0;
+    await this.playChunkInternal(targetChunk);
+    return false;
+  }
+
+  private async stopInternal() {
+    this.isPlaying = false;
+    this.shouldResumeAfterBuffer = false;
+    this.stopPositionTracking();
+    await this.stopAndUnloadCurrentSound();
+    this.currentChunkIndex = -1;
+    this.isBuffering = false;
+    this.waitingForChunkIndex = null;
+  }
+
   /**
    * Play audio starting from a specific chunk
    */
@@ -316,37 +462,28 @@ export class AudioChunkManager {
       return;
     }
 
-    this.isPlaying = true;
-    this.currentChunkIndex = startChunkIndex;
-    
-    await this.playChunk(startChunkIndex);
-    this.startPositionTracking();
+    await this.withPlaybackLock('play', async () => {
+      this.shouldResumeAfterBuffer = true;
+      await this.playChunkInternal(startChunkIndex);
+    });
   }
 
-  /**
-   * Play a specific chunk
-   */
-  private async playChunk(chunkIndex: number) {
+  private async playChunkInternal(chunkIndex: number) {
     try {
-      // Attempt to load the requested chunk. If it's not available yet, buffer and wait.
+      const resumeOnReady = this.shouldResumeAfterBuffer || this.isPlaying;
+      await this.stopAndUnloadCurrentSound();
+
       const loadedChunk = await this.preloadChunk(chunkIndex);
       if (!loadedChunk) {
         console.warn(`Chunk ${chunkIndex} not yet available - buffering`);
+        this.currentChunkIndex = chunkIndex;
         this.isBuffering = true;
         this.waitingForChunkIndex = chunkIndex;
-        await this.pause();
-        await this.currentSound?.unloadAsync();
-        this.currentSound = null;
-        this.emitStateChange();
+        this.shouldResumeAfterBuffer = resumeOnReady;
+        this.isPlaying = false;
+        this.stopPositionTracking();
+        await this.emitStateChange();
         return;
-      }
-
-      // Stop current sound if playing
-      if (this.currentSound) {
-        // Detach status updates before stopping to avoid duplicate completion events
-        this.currentSound.setOnPlaybackStatusUpdate(undefined);
-        await this.currentSound.stopAsync();
-        await this.currentSound.unloadAsync();
       }
 
       this.currentSound = loadedChunk.sound;
@@ -354,20 +491,16 @@ export class AudioChunkManager {
       this.isBuffering = false;
       this.waitingForChunkIndex = null;
 
-      // Preload several chunks ahead while this one plays
       this.preloadAheadFrom(chunkIndex);
 
-      // Set up playback status update
+      loadedChunk.sound.setOnPlaybackStatusUpdate(undefined);
       loadedChunk.sound.setOnPlaybackStatusUpdate(async (status: PlaybackStatus) => {
         if (!status.isLoaded || !status.didJustFinish) {
           return;
         }
-        // Ignore stale callbacks from previously playing chunks
         if (this.currentChunkIndex !== chunkIndex) {
           return;
         }
-        // Detach callback to prevent re-entrancy before awaiting completion
-        loadedChunk.sound.setOnPlaybackStatusUpdate(undefined);
         try {
           await this.handleChunkComplete(chunkIndex);
         } catch (error) {
@@ -375,22 +508,28 @@ export class AudioChunkManager {
         }
       });
 
-      // Start playing
-      await loadedChunk.sound.playAsync();
       console.log(`Playing chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
+      await loadedChunk.sound.playAsync();
       if (chunkIndex === 0) {
         PerfTracer.mark('first_playback');
       }
 
-      this.emitStateChange();
+      this.isPlaying = true;
+      this.shouldResumeAfterBuffer = true;
+      this.startPositionTracking();
+      await this.emitStateChange();
     } catch (error) {
       console.error(`Error playing chunk ${chunkIndex}:`, error);
-      // Try next expected chunk
       const nextIndex = chunkIndex + 1;
-      if (this.expectedTotalChunks > 0 ? nextIndex < this.expectedTotalChunks : nextIndex < this.chunks.size) {
-        await this.playChunk(nextIndex);
+      const hasMore = this.expectedTotalChunks > 0
+        ? nextIndex < this.expectedTotalChunks
+        : nextIndex < this.chunks.size;
+
+      if (hasMore) {
+        await this.playChunkInternal(nextIndex);
       } else {
-        this.handleAllChunksComplete();
+        await this.stopAndUnloadCurrentSound();
+        await this.handleAllChunksCompleteInternal();
       }
     }
   }
@@ -399,116 +538,133 @@ export class AudioChunkManager {
    * Handle chunk completion
    */
   private async handleChunkComplete(chunkIndex: number) {
+    await this.withPlaybackLock(`chunk-${chunkIndex}-complete`, async () => {
+      await this.handleChunkCompleteInternal(chunkIndex);
+    });
+  }
+
+  private async handleChunkCompleteInternal(chunkIndex: number) {
     console.log(`Chunk ${chunkIndex + 1} completed`);
-    
+
     if (this.onChunkComplete) {
       this.onChunkComplete(chunkIndex);
     }
 
-    // Determine next index based on expected total
     const nextIndex = chunkIndex + 1;
     const hasMore = this.expectedTotalChunks > 0
       ? nextIndex < this.expectedTotalChunks
       : nextIndex < this.chunks.size;
 
-    // Play next chunk if we expect more and are still playing
-    if (this.isPlaying && hasMore) {
-      await this.playChunk(nextIndex);
-    } else {
-      this.handleAllChunksComplete();
+    if (!this.shouldResumeAfterBuffer && !this.isPlaying) {
+      console.log(`[AudioChunkManager] Skipping completion handling for chunk ${chunkIndex + 1} (playback inactive)`);
+      return;
     }
+
+    if (hasMore && this.shouldResumeAfterBuffer) {
+      await this.playChunkInternal(nextIndex);
+      return;
+    }
+
+    await this.stopAndUnloadCurrentSound();
+    await this.handleAllChunksCompleteInternal();
   }
 
   /**
    * Handle all chunks complete
    */
-  private handleAllChunksComplete() {
+  private async handleAllChunksCompleteInternal() {
     console.log('All chunks completed');
     this.isPlaying = false;
+    this.shouldResumeAfterBuffer = false;
+    this.isBuffering = false;
+    this.waitingForChunkIndex = null;
     this.stopPositionTracking();
-    
+
     if (this.onAllChunksComplete) {
       this.onAllChunksComplete();
     }
-    
-    this.emitStateChange();
+
+    await this.emitStateChange();
   }
 
   /**
    * Pause playback
    */
   public async pause() {
-    if (this.currentSound && this.isPlaying) {
-      await this.currentSound.pauseAsync();
-      this.isPlaying = false;
-      this.stopPositionTracking();
-      this.emitStateChange();
-    }
+    await this.withPlaybackLock('pause', async () => {
+      await this.pauseInternal();
+      await this.emitStateChange();
+    });
   }
 
   /**
    * Resume playback
    */
   public async resume() {
-    if (this.currentSound && !this.isPlaying) {
-      await this.currentSound.playAsync();
-      this.isPlaying = true;
-      this.startPositionTracking();
-      this.emitStateChange();
-    }
+    await this.withPlaybackLock('resume', async () => {
+      this.shouldResumeAfterBuffer = true;
+      const shouldEmit = await this.resumeInternal();
+      if (shouldEmit) {
+        await this.emitStateChange();
+      }
+    });
   }
 
   /**
    * Stop playback and cleanup
    */
   public async stop() {
-    this.isPlaying = false;
-    this.stopPositionTracking();
-    
-    if (this.currentSound) {
-      await this.currentSound.stopAsync();
-      await this.currentSound.unloadAsync();
-      this.currentSound = null;
-    }
-    
-    this.currentChunkIndex = -1;
-    this.emitStateChange();
+    await this.withPlaybackLock('stop', async () => {
+      await this.stopInternal();
+      await this.emitStateChange();
+    });
   }
 
   /**
    * Seek to a specific position across all chunks
    */
   public async seek(positionMs: number) {
-    // Find which chunk this position falls into
+    await this.withPlaybackLock('seek', async () => {
+      await this.seekInternal(positionMs);
+    });
+  }
+
+  private async seekInternal(positionMs: number) {
     let targetChunkIndex = 0;
     let positionInChunk = positionMs;
-    
+
     for (const [index, startTime] of this.chunkStartTimes.entries()) {
       const chunk = this.chunks.get(index);
       if (!chunk) continue;
-      
+
       const chunkDuration = (chunk.actualDuration || chunk.estimatedDuration) * 1000;
       const chunkEndTime = startTime + chunkDuration;
-      
+
       if (positionMs >= startTime && positionMs < chunkEndTime) {
         targetChunkIndex = index;
         positionInChunk = positionMs - startTime;
         break;
       }
     }
-    
-    // If different chunk, load and play from position
-    if (targetChunkIndex !== this.currentChunkIndex) {
-      await this.stop();
-      await this.play(targetChunkIndex);
+
+    const needsChunkChange = targetChunkIndex !== this.currentChunkIndex || !this.currentSound;
+
+    if (needsChunkChange) {
+      this.shouldResumeAfterBuffer = true;
+      await this.playChunkInternal(targetChunkIndex);
     }
-    
-    // Seek within the chunk
+
     if (this.currentSound) {
-      await this.currentSound.setPositionAsync(positionInChunk);
+      try {
+        await this.currentSound.setPositionAsync(positionInChunk);
+      } catch (error) {
+        console.error('Error seeking within chunk:', error);
+      }
     }
-    
-    this.emitStateChange();
+
+    if (!needsChunkChange) {
+      await this.emitStateChange();
+    }
   }
 
   /**
@@ -590,31 +746,37 @@ export class AudioChunkManager {
    * Clear all chunks and cleanup
    */
   public async clear() {
-    await this.stop();
-    
-    // Unload all sounds
-    for (const loadedChunk of this.loadedSounds.values()) {
-      try {
-        await loadedChunk.sound.unloadAsync();
-        // Delete only temporary cache files; keep persistent cached files in documentDirectory
-        const cacheDir = FileSystem.cacheDirectory || '';
-        if (loadedChunk.fileUri.startsWith(cacheDir)) {
-          await FileSystem.deleteAsync(loadedChunk.fileUri, { idempotent: true });
+    await this.withPlaybackLock('clear', async () => {
+      await this.stopInternal();
+
+      const loadedChunks = Array.from(this.loadedSounds.values());
+      this.loadedSounds.clear();
+
+      for (const loadedChunk of loadedChunks) {
+        try {
+          loadedChunk.sound.setOnPlaybackStatusUpdate(undefined);
+          await loadedChunk.sound.unloadAsync();
+          const cacheDir = FileSystem.cacheDirectory || '';
+          if (loadedChunk.fileUri.startsWith(cacheDir)) {
+            await FileSystem.deleteAsync(loadedChunk.fileUri, { idempotent: true });
+          }
+        } catch (error) {
+          console.error('Error cleaning up chunk:', error);
         }
-      } catch (error) {
-        console.error('Error cleaning up chunk:', error);
       }
-    }
-    
-    this.chunks.clear();
-    this.loadedSounds.clear();
-    this.chunkStartTimes.clear();
-    this.totalDuration = 0;
-    this.currentChunkIndex = -1;
-    this.expectedTotalChunks = 0;
-    this.estimatedChunkDurations.clear();
-    this.isBuffering = false;
-    this.waitingForChunkIndex = null;
+
+      this.chunks.clear();
+      this.chunkStartTimes.clear();
+      this.totalDuration = 0;
+      this.currentChunkIndex = -1;
+      this.expectedTotalChunks = 0;
+      this.estimatedChunkDurations.clear();
+      this.isBuffering = false;
+      this.waitingForChunkIndex = null;
+      this.shouldResumeAfterBuffer = false;
+
+      await this.emitStateChange();
+    });
   }
 
   /**
