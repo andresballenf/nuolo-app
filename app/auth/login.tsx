@@ -123,10 +123,6 @@ export default function LoginScreen() {
         }
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        // Mark that credentials can be saved for biometric
-        if (biometricAvailable) {
-          await AsyncStorage.setItem('hasBiometricCredentials', 'true');
-        }
         router.replace('/map');
       }
     } catch (error) {
