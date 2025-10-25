@@ -155,6 +155,20 @@ const secureStorage = {
   }
 };
 
+const clearBiometricCredentials = async () => {
+  try {
+    await Promise.all([
+      secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_EMAIL),
+      secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_TOKEN),
+      secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN),
+      secureStorage.deleteItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP),
+    ]);
+    await AsyncStorage.removeItem('hasBiometricCredentials');
+  } catch (error) {
+    console.error('Error clearing biometric credentials:', error);
+  }
+};
+
 async function withTimeout<T>(
   operation: () => PromiseLike<T>,
   timeoutMs: number,
@@ -600,10 +614,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: email.toLowerCase().trim(),
         password,
       });
-      
+
       await handleLoginAttempt(!error);
       setLastActivity(new Date());
-      
+
+      if (!error && data?.session) {
+        await saveBiometricCredentials(data.session);
+      }
+
       return { error };
     } catch (error) {
       await handleLoginAttempt(false);
@@ -815,6 +833,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Check if stored credentials are still valid
       const isTokenValid = await secureStorage.isTokenValid();
       if (!isTokenValid) {
+        await clearBiometricCredentials();
         return {
           error: new Error('Stored credentials have expired. Please sign in again.'),
         };
@@ -839,13 +858,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             access_token: storedAccessToken,
             refresh_token: storedRefreshToken,
           });
-          
+
           if (!error) {
             setLastActivity(new Date());
+          } else {
+            await clearBiometricCredentials();
           }
-          
+
           return { error };
         } else {
+          await clearBiometricCredentials();
           return {
             error: new Error('No stored credentials found. Please sign in with email and password first.'),
           };
@@ -856,6 +878,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
     } catch (error) {
+      await clearBiometricCredentials();
       return {
         error: error as Error,
       };
@@ -871,14 +894,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         'loginAttempts',
         'lockoutUntil',
       ]);
-      
-      // Clear secure storage
-      await Promise.all([
-        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_EMAIL),
-        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_TOKEN),
-        secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN),
-        secureStorage.deleteItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP),
-      ]);
+
+      await clearBiometricCredentials();
       
       setAuthState({
         user: null,
@@ -905,6 +922,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           secureStorage.setItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN, session.refresh_token),
           secureStorage.setItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP, Date.now().toString()),
         ]);
+        await AsyncStorage.setItem('hasBiometricCredentials', 'true');
         console.log('Biometric credentials saved securely');
       }
     } catch (error) {
