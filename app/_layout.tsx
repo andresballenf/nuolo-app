@@ -21,6 +21,7 @@ import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { TelemetryService } from '../services/TelemetryService';
 import { runStartupHealthChecks } from '../services/RuntimeHealthService';
+import { initializeErrorTracking, shutdownErrorTracking } from '../services/ErrorTrackingService';
 import { DiagnosticsOverlay } from '../components/diagnostics/DiagnosticsOverlay';
 
 // Keep native splash screen visible until our JS tree has mounted and laid out
@@ -86,7 +87,9 @@ export default function RootLayout() {
   const deepLinkQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
+    initializeErrorTracking();
     runStartupHealthChecks();
+    TelemetryService.increment('session_start');
 
     TelemetryService.startAutoFlush();
 
@@ -100,6 +103,7 @@ export default function RootLayout() {
       appStateSubscription.remove();
       TelemetryService.stopAutoFlush();
       TelemetryService.flush().catch(() => {});
+      shutdownErrorTracking();
     };
   }, []);
 

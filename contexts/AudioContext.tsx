@@ -982,14 +982,15 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     text: string,
     preferences: AudioGenerationPreferences
   ) => {
+    const useStreamingMode = (process.env.EXPO_PUBLIC_TTS_STREAMING ?? 'true') === 'true';
     const traceId = PerfTracer.start('audio_pipeline', {
-      mode: 'chunked',
+      mode: useStreamingMode ? 'streaming' : 'chunked',
       attractionId: attraction.id,
       language: preferences.language,
       voiceStyle: preferences.voiceStyle,
     });
     try {
-      console.log('Starting app-orchestrated chunked audio generation for:', attraction.name);
+      console.log(`Starting ${useStreamingMode ? 'streaming' : 'chunked'} audio generation for:`, attraction.name);
       mark('audio_generate_start');
 
       if (!attraction.userLocation) {
@@ -1114,8 +1115,17 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         }
       }));
       
-      // Generate chunks with callbacks
-      await audioGenerationServiceRef.current.generateChunkedAudio(
+      // Choose streaming vs chunked generation.
+      // Streaming (Inworld): sends full text → receives progressive NDJSON segments.
+      //   Bypasses client-side 3,900-char chunking for <500ms TTFA on any text length.
+      //   Automatically falls back to chunked mode if streaming fails.
+      // Chunked (OpenAI fallback): splits text on client → parallel HTTP calls.
+      const useStreaming = (process.env.EXPO_PUBLIC_TTS_STREAMING ?? 'true') === 'true';
+      const generationMethod = useStreaming
+        ? audioGenerationServiceRef.current.generateStreamingAudio.bind(audioGenerationServiceRef.current)
+        : audioGenerationServiceRef.current.generateChunkedAudio.bind(audioGenerationServiceRef.current);
+
+      await generationMethod(
         text,
         preferences.voiceStyle,
         preferences.language,

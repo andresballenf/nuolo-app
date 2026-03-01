@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { storage } from '../lib/utils';
 import { PreferencesService, NarrativeMode } from '../services/PreferencesService';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 
 export type Theme = 'history' | 'nature' | 'architecture' | 'culture' | 'general';
 export type AudioLength = 'short' | 'medium' | 'deep-dive';
@@ -127,7 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserPreferencesState(savedPreferences);
       }
     } catch (error) {
-      console.error('Error loading user preferences from local storage:', error);
+      logger.error('Error loading user preferences from local storage', error);
     }
   };
 
@@ -152,7 +153,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadUserPreferences();
       }
     } catch (error) {
-      console.error('Error loading preferences from Supabase:', error);
+      logger.error('Error loading preferences from Supabase', error, { hasUserId: Boolean(userId) });
       // Fall back to local storage
       loadUserPreferences();
     }
@@ -166,7 +167,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newPreferences = { ...userPreferences, ...preferences };
     setUserPreferencesState(newPreferences);
 
-    console.log('💾 Saving user preferences:', newPreferences);
+    logger.info('Saving user preferences update', {
+      changedKeys: Object.keys(preferences),
+      hasAuthenticatedUser: Boolean(currentUserId),
+    });
 
     try {
       // Save to local storage first
@@ -186,7 +190,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await PreferencesService.saveUserPreferences(currentUserId, supabasePrefs);
       }
     } catch (error) {
-      console.error('Error saving user preferences:', error);
+      logger.error('Error saving user preferences', error, {
+        changedKeys: Object.keys(preferences),
+        hasAuthenticatedUser: Boolean(currentUserId),
+      });
     }
   };
 

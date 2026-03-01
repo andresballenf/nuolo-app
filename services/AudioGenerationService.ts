@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { TTSChunkService, TextChunk } from './TTSChunkService';
 import { AudioChunkManager, AudioChunkData } from './AudioChunkManager';
+import { AudioStreamHandler } from './AudioStreamHandler';
 import { PerfTracer } from '../utils/perfTrace';
 import { AudioCacheService } from './AudioCacheService';
 import { TelemetryService } from './TelemetryService';
@@ -636,6 +637,167 @@ export class AudioGenerationService {
     resolveInFlight(null);
     AudioGenerationService.inFlightRequests.delete(cacheKey);
     return null;
+  }
+
+  /**
+   * Generate audio via Inworld streaming — sends full text, receives progressive NDJSON.
+   * Bypasses client-side chunking entirely; the edge function handles segmentation.
+   * Falls back to generateChunkedAudio() on any error.
+   */
+  async generateStreamingAudio(
+    text: string,
+    voiceStyle: string,
+    language: string = 'en',
+    callbacks?: GenerationCallbacks
+  ): Promise<AudioChunkData[]> {
+    // Cancel any existing generation
+    this.cancel();
+    this.abortController = new AbortController();
+
+    const streamHandler = new AudioStreamHandler();
+    const generatedChunks: AudioChunkData[] = [];
+    let firstChunkEmitted = false;
+
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+    if (!supabaseUrl) {
+      throw new Error('Supabase URL is not configured');
+    }
+
+    // Initialize progress
+    this.generationProgress = {
+      totalChunks: 0,
+      chunksGenerated: 0,
+      chunksLoading: 1,
+      chunksFailed: 0,
+      isComplete: false,
+    };
+
+    if (callbacks?.onProgress) {
+      callbacks.onProgress(this.generationProgress);
+    }
+
+    const url = `${supabaseUrl}/functions/v1/generate-audio-chunk`;
+
+    return new Promise<AudioChunkData[]>((resolve, reject) => {
+      streamHandler.streamAudio(
+        url,
+        {
+          text,
+          chunkIndex: 0,
+          totalChunks: 1,
+          voiceStyle,
+          language,
+          speed: 1.0,
+          stream: true, // Enable streaming mode
+          supabaseAnonKey,
+        },
+        {
+          onMetadata: (metadata) => {
+            console.log('Streaming metadata received:', metadata);
+            this.generationProgress.totalChunks = metadata.totalChunks;
+
+            // Initialize chunk manager timeline with estimated segments
+            if (this.chunkManager && metadata.totalChunks > 0) {
+              const timelineEntries = [];
+              const charsPerSegment = Math.ceil(text.length / metadata.totalChunks);
+              for (let i = 0; i < metadata.totalChunks; i++) {
+                const segChars = Math.min(charsPerSegment, text.length - i * charsPerSegment);
+                timelineEntries.push({
+                  chunkIndex: i,
+                  totalChunks: metadata.totalChunks,
+                  estimatedDuration: Math.ceil(segChars / 15),
+                  text: '', // text not needed for playback
+                });
+              }
+              this.chunkManager.initializeTimeline(timelineEntries);
+              this.chunkManager.setBufferAheadCount(3);
+            }
+
+            if (callbacks?.onProgress) {
+              callbacks.onProgress(this.generationProgress);
+            }
+          },
+
+          onChunk: async (chunk: AudioChunkData) => {
+            console.log(`Streaming chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} received`);
+            generatedChunks.push(chunk);
+
+            // Add to chunk manager for playback
+            if (this.chunkManager) {
+              await this.chunkManager.addChunk(chunk);
+            }
+
+            this.updateProgress({
+              totalChunks: chunk.totalChunks,
+              chunksGenerated: this.generationProgress.chunksGenerated + 1,
+              chunksLoading: Math.max(0, this.generationProgress.chunksLoading - 1),
+            });
+
+            // First chunk triggers playback start
+            if (!firstChunkEmitted) {
+              firstChunkEmitted = true;
+              PerfTracer.mark('first_chunk_generated', { index: chunk.chunkIndex, mode: 'streaming' });
+              if (callbacks?.onFirstChunkReady) {
+                callbacks.onFirstChunkReady(chunk);
+              }
+            }
+
+            if (callbacks?.onChunkGenerated) {
+              callbacks.onChunkGenerated(chunk, this.generationProgress);
+            }
+
+            if (callbacks?.onProgress) {
+              callbacks.onProgress(this.generationProgress);
+            }
+          },
+
+          onComplete: () => {
+            console.log(`Streaming generation complete: ${generatedChunks.length} chunks`);
+            PerfTracer.mark('chunks_generation_complete', { mode: 'streaming' });
+
+            this.updateProgress({ isComplete: true, chunksLoading: 0 });
+
+            if (callbacks?.onComplete) {
+              callbacks.onComplete(generatedChunks.length, this.generationProgress.totalChunks);
+            }
+
+            resolve(generatedChunks);
+          },
+
+          onError: (error: string) => {
+            console.error('Streaming audio error:', error);
+
+            this.updateProgress({
+              chunksFailed: this.generationProgress.chunksFailed + 1,
+              chunksLoading: 0,
+              isComplete: true,
+            });
+
+            // If we got no chunks at all, fall back to chunked generation
+            if (generatedChunks.length === 0) {
+              console.log('Streaming failed with no chunks — falling back to chunked generation');
+              this.generateChunkedAudio(text, voiceStyle, language, callbacks)
+                .then(resolve)
+                .catch(reject);
+            } else {
+              // We got partial results; resolve with what we have
+              if (callbacks?.onComplete) {
+                callbacks.onComplete(generatedChunks.length, this.generationProgress.totalChunks);
+              }
+              resolve(generatedChunks);
+            }
+          },
+        }
+      ).catch((err) => {
+        console.error('Stream handler failed:', err);
+        // Fall back to chunked generation
+        this.generateChunkedAudio(text, voiceStyle, language, callbacks)
+          .then(resolve)
+          .catch(reject);
+      });
+    });
   }
 
   /**

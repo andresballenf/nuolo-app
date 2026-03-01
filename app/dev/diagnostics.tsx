@@ -2,19 +2,41 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { TelemetryService } from '../../services/TelemetryService';
 import { PerfTraceRecord } from '../../utils/perfTrace';
+import type { ReliabilityDashboardSnapshot } from '../../services/TelemetryService';
 
 export default function DiagnosticsScreen() {
   const [traces, setTraces] = useState<PerfTraceRecord[]>([]);
   const [p, setP] = useState<{ p50: number | null; p95: number | null; samples: number }>({ p50: null, p95: null, samples: 0 });
+  const [dashboard, setDashboard] = useState<ReliabilityDashboardSnapshot>(
+    TelemetryService.getReliabilityDashboardSnapshot()
+  );
 
   useEffect(() => {
     setTraces(TelemetryService.getRecentTraces(20));
     TelemetryService.fetchPercentiles().then(setP).catch(() => {});
+    setDashboard(TelemetryService.getReliabilityDashboardSnapshot());
+
+    const id = setInterval(() => {
+      setDashboard(TelemetryService.getReliabilityDashboardSnapshot());
+    }, 2000);
+
+    return () => clearInterval(id);
   }, []);
+
+  const formatRate = (value: number | null) => (value === null ? '-' : `${(value * 100).toFixed(1)}%`);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
       <Text style={styles.h1}>Diagnostics</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.h2}>Reliability Dashboard</Text>
+        <Text style={styles.text}>Captured: {new Date(dashboard.capturedAt).toLocaleTimeString()}</Text>
+        <Text style={styles.text}>Sessions: {dashboard.sessions.success}/{dashboard.sessions.attempts} ({formatRate(dashboard.sessions.successRate)})</Text>
+        <Text style={styles.text}>Auth: {dashboard.auth.success}/{dashboard.auth.attempts} ({formatRate(dashboard.auth.successRate)})</Text>
+        <Text style={styles.text}>Paywall: {dashboard.paywall.success}/{dashboard.paywall.attempts} ({formatRate(dashboard.paywall.successRate)})</Text>
+        <Text style={styles.text}>Audio: {dashboard.audio.success}/{dashboard.audio.attempts} ({formatRate(dashboard.audio.successRate)})</Text>
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.h2}>Audio Pipeline percentiles</Text>

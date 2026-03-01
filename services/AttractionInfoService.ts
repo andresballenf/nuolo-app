@@ -3,6 +3,7 @@ import { AudioStreamHandler, StreamHandlerCallbacks } from './AudioStreamHandler
 import { AudioChunkData } from './AudioChunkManager';
 import { PerfTracer } from '../utils/perfTrace';
 import { deriveSpatialHints } from '../utils/geo';
+import { logger } from '../lib/logger';
 
 // Timed transcript segment interface used for karaoke-style highlighting
 export interface TranscriptWordTiming {
@@ -136,14 +137,16 @@ export class AttractionInfoService {
         aiProvider: preferences.aiProvider || 'openai', // Pass AI provider selection to backend at top level
       };
 
-      console.log('🤖 AI Provider selected:', requestData.aiProvider);
-
-      console.log('Calling attraction-info edge function with:', {
+      logger.info('Calling attraction-info edge function', {
         attractionName,
-        attractionAddress,
-        userLocation,
-        preferences,
-        options,
+        aiProvider: requestData.aiProvider,
+        audioLength: preferences.audioLength,
+        language: preferences.language || 'en',
+        generateAudio: Boolean(options.generateAudio),
+        streamAudio: Boolean(options.streamAudio),
+        testMode: Boolean(options.testMode),
+        hasPoiLocation: Boolean(options.poiLocation),
+        retryAttempt: currentAttempt,
       });
 
       // Add timeout and better error handling
@@ -163,7 +166,10 @@ export class AttractionInfoService {
         PerfTracer.mark('edge_call_end', { fn: 'attraction-info', durationMs: Date.now() - callStart });
 
         if (error) {
-          console.error('Supabase edge function error:', error);
+          logger.error('Supabase attraction-info edge function returned error', error, {
+            attractionName,
+            retryAttempt: currentAttempt,
+          });
           // Check for specific error types
           if (error.message?.includes('Failed to send')) {
             throw new Error('Connection error: Please check your internet connection and try again');
@@ -194,7 +200,11 @@ export class AttractionInfoService {
         if (controller.signal.aborted) {
           // If it's a timeout and we haven't exceeded retries, try again
           if (currentAttempt < maxRetries) {
-            console.log(`Request timeout on attempt ${currentAttempt + 1}, retrying...`);
+            logger.warn('Attraction info request timed out; retrying', {
+              attempt: currentAttempt + 1,
+              maxRetries,
+              attractionName,
+            });
             
             // Wait a bit before retrying
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -214,7 +224,11 @@ export class AttractionInfoService {
         throw timeoutError;
       }
     } catch (error) {
-      console.error(`Error in generateAttractionInfo (attempt ${currentAttempt + 1}):`, error);
+      logger.error('Error generating attraction info', error, {
+        attempt: currentAttempt + 1,
+        attractionName,
+        aiProvider: preferences.aiProvider || 'openai',
+      });
       
       // Return a more user-friendly error message
       let errorMessage = 'Unknown error occurred';
@@ -458,7 +472,10 @@ export class AttractionInfoService {
         callbacks.onComplete();
       }
     } catch (error) {
-      console.error('Stream generation error:', error);
+      logger.error('Stream generation error', error, {
+        attractionName,
+        aiProvider: preferences.aiProvider || 'openai',
+      });
       if (callbacks.onError) {
         callbacks.onError(error instanceof Error ? error.message : 'Stream generation failed');
       }
@@ -524,7 +541,10 @@ export class AttractionInfoService {
       
       return result;
     } catch (error) {
-      console.error('Chunk generation error:', error);
+      logger.error('Chunk generation error', error, {
+        attractionName,
+        aiProvider: preferences.aiProvider || 'openai',
+      });
       throw new Error(
         error instanceof Error ? error.message : 'Failed to generate audio chunks'
       );

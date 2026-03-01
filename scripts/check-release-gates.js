@@ -6,6 +6,7 @@
  * These checks are intentionally static and fast:
  * - Startup runtime env health checks are wired
  * - Telemetry auto-flush is wired in root layout
+ * - Production error tracking initialization is wired
  * - Logger exposes production error-tracking adapter hooks
  */
 
@@ -32,6 +33,18 @@ const checks = [
     id: 'telemetry-autoflush-stop',
     pattern: /TelemetryService\.stopAutoFlush\(/,
     message: 'Root layout must stop telemetry auto-flush on cleanup.',
+  },
+  {
+    file: 'app/_layout.tsx',
+    id: 'error-tracking-init',
+    pattern: /initializeErrorTracking\(\)/,
+    message: 'Root layout must initialize production error tracking.',
+  },
+  {
+    file: 'app/_layout.tsx',
+    id: 'error-tracking-shutdown',
+    pattern: /shutdownErrorTracking\(\)/,
+    message: 'Root layout must shutdown error tracking on cleanup.',
   },
   {
     file: 'services/RuntimeHealthService.ts',

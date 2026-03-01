@@ -44,7 +44,7 @@ interface User {
   profile?: {
     fullName?: string;
     avatar?: string;
-    preferences?: Record<string, any>;
+    preferences?: Record<string, unknown>;
   };
 }
 
@@ -62,7 +62,7 @@ interface AuthState {
 interface AuthContextType extends AuthState {
   // Authentication methods
   signIn: (email: string, password: string) => Promise<{ error?: AuthError | null; biometricSaved?: boolean }>;
-  signUp: (email: string, password: string, metadata?: Record<string, any>) => Promise<{ error?: AuthError | null }>;
+  signUp: (email: string, password: string, metadata?: Record<string, unknown>) => Promise<{ error?: AuthError | null }>;
   signInWithOAuth: (provider: 'google' | 'apple') => Promise<{ error?: AuthError | null }>;
   signInWithMagicLink: (email: string) => Promise<{ error?: AuthError | null }>;
   signInWithBiometric: () => Promise<{ error?: Error | null }>;
@@ -122,6 +122,8 @@ const ASYNC_STORAGE_KEYS = {
 // Token expiration time (7 days)
 const TOKEN_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000;
 const PROFILE_FETCH_TIMEOUT = 5000;
+const REFRESH_SESSION_MIN_INTERVAL = 10_000;
+const REFRESH_SESSION_ERROR_COOLDOWN = 15_000;
 
 const isRefreshTokenError = (message: string | undefined): boolean => {
   if (!message) return false;
@@ -243,8 +245,6 @@ const buildUserFromSession = (sessionUser: Session['user']): User => ({
   email: sessionUser.email || '',
   emailVerified: !!sessionUser.email_confirmed_at,
 });
-
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
@@ -259,6 +259,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   const [lastActivity, setLastActivity] = useState<Date>(new Date());
   const biometricSignInInProgress = useRef(false);
+  const refreshSessionInProgress = useRef<Promise<void> | null>(null);
+  const lastRefreshAttemptAtRef = useRef(0);
+  const lastRefreshErrorAtRef = useRef(0);
+  const signOutInProgressRef = useRef(false);
+
+  const clearAuthSessionState = useCallback(async (reason: string, clearBiometric: boolean = false) => {
+    try {
+      await AsyncStorage.multiRemove(['supabase.auth.token', 'loginAttempts', 'lockoutUntil']);
+      if (clearBiometric) await clearBiometricCredentials();
+    } catch (error) {
+      logger.error('Failed to clear auth session storage artifacts', error, { reason, clearBiometric });
+    }
+
+    setAuthState(prev => ({
+      ...prev,
+      user: null,
+      session: null,
+      isAuthenticated: false,
+      loading: false,
+    }));
+    setLastActivity(new Date());
+    logger.warn('Auth session state cleared', { reason, clearBiometric });
+  }, []);
 
   // Check for biometric availability
   useEffect(() => {
@@ -387,15 +410,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Handle token refresh errors specifically
         if (event === 'TOKEN_REFRESHED' && !session) {
           logger.warn('Token refresh failed; clearing session');
-          // Clear invalid session data
-          await AsyncStorage.removeItem('supabase.auth.token');
-          setAuthState(prev => ({
-            ...prev,
-            user: null,
-            session: null,
-            isAuthenticated: false,
-            loading: false,
-          }));
+          TelemetryService.increment('auth_token_refreshed_without_session');
+          await clearAuthSessionState('token_refreshed_without_session', true);
           return;
         }
 
@@ -481,7 +497,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
     
     return () => subscription.unsubscribe();
-  }, []);
+  }, [clearAuthSessionState]);
   
   // Session timeout monitoring
   useEffect(() => {
@@ -531,7 +547,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userData.profile = {
           fullName: data.full_name ?? undefined,
           avatar: data.avatar_url ?? undefined,
-          preferences: data.preferences ? (data.preferences as Record<string, any>) : undefined,
+          preferences: data.preferences ? (data.preferences as Record<string, unknown>) : undefined,
         };
       }
     } catch (error) {
@@ -707,7 +723,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, metadata?: Record<string, any>) => {
+  const signUp = async (email: string, password: string, metadata?: Record<string, unknown>) => {
     try {
       // Validate email
       if (!validateEmail(email)) {
@@ -1021,7 +1037,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    if (signOutInProgressRef.current) {
+      logger.debug('Sign-out request ignored because a sign-out is already in progress');
+      TelemetryService.increment('auth_sign_out_deduped');
+      return;
+    }
+
+    signOutInProgressRef.current = true;
     try {
+      TelemetryService.increment('auth_sign_out_requested');
       await supabase.auth.signOut();
 
       // Clear login attempt data from AsyncStorage
@@ -1045,8 +1069,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginAttempts: 0,
         lockedUntil: null,
       });
+      TelemetryService.increment('auth_sign_out_success');
     } catch (error) {
+      TelemetryService.increment('auth_sign_out_error');
       logger.error('Sign out error', error);
+    } finally {
+      signOutInProgressRef.current = false;
     }
   };
   
@@ -1152,53 +1180,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   
   const refreshSession = async () => {
-    try {
-      const { data, error } = await supabase.auth.refreshSession();
-      
-      if (error) {
-        TelemetryService.increment('auth_refresh_session_error');
-        logger.error('Session refresh error', error);
-        
-        // If refresh token is invalid, clear session
-        if (isRefreshTokenError(error.message)) {
-          TelemetryService.increment('auth_refresh_session_invalid_refresh_token');
-          logger.warn('Invalid refresh token; clearing session');
-          
-          // Clear all auth data
-          await AsyncStorage.multiRemove([
-            'supabase.auth.token',
-            'loginAttempts',
-            'lockoutUntil'
-          ]);
-          
-          // Clear stored biometric credentials and metadata
-          await clearBiometricCredentials();
-          
-          // Reset auth state
-          setAuthState(prev => ({
-            ...prev,
-            user: null,
-            session: null,
-            isAuthenticated: false,
-            loading: false,
-          }));
-          
-          return;
+    const now = Date.now();
+
+    if (refreshSessionInProgress.current) {
+      TelemetryService.increment('auth_refresh_session_deduped');
+      await refreshSessionInProgress.current;
+      return;
+    }
+
+    if (now - lastRefreshAttemptAtRef.current < REFRESH_SESSION_MIN_INTERVAL) {
+      TelemetryService.increment('auth_refresh_session_skipped_min_interval');
+      return;
+    }
+
+    if (lastRefreshErrorAtRef.current > 0 && now - lastRefreshErrorAtRef.current < REFRESH_SESSION_ERROR_COOLDOWN) {
+      TelemetryService.increment('auth_refresh_session_skipped_error_cooldown');
+      return;
+    }
+
+    lastRefreshAttemptAtRef.current = now;
+
+    const refreshTask = (async () => {
+      try {
+        TelemetryService.increment('auth_refresh_session_requested');
+        const { data, error } = await supabase.auth.refreshSession();
+
+        if (error) {
+          TelemetryService.increment('auth_refresh_session_error');
+          logger.error('Session refresh error', error);
+          lastRefreshErrorAtRef.current = Date.now();
+
+          if (isRefreshTokenError(error.message)) {
+            TelemetryService.increment('auth_refresh_session_invalid_refresh_token');
+            logger.warn('Invalid refresh token; clearing session');
+            await clearAuthSessionState('invalid_refresh_token', true);
+            return;
+          }
         }
+
+        if (data?.session) {
+          TelemetryService.increment('auth_refresh_session_success');
+          lastRefreshErrorAtRef.current = 0;
+          setLastActivity(new Date());
+          setAuthState(prev => ({ ...prev, session: data.session }));
+        }
+      } catch (error) {
+        TelemetryService.increment('auth_refresh_session_exception');
+        lastRefreshErrorAtRef.current = Date.now();
+        logger.error('Session refresh error', error);
       }
-      
-      if (data?.session) {
-        TelemetryService.increment('auth_refresh_session_success');
-        setLastActivity(new Date());
-        setAuthState(prev => ({
-          ...prev,
-          session: data.session,
-        }));
-      }
-    } catch (error) {
-      TelemetryService.increment('auth_refresh_session_exception');
-      logger.error('Session refresh error', error);
-      // Don't throw - just log the error
+    })();
+
+    refreshSessionInProgress.current = refreshTask;
+    try {
+      await refreshTask;
+    } finally {
+      refreshSessionInProgress.current = null;
     }
   };
   

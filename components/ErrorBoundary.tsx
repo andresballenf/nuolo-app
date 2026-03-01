@@ -1,5 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, Button } from 'react-native';
+import { logger } from '../lib/logger';
+import { TelemetryService } from '../services/TelemetryService';
 
 interface Props {
   children: ReactNode;
@@ -23,11 +25,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Log error to console in development
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
-    
-    // In production, you would send this to an error reporting service
-    // like Sentry, Bugsnag, etc.
+    TelemetryService.increment('session_crash_boundary');
+    logger.error('ErrorBoundary caught runtime render error', error, {
+      componentStack: errorInfo.componentStack,
+    });
   }
 
   handleReset = () => {

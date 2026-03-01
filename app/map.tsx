@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, StyleSheet, Alert, StatusBar, Text } from 'react-native';
 import { Redirect } from 'expo-router';
-import * as Location from 'expo-location';
 import type MapView from 'react-native-maps';
 import MapViewComponent, { type SearchAreaHandle } from '../components/map/MapView';
 import { TestLocationControls } from '../components/map/TestLocationControls';
@@ -15,19 +14,17 @@ import { RevenueCatPaywallModal } from '../components/ui/RevenueCatPaywallModal'
 import { useApp } from '../contexts/AppContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAudio } from '../contexts/AudioContext';
-import type { AttractionForAudio, AudioGenerationPreferences } from '../contexts/AudioContext';
 import { useMonetization } from '../contexts/MonetizationContext';
 import { useContentAccess } from '../contexts/MonetizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { PointOfInterest } from '../services/GooglePlacesService';
-import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
-import { Button } from '../components/ui/Button';
+import { TranscriptSegment } from '../services/AttractionInfoService';
 import { useMapSettings } from '../contexts/MapSettingsContext';
 import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
 import { logger } from '../lib/logger';
 import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
+import { useMapAudioGuide } from '../hooks/useMapAudioGuide';
 import { useMapSheetState } from '../hooks/useMapSheetState';
-import { getFeatureFlag } from '../config/featureFlags';
 import { buildTranscriptSegments } from '../utils/transcriptSegments';
 
 export default function MapScreen() {
@@ -59,10 +56,8 @@ export default function MapScreen() {
     handlePointsOfInterestUpdate,
   } = useMapSheetState();
   const [selectedAttraction, setSelectedAttractionLocal] = useState<PointOfInterest | null>(null);
-  const [selectedAttractionIndex, setSelectedAttractionIndex] = useState(0);
   const [attractionInfo, setAttractionInfo] = useState<string | null>(null);
   const [attractionAudio, setAttractionAudio] = useState<string | null>(null);
-  const [isGeneratingInfo, setIsGeneratingInfo] = useState(false);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[] | undefined>(undefined);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -70,16 +65,26 @@ export default function MapScreen() {
   const { settings: mapSettings, setSettings: setMapSettings } = useMapSettings();
   const mapType = mapSettings.mapType;
   const mapTilt = mapSettings.tilt;
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [triggerGPS, setTriggerGPS] = useState(0);
-  const [isEnablingGPS, setIsEnablingGPS] = useState(false);
+  const triggerGPS = 0;
 
   // Search state
-  const [showSearchButton, setShowSearchButton] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const mapSearchRef = useRef<SearchAreaHandle | null>(null);
   const mapRef = useRef<MapView | null>(null);
+
+  const { isGeneratingInfo, isEnablingGPS, handleGenerateInfo, handleEnableGPS, handlePlayAudio } = useMapAudioGuide({
+    gpsStatus,
+    setGpsStatus,
+    testLocation,
+    isTestModeEnabled,
+    setIsTestModeEnabled,
+    userPreferences,
+    generateAudioGuideWithValidation,
+    setShowPaywall,
+    recordAttractionUsage,
+    audioContext,
+    setAttractionInfo,
+  });
 
   // All callbacks and effects before conditional returns
 
@@ -104,9 +109,7 @@ export default function MapScreen() {
   }, [audioContext.duration, attractionInfo, transcriptSegments]);
 
   // Memoized callbacks to prevent re-renders
-  const handleSearchStateChange = useCallback((showButton: boolean, searching: boolean) => {
-    // Only update if values actually changed to prevent unnecessary re-renders
-    setShowSearchButton(prev => prev !== showButton ? showButton : prev);
+  const handleSearchStateChange = useCallback((_showButton: boolean, searching: boolean) => {
     setIsSearching(prev => prev !== searching ? searching : prev);
   }, []);
 
@@ -131,9 +134,7 @@ export default function MapScreen() {
   }, [mapTilt]);
 
   const handleAttractionSelect = useCallback((attraction: PointOfInterest) => {
-    const index = attractions.findIndex(a => a.id === attraction.id);
     setSelectedAttractionLocal(attraction);
-    setSelectedAttractionIndex(index >= 0 ? index : 0);
     setAttractionInfo(null);
     setAttractionAudio(null);
     setTranscriptSegments(undefined);
@@ -220,9 +221,7 @@ export default function MapScreen() {
   ];
 
   const handleMarkerPress = (poi: PointOfInterest) => {
-    const index = attractions.findIndex(a => a.id === poi.id);
     setSelectedAttractionLocal(poi);
-    setSelectedAttractionIndex(index >= 0 ? index : 0);
     setAttractionInfo(null);
     setAttractionAudio(null);
     setTranscriptSegments(undefined);
@@ -289,410 +288,9 @@ export default function MapScreen() {
       `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`
     );
   };
-
-
-  const handleGenerateInfo = async (attraction: PointOfInterest) => {
-    setIsGeneratingInfo(true);
-    setAttractionInfo(null);
-
-    try {
-      const currentLocation = testLocation 
-        ? { lat: testLocation.latitude, lng: testLocation.longitude }
-        : (gpsStatus.latitude !== null && gpsStatus.longitude !== null
-            ? { lat: gpsStatus.latitude, lng: gpsStatus.longitude }
-            : null);
-
-      if (!currentLocation) {
-        throw new Error('Location is required to generate attraction information');
-      }
-
-      if (!AttractionInfoService.validateUserLocation(currentLocation)) {
-        throw new Error('Invalid location coordinates');
-      }
-
-      logger.info('Generating attraction info', { attractionName: attraction.name });
-
-      const attractionInfo = await AttractionInfoService.generateTextInfo(
-        attraction.name,
-        attraction.description || 'Unknown location',
-        currentLocation,
-        {
-          theme: userPreferences.theme,
-          audioLength: userPreferences.audioLength,
-          voiceStyle: userPreferences.voiceStyle,
-          language: userPreferences.language,
-          aiProvider: userPreferences.aiProvider,
-        },
-        isTestModeEnabled,
-        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
-      );
-      
-      setAttractionInfo(attractionInfo);
-      logger.info('Successfully generated attraction info', { attractionName: attraction.name });
-      
-    } catch (error) {
-      logger.error('Error generating attraction info', error, { attractionName: attraction.name });
-      
-      const errorMessage = AttractionInfoService.getErrorMessage(error);
-      
-      Alert.alert(
-        'Error',
-        errorMessage,
-        [
-          { text: 'OK' },
-          { 
-            text: 'Retry', 
-            onPress: () => handleGenerateInfo(attraction) 
-          }
-        ]
-      );
-    } finally {
-      setIsGeneratingInfo(false);
-    }
-  };
-
-  // NEW: Chunked audio generation with streaming support
-  const handlePlayAudio = async (attraction: PointOfInterest) => {
-    let shouldRecordUsage = false;
-
-    try {
-      // Contextual GPS prompt if location is not available
-      if (!gpsStatus.active && !testLocation && !isTestModeEnabled) {
-        Alert.alert(
-          'Enable Location',
-          'Enable GPS to get personalized audio guides based on your location, or use test mode to explore.',
-          [
-            {
-              text: 'Use Test Mode',
-              onPress: () => setIsTestModeEnabled(true),
-            },
-            {
-              text: 'Enable GPS',
-              onPress: async () => {
-                await handleEnableGPS();
-                // Retry audio generation after GPS is enabled
-                if (gpsStatus.active) {
-                  handlePlayAudio(attraction);
-                }
-              },
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ]
-        );
-        return;
-      }
-
-      // Check monetization entitlements first
-      const validationResult = await generateAudioGuideWithValidation(attraction.id, attraction.name);
-
-      if (!validationResult.canGenerate) {
-        // Show paywall if user can't generate
-        if (validationResult.shouldShowPaywall) {
-          setShowPaywall(true, validationResult.paywallContext);
-        }
-        return;
-      }
-
-      // Store whether we need to record usage after successful generation
-      shouldRecordUsage = validationResult.shouldRecordUsage;
-
-      // Clear any existing generation state first (allows switching attractions)
-      audioContext.clearGenerationState();
-      
-      // Start loading state immediately for instant UI feedback
-      audioContext.startGeneratingAudio(attraction.id, attraction.name);
-
-      const currentLocation = testLocation 
-        ? { lat: testLocation.latitude, lng: testLocation.longitude }
-        : (gpsStatus.latitude !== null && gpsStatus.longitude !== null
-            ? { lat: gpsStatus.latitude, lng: gpsStatus.longitude }
-            : null);
-
-      if (!currentLocation) {
-        audioContext.setGenerationError('Location is required for audio generation');
-        Alert.alert('Error', 'Location is required for audio generation');
-        return;
-      }
-
-      if (!AttractionInfoService.validateUserLocation(currentLocation)) {
-        audioContext.setGenerationError('Invalid location coordinates');
-        Alert.alert('Error', 'Invalid location coordinates');
-        return;
-      }
-
-      logger.info('Starting chunked audio generation', { attractionName: attraction.name });
-      logger.debug('Audio generation preferences', userPreferences);
-      
-      // First generate the text content
-      const text = await AttractionInfoService.generateTextInfo(
-        attraction.name,
-        attraction.description || 'Unknown location',
-        currentLocation,
-        {
-          theme: userPreferences.theme,
-          audioLength: userPreferences.audioLength,
-          voiceStyle: userPreferences.voiceStyle,
-          language: userPreferences.language,
-          aiProvider: userPreferences.aiProvider,
-        },
-        isTestModeEnabled,
-        { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
-      );
-
-      logger.info('Narration text generated', { characterCount: text.length });
-      
-      // Update UI with text immediately
-      setAttractionInfo(text);
-      
-      // Feature flags for generation pipeline
-      const useAppChunkedAudio = getFeatureFlag('audio_chunked_pipeline');
-      let audioGenerated = false;
-      const useChunkedStreaming = getFeatureFlag('audio_streaming_pipeline');
-      
-      if (useChunkedStreaming) {
-        try {
-          // Try the new chunked streaming method
-          await AttractionInfoService.streamGenerateTextAndAudio(
-        attraction.name,
-        attraction.description || 'Unknown location',
-        currentLocation,
-        {
-          theme: userPreferences.theme,
-          audioLength: userPreferences.audioLength,
-          voiceStyle: userPreferences.voiceStyle,
-          language: userPreferences.language,
-          aiProvider: userPreferences.aiProvider,
-        },
-        {
-          onText: (receivedText) => {
-            // Text already generated above, but update if needed
-            if (receivedText && receivedText.length > 0) {
-              setAttractionInfo(receivedText);
-            }
-          },
-          onMetadata: (metadata) => {
-            logger.debug('Audio metadata received', metadata);
-            // Metadata is logged but state update happens in AudioContext
-          },
-          onChunk: async (chunk) => {
-            logger.debug('Received audio chunk', {
-              chunkIndex: chunk.chunkIndex + 1,
-              totalChunks: chunk.totalChunks,
-            });
-            
-            // The AudioContext's streamGenerateAndPlay will handle chunk playback
-            // Just log for debugging
-            if (chunk.chunkIndex === 0) {
-              logger.info('First audio chunk received; playback should start soon');
-              audioContext.clearGenerationState();
-            }
-          },
-          onComplete: () => {
-            logger.info('All audio chunks received successfully');
-            audioContext.clearGenerationState();
-          },
-          onError: (error) => {
-            logger.error('Streaming error during audio generation', error);
-            audioContext.setGenerationError(error);
-            Alert.alert('Audio Error', error);
-          }
-        },
-        isTestModeEnabled
-      );
-      
-          audioGenerated = true;
-          logger.info('Chunked audio streaming initiated');
-        } catch (streamError) {
-          logger.warn('Chunked streaming failed; trying fallback method', streamError);
-        }
-      }
-      
-      // Use app-orchestrated chunked audio generation (NEW - unlimited text length!)
-      if (!audioGenerated && useAppChunkedAudio) {
-        try {
-          logger.info('Using app-orchestrated chunked audio generation');
-          
-          // Use the new chunked generation method from AudioContext
-          const attractionForAudio: AttractionForAudio = {
-            id: attraction.id,
-            name: attraction.name,
-            address: attraction.description || 'Unknown location',
-            userLocation: currentLocation,
-            photos: attraction.photos, // Pass the photos array for image display
-          };
-
-          const audioPreferences: AudioGenerationPreferences = {
-            theme: userPreferences.theme,
-            audioLength: userPreferences.audioLength,
-            voiceStyle: userPreferences.voiceStyle,
-            language: userPreferences.language,
-          };
-
-          await audioContext.generateChunkedAudio(
-            attractionForAudio,
-            text,
-            audioPreferences
-          );
-          
-          audioGenerated = true;
-          logger.info('App-orchestrated chunked audio generation initiated');
-          
-          // Record usage for free tier users after successful generation
-          if (shouldRecordUsage) {
-            try {
-              await recordAttractionUsage(attraction.id);
-              logger.info('Recorded attraction usage after successful chunked audio generation', {
-                attractionId: attraction.id,
-              });
-            } catch (usageError) {
-              logger.error('Failed to record attraction usage after chunked audio generation', usageError, {
-                attractionId: attraction.id,
-              });
-              // Don't fail the audio generation for usage recording errors
-            }
-          }
-          
-        } catch (chunkError) {
-          logger.error('App-orchestrated chunked audio failed', chunkError);
-
-          const errorMessage = chunkError instanceof Error ? chunkError.message : String(chunkError);
-          
-          // Show helpful error messages
-          if (errorMessage.includes('not deployed')) {
-            Alert.alert(
-              'Setup Required',
-              'The chunked audio feature requires deploying a Supabase function. Using standard audio generation instead.',
-              [{ text: 'OK' }]
-            );
-          } else if (errorMessage.includes('quota exceeded')) {
-            Alert.alert(
-              'OpenAI Quota Exceeded',
-              'The OpenAI API has reached its usage limit. Please add credits to your OpenAI account at platform.openai.com',
-              [
-                { text: 'OK' },
-                { text: 'Open OpenAI', onPress: () => {
-                  // Could open URL if needed
-                  logger.info('Prompted user to visit OpenAI billing page');
-                }}
-              ]
-            );
-            // Don't fall through - quota issue affects all methods
-            audioContext.setGenerationError('OpenAI quota exceeded');
-            return;
-          } else if (errorMessage.includes('API key')) {
-            Alert.alert(
-              'API Key Issue',
-              errorMessage,
-              [{ text: 'OK' }]
-            );
-            // Don't fall through - API key issue affects all methods
-            audioContext.setGenerationError(errorMessage);
-            return;
-          }
-          // Will fall through to old method as backup for other errors
-        }
-      }
-      
-      // Fallback to old single-chunk method (limited to 4096 chars)
-      if (!audioGenerated) {
-        try {
-          logger.info('Using fallback single-chunk audio generation');
-
-          if (text.length > 3900) {
-            throw new Error('Chunked audio is required for this narration length. Please retry once the chunk generator is available.');
-          }
-
-          const audioData = await AttractionInfoService.generateAudio(
-            attraction.name,
-            attraction.description || 'Unknown location',
-            currentLocation,
-            {
-              theme: userPreferences.theme,
-              audioLength: userPreferences.audioLength,
-              voiceStyle: userPreferences.voiceStyle,
-              language: userPreferences.language,
-              aiProvider: userPreferences.aiProvider,
-            },
-            text,
-            isTestModeEnabled,
-            { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
-          );
-          
-          // Create audio track with the old method
-          const audioTrack = {
-            id: attraction.id,
-            title: attraction.name,
-            subtitle: attraction.description || 'Audio Guide',
-            description: text,
-            location: attraction.description,
-            category: userPreferences.theme,
-            audioData: audioData,
-            duration: 0,
-            imageUrl: attraction.photos && attraction.photos.length > 0 ? attraction.photos[0] : undefined,
-          };
-          
-          audioContext.addTrack(audioTrack);
-          await audioContext.setCurrentTrack(audioTrack);
-          await audioContext.play();
-          
-          audioGenerated = true;
-          logger.info('Audio generation completed using standard method');
-          
-          // Record usage for free tier users after successful generation
-          if (shouldRecordUsage) {
-            try {
-              await recordAttractionUsage(attraction.id);
-              logger.info('Recorded attraction usage after fallback audio generation', {
-                attractionId: attraction.id,
-              });
-            } catch (usageError) {
-              logger.error('Failed to record attraction usage after fallback audio generation', usageError, {
-                attractionId: attraction.id,
-              });
-              // Don't fail the audio generation for usage recording errors
-            }
-          }
-        } catch (audioError) {
-          logger.error('Audio generation failed', audioError);
-          throw audioError;
-        }
-      }
-
-    } catch (error) {
-      logger.error('Error in chunked audio generation', error);
-      
-      const errorMessage = AttractionInfoService.getErrorMessage(error);
-      
-      // Clear generation state on error to allow retry
-      audioContext.setGenerationError(errorMessage);
-      
-      Alert.alert(
-        'Audio Generation Failed',
-        errorMessage,
-        [
-          { text: 'OK' },
-          { 
-            text: 'Retry', 
-            onPress: () => handlePlayAudio(attraction) 
-          }
-        ]
-      );
-    }
-  };
-
   // Update map camera when tilt changes - REMOVED to prevent drift
   // The tilt being related to drift speed indicates the camera animation is the issue
   // Let the user control tilt manually through map gestures instead
-
-  // Legacy function kept for compatibility (will be removed in Phase 4)
-  const handleRequestAudio = async () => {
-    if (!selectedAttraction) {
-      Alert.alert('Error', 'No attraction selected for audio generation');
-      return;
-    }
-
-    await handlePlayAudio(selectedAttraction);
-  };
 
   const handleCloseBottomSheet = () => {
     setIsBottomSheetVisible(false);
@@ -701,90 +299,6 @@ export default function MapScreen() {
     setAttractionAudio(null);
     setIsBottomSheetOpen(false);
     setSelectedAttraction(null);
-  };
-
-  const handleEnableGPS = async () => {
-    try {
-      setIsEnablingGPS(true);
-      logger.info('GPS enable requested by user');
-
-      // Request location permission
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      logger.info('Location permission request result', { status });
-
-      if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission',
-          'Enable location to discover nearby attractions automatically. You can continue using test mode or search to explore locations.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      logger.info('Location permission granted; acquiring current location');
-
-      // Get current location with timeout and fallback
-      let location;
-      try {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-          mayShowUserSettingsDialog: true,
-          });
-
-      } catch (highAccuracyError) {
-        logger.warn('High accuracy location failed; trying balanced accuracy', highAccuracyError);
-        // Fallback to balanced accuracy if high accuracy fails
-        try {
-          location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-            mayShowUserSettingsDialog: true,
-          });
-        } catch (balancedError) {
-          logger.warn('Balanced accuracy location failed; trying lowest accuracy', balancedError);
-          // Last resort: try lowest accuracy
-          location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Lowest,
-            mayShowUserSettingsDialog: true,
-          });
-        }
-      }
-
-      logger.info('Current location acquired for GPS enable flow', {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-
-      // Update GPS status with actual location data
-      setGpsStatus({
-        active: true,
-        locked: true,
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        accuracy: location.coords.accuracy,
-        lastUpdated: new Date(),
-      });
-
-      logger.info('GPS enabled successfully with location data');
-    } catch (error) {
-      logger.error('Error enabling GPS', error);
-
-      // Reset GPS status if there was an error
-      setGpsStatus({ active: false, locked: false });
-
-      Alert.alert(
-        'GPS Error',
-        'Unable to get your current location. You can continue using test mode or search to explore locations.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setIsEnablingGPS(false);
-    }
-  };
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    // The refresh will be handled by the MapView component
-    setTimeout(() => setIsRefreshing(false), 1000);
   };
 
   // Gracefully handle no GPS - show map with manual controls instead of blocking

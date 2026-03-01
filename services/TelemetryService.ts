@@ -17,6 +17,21 @@ interface AudioMetricRow {
 
 type CounterMap = Record<string, number>;
 
+interface ReliabilityMetricSnapshot {
+  attempts: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+}
+
+export interface ReliabilityDashboardSnapshot {
+  capturedAt: string;
+  sessions: ReliabilityMetricSnapshot;
+  auth: ReliabilityMetricSnapshot;
+  paywall: ReliabilityMetricSnapshot;
+  audio: ReliabilityMetricSnapshot;
+}
+
 class TelemetryServiceImpl {
   private buffer: AudioMetricRow[] = [];
   private maxBuffer = 20;
@@ -182,6 +197,45 @@ class TelemetryServiceImpl {
 
   static getAll(): CounterMap {
     return { ...TelemetryServiceImpl.counters };
+  }
+
+  private buildMetricSnapshot(attempts: number, success: number): ReliabilityMetricSnapshot {
+    const safeAttempts = Math.max(0, attempts);
+    const safeSuccess = Math.max(0, Math.min(success, safeAttempts));
+    const failure = Math.max(0, safeAttempts - safeSuccess);
+
+    return {
+      attempts: safeAttempts,
+      success: safeSuccess,
+      failure,
+      successRate: safeAttempts > 0 ? Number((safeSuccess / safeAttempts).toFixed(4)) : null,
+    };
+  }
+
+  getReliabilityDashboardSnapshot(): ReliabilityDashboardSnapshot {
+    const sessionStarts = TelemetryServiceImpl.get('session_start');
+    const sessionCrashes = TelemetryServiceImpl.get('session_crash_boundary') + TelemetryServiceImpl.get('session_crash_uncaught');
+    const sessionSuccess = Math.max(0, sessionStarts - sessionCrashes);
+
+    const authSuccess = TelemetryServiceImpl.get('auth_sign_in_success');
+    const authFailures =
+      TelemetryServiceImpl.get('auth_sign_in_error') +
+      TelemetryServiceImpl.get('auth_sign_in_exception');
+    const authAttempts = authSuccess + authFailures;
+
+    const paywallAttempts = TelemetryServiceImpl.get('paywall_open_attempt');
+    const paywallSuccess = TelemetryServiceImpl.get('paywall_open_success');
+
+    const audioAttempts = TelemetryServiceImpl.get('audio_generation_attempt');
+    const audioSuccess = TelemetryServiceImpl.get('audio_generation_success');
+
+    return {
+      capturedAt: new Date().toISOString(),
+      sessions: this.buildMetricSnapshot(sessionStarts, sessionSuccess),
+      auth: this.buildMetricSnapshot(authAttempts, authSuccess),
+      paywall: this.buildMetricSnapshot(paywallAttempts, paywallSuccess),
+      audio: this.buildMetricSnapshot(audioAttempts, audioSuccess),
+    };
   }
 
   reset() {

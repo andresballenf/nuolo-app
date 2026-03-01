@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".tmp-tests",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2020",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "tests/unit/**/*.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "supabase/functions"
+  ]
+}

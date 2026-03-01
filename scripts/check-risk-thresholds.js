@@ -13,9 +13,9 @@ const ROOT = process.cwd();
 const RISK_THRESHOLDS = [
   {
     file: 'app/map.tsx',
-    maxLines: 1000,
-    maxAny: 2,
-    maxConsole: 40,
+    maxLines: 700,
+    maxAny: 1,
+    maxConsole: 0,
   },
   {
     file: 'contexts/AuthContext.tsx',
@@ -39,7 +39,25 @@ const RISK_THRESHOLDS = [
     file: 'components/map/MapView.tsx',
     maxLines: 650,
     maxAny: 2,
-    maxConsole: 20,
+    maxConsole: 0,
+  },
+  {
+    file: 'contexts/AppContext.tsx',
+    maxLines: 300,
+    maxAny: 0,
+    maxConsole: 0,
+  },
+  {
+    file: 'services/AttractionInfoService.ts',
+    maxLines: 700,
+    maxAny: 5,
+    maxConsole: 0,
+  },
+  {
+    file: 'hooks/useMapAudioGuide.ts',
+    maxLines: 650,
+    maxAny: 0,
+    maxConsole: 0,
   },
 ];
 

@@ -41,6 +41,7 @@ logs/
 # Misc
 coverage/
 .tmp/
+.tmp-tests/
 .cypress/
 .idea/
 .vscode/*

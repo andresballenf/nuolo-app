@@ -38,10 +38,21 @@ export const RevenueCatPaywallModal: React.FC<RevenueCatPaywallModalProps> = ({
 
   useEffect(() => {
     if (visible) {
-      TelemetryService.increment('paywall_open_success');
-      logger.info('RevenueCat paywall opened', { trigger, attractionId, attractionName });
+      TelemetryService.increment('paywall_open_attempt');
+
+      if (initialized) {
+        TelemetryService.increment('paywall_open_success');
+        logger.info('RevenueCat paywall opened', { trigger, attractionId, attractionName });
+      } else {
+        TelemetryService.increment('paywall_open_error');
+        logger.warn('Paywall open requested before monetization initialization', {
+          trigger,
+          attractionId,
+          attractionName,
+        });
+      }
     }
-  }, [visible, trigger, attractionId, attractionName]);
+  }, [visible, initialized, trigger, attractionId, attractionName]);
 
   const handleDismiss = async () => {
     TelemetryService.increment('paywall_dismissed');
