@@ -37,6 +37,16 @@ const RULES = [
     message: 'Import react-native-purchases-ui only in the centralized RevenueCat paywall component.',
   },
   {
+    id: 'direct-revenuecat-paywall-import',
+    regex: /from\s+['"][^'"]*components\/ui\/RevenueCatPaywallModal['"]/g,
+    message: 'RevenueCatPaywallModal must be imported only from app/map runtime flow (or deprecated purchase examples).',
+  },
+  {
+    id: 'direct-revenuecat-paywall-require',
+    regex: /require\(\s*['"][^'"]*components\/ui\/RevenueCatPaywallModal['"]\s*\)/g,
+    message: 'RevenueCatPaywallModal must be required only from app/map runtime flow (or deprecated purchase examples).',
+  },
+  {
     id: 'legacy-purchase-hook-runtime-import',
     regex: /from\s+['"][^'"]*hooks\/usePurchaseIntegration['"]/g,
     message: 'Runtime code must not import usePurchaseIntegration; route paywall state through MonetizationContext.',
@@ -63,6 +73,14 @@ const ALLOWED_PATHS_BY_RULE = {
   'deprecated-purchase-paywall-import': [],
   'direct-purchases-ui-import': [
     /^components\/ui\/RevenueCatPaywallModal\.tsx$/,
+  ],
+  'direct-revenuecat-paywall-import': [
+    /^app\/map\.tsx$/,
+    /^components\/purchase\/.+/,
+  ],
+  'direct-revenuecat-paywall-require': [
+    /^app\/map\.tsx$/,
+    /^components\/purchase\/.+/,
   ],
   'legacy-purchase-hook-runtime-import': [
     /^components\/purchase\/.+/,

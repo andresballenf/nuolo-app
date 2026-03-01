@@ -3,12 +3,12 @@ import Purchases, {
   PurchasesOfferings,
   PurchasesPackage,
   CustomerInfo,
-  PurchasesStoreProduct,
   PurchasesEntitlementInfo,
   LOG_LEVEL,
 } from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { monetizationRpcContract } from './MonetizationRpcContract';
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -92,23 +92,6 @@ interface RevenueCatStatus {
   hasCurrentOffering: boolean;
   currentOfferingIdentifier: string | null;
   availablePackageCount: number;
-}
-
-interface SubscriptionStateV2Row {
-  is_active?: boolean;
-  subscription_type?: string | null;
-  expires_at?: string | null;
-  in_grace_period?: boolean;
-  in_trial?: boolean;
-  trial_ends_at?: string | null;
-}
-
-interface UserEntitlementsV2Row {
-  has_unlimited_access?: boolean;
-  total_attraction_limit?: number | string | null;
-  attractions_used?: number | string | null;
-  attractions_remaining?: number | string | null;
-  owned_packages?: unknown;
 }
 
 export class MonetizationService {
@@ -736,25 +719,19 @@ export class MonetizationService {
       return;
     }
 
-    try {
-      const { data, error } = await supabase.rpc('record_attraction_usage_v2', {
-        user_uuid: userId,
-        attraction_id: attractionId,
+    const v2Result = await monetizationRpcContract.recordAttractionUsageV2(userId, attractionId);
+    if (v2Result) {
+      logger.info('Attraction usage handled via RPC v2', {
+        recorded: v2Result.recorded,
+        reason: v2Result.reason,
+        totalAttractionLimit: v2Result.totalAttractionLimit,
+        attractionsUsed: v2Result.attractionsUsed,
+        attractionsRemaining: v2Result.attractionsRemaining,
       });
-
-      if (!error) {
-        const result = Array.isArray(data) ? data[0] : data;
-        logger.info('Attraction usage recorded via RPC v2', {
-          recorded: (result as { recorded?: boolean } | undefined)?.recorded ?? null,
-          reason: (result as { reason?: string } | undefined)?.reason ?? null,
-        });
-        return;
-      }
-
-      logger.warn('record_attraction_usage_v2 failed; using legacy fallback path', error);
-    } catch (rpcError) {
-      logger.warn('record_attraction_usage_v2 threw; using legacy fallback path', rpcError);
+      return;
     }
+
+    logger.warn('record_attraction_usage_v2 unavailable; using legacy fallback path');
 
     try {
       const subscription = await this.getSubscriptionStatus(userId);
@@ -895,18 +872,12 @@ export class MonetizationService {
 
   async canUserAccessAttraction(userId: string, attractionId: string): Promise<boolean> {
     try {
-      const { data: v2Data, error: v2Error } = await supabase.rpc('can_user_access_attraction_v2', {
-        user_uuid: userId,
-        attraction_id: attractionId,
-      });
-
-      if (!v2Error && v2Data !== null) {
-        return Boolean(v2Data);
+      const v2Access = await monetizationRpcContract.canUserAccessAttractionV2(userId, attractionId);
+      if (v2Access !== null) {
+        return v2Access;
       }
 
-      if (v2Error) {
-        logger.warn('can_user_access_attraction_v2 failed; falling back to legacy RPCs', v2Error);
-      }
+      logger.warn('can_user_access_attraction_v2 unavailable; falling back to legacy RPCs');
 
       const { data, error } = await supabase.rpc('can_user_access_attraction_with_packages', {
         user_uuid: userId,
@@ -1041,12 +1012,8 @@ export class MonetizationService {
   }
 
   private async getSubscriptionStatusFromRpcV2(userId: string): Promise<SubscriptionStatus> {
-    const { data, error } = await supabase.rpc('get_user_subscription_state_v2', {
-      user_uuid: userId,
-    });
-
-    if (error) {
-      logger.error('Failed to load subscription state from RPC v2', error);
+    const state = await monetizationRpcContract.getSubscriptionStateV2(userId);
+    if (!state) {
       return {
         isActive: false,
         type: 'free',
@@ -1057,26 +1024,13 @@ export class MonetizationService {
       };
     }
 
-    const row = (Array.isArray(data) ? data[0] : data) as SubscriptionStateV2Row | null;
-    if (!row) {
-      return {
-        isActive: false,
-        type: 'free',
-        expiresAt: null,
-        inGracePeriod: false,
-        inTrial: false,
-        trialEndsAt: null,
-      };
-    }
-
-    const type = row.subscription_type ?? 'free';
     return {
-      isActive: this.parseBoolean(row.is_active, false),
-      type: (type as SubscriptionStatus['type']) ?? 'free',
-      expiresAt: this.parseDate(row.expires_at),
-      inGracePeriod: this.parseBoolean(row.in_grace_period, false),
-      inTrial: this.parseBoolean(row.in_trial, false),
-      trialEndsAt: this.parseDate(row.trial_ends_at),
+      isActive: state.isActive,
+      type: this.normalizeSubscriptionType(state.subscriptionType),
+      expiresAt: this.parseDate(state.expiresAt),
+      inGracePeriod: state.inGracePeriod,
+      inTrial: state.inTrial,
+      trialEndsAt: this.parseDate(state.trialEndsAt),
     };
   }
 
@@ -1087,30 +1041,18 @@ export class MonetizationService {
     attractionsRemaining: number;
     ownedPackages: string[];
   }> {
-    const { data, error } = await supabase.rpc('get_user_entitlements_v2', {
-      user_uuid: userId,
-    });
-
-    if (!error && data) {
-      const row = (Array.isArray(data) ? data[0] : data) as UserEntitlementsV2Row | null;
-      if (row) {
-        const totalAttractionLimit = Math.max(0, this.parseNumber(row.total_attraction_limit, 2));
-        const attractionsUsed = Math.max(0, this.parseNumber(row.attractions_used, 0));
-        const attractionsRemaining = Math.max(
-          0,
-          this.parseNumber(row.attractions_remaining, totalAttractionLimit - attractionsUsed)
-        );
-        return {
-          hasUnlimitedAccess: this.parseBoolean(row.has_unlimited_access, false),
-          totalAttractionLimit,
-          attractionsUsed,
-          attractionsRemaining,
-          ownedPackages: this.parseStringArray(row.owned_packages),
-        };
-      }
-    } else if (error) {
-      logger.warn('Failed to load entitlements from RPC v2; using legacy RPC fallback', error);
+    const v2Entitlements = await monetizationRpcContract.getUserEntitlementsV2(userId);
+    if (v2Entitlements) {
+      return {
+        hasUnlimitedAccess: v2Entitlements.hasUnlimitedAccess,
+        totalAttractionLimit: Math.max(0, v2Entitlements.totalAttractionLimit),
+        attractionsUsed: Math.max(0, v2Entitlements.attractionsUsed),
+        attractionsRemaining: Math.max(0, v2Entitlements.attractionsRemaining),
+        ownedPackages: v2Entitlements.ownedPackages,
+      };
     }
+
+    logger.warn('Failed to load entitlements from RPC v2; using legacy RPC fallback');
 
     const { data: packageEntitlements, error: packageEntitlementsError } = await supabase.rpc(
       'get_user_package_entitlements',
@@ -1138,6 +1080,22 @@ export class MonetizationService {
       attractionsRemaining: Math.max(0, totalAttractionLimit - attractionsUsed),
       ownedPackages: this.parseStringArray(legacyRow?.owned_packages),
     };
+  }
+
+  private normalizeSubscriptionType(rawType: string | null): SubscriptionStatus['type'] {
+    switch (rawType) {
+      case 'free':
+      case 'unlimited_monthly':
+      case 'premium_monthly':
+      case 'premium_yearly':
+      case 'lifetime':
+        return rawType;
+      default:
+        if (rawType) {
+          logger.warn('Unexpected subscription type from monetization contract', { rawType });
+        }
+        return 'free';
+    }
   }
 
   private parseBoolean(value: unknown, fallback = false): boolean {
