@@ -7,10 +7,10 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { RevenueCatPaywallModal } from '../ui/RevenueCatPaywallModal';
 
 // Import the purchase system components
 import {
-  PaywallModal,
   SubscriptionManager,
   EntitlementStatus,
   PurchaseRestoreFlow,
@@ -56,8 +56,6 @@ export const PurchaseIntegratedExample: React.FC = () => {
 
   const {
     isLoading,
-    handleSubscriptionPurchase,
-    handlePackagePurchase,
   } = useSubscriptionManagement();
 
   // Get CTA button info for demo attraction
@@ -280,7 +278,7 @@ export const PurchaseIntegratedExample: React.FC = () => {
       </View>
 
       {/* Paywall Modal */}
-      <PaywallModal
+      <RevenueCatPaywallModal
         visible={paywallVisible}
         onClose={hidePaywall}
       />

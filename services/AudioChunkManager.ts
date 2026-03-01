@@ -278,13 +278,25 @@ export class AudioChunkManager {
         existing.sound.setOnPlaybackStatusUpdate(undefined);
         const status = await existing.sound.getStatusAsync();
         if (status.isLoaded) {
-          return existing;
+          // CRITICAL: If the sound is playing, it means something external is controlling it
+          // We MUST unload and recreate to ensure clean state
+          if (status.isPlaying) {
+            console.warn(`[PreloadChunk] Found playing sound for chunk ${chunkIndex}, unloading and recreating`);
+            await existing.sound.stopAsync();
+            await existing.sound.unloadAsync();
+            this.loadedSounds.delete(chunkIndex);
+            // Fall through to recreate the sound
+          } else {
+            return existing;
+          }
+        } else {
+          await existing.sound.unloadAsync();
+          this.loadedSounds.delete(chunkIndex);
         }
-        await existing.sound.unloadAsync();
       } catch (error) {
         console.warn(`Existing sound for chunk ${chunkIndex} was not reusable:`, error);
+        this.loadedSounds.delete(chunkIndex);
       }
-      this.loadedSounds.delete(chunkIndex);
     }
 
     try {
@@ -307,16 +319,26 @@ export class AudioChunkManager {
         });
       }
 
-      // Create sound object
+      // Create sound object - CRITICAL: ensure it never auto-plays
       const { sound } = await Audio.Sound.createAsync(
         { uri: fileUri },
         {
           shouldPlay: false,
-          volume: 1.0,
+          volume: 1.0, // Normal volume - we'll stop it if it auto-plays
           rate: 1.0,
           shouldCorrectPitch: true,
         }
       );
+
+      // CRITICAL: Expo Audio has a bug where sounds can auto-play despite shouldPlay:false
+      // This is expected behavior that we handle gracefully - not an actual error
+      const postCreateStatus = await sound.getStatusAsync();
+      if (postCreateStatus.isLoaded && postCreateStatus.isPlaying) {
+        console.warn(`[PreloadChunk] Expo Audio bug detected: Sound auto-played for chunk ${chunkIndex} (stopping and resetting)`);
+        await sound.stopAsync();
+        // Reset position to ensure clean playback when intentionally started
+        await sound.setPositionAsync(0);
+      }
 
       // Get actual duration
       const status = await sound.getStatusAsync();
@@ -347,8 +369,27 @@ export class AudioChunkManager {
   /**
    * Pre-load up to bufferAheadCount chunks ahead of the current index if available
    */
-  private preloadAheadFrom(currentIndex: number) {
+  private async preloadAheadFrom(currentIndex: number) {
     if (this.bufferAheadCount <= 0) return;
+
+    // First, ensure all preloaded sounds that aren't current are stopped
+    // This handles the Expo Audio bug where sounds auto-play despite shouldPlay:false
+    for (const [idx, loaded] of this.loadedSounds.entries()) {
+      if (idx !== currentIndex) {
+        try {
+          const status = await loaded.sound.getStatusAsync();
+          if (status.isLoaded && status.isPlaying) {
+            console.warn(`[PreloadAhead] Found rogue playing sound for chunk ${idx}, stopping it`);
+            await loaded.sound.stopAsync();
+            await loaded.sound.setPositionAsync(0);
+          }
+        } catch (error) {
+          console.warn(`[PreloadAhead] Error checking chunk ${idx}:`, error);
+        }
+      }
+    }
+
+    // Now preload ahead
     for (let i = 1; i <= this.bufferAheadCount; i++) {
       const idx = currentIndex + i;
       if (this.chunks.has(idx)) {
@@ -364,29 +405,36 @@ export class AudioChunkManager {
     }
 
     const activeChunkIndex = this.currentChunkIndex;
+    const soundToStop = this.currentSound;
+
+    // Immediately clear reference to prevent reuse during async operations
+    this.currentSound = null;
 
     try {
-      this.currentSound.setOnPlaybackStatusUpdate(undefined);
+      soundToStop.setOnPlaybackStatusUpdate(undefined);
     } catch (error) {
       console.warn('Error detaching playback status listener:', error);
     }
 
     try {
-      const status = await this.currentSound.getStatusAsync();
+      const status = await soundToStop.getStatusAsync();
       if (status.isLoaded) {
-        await this.currentSound.stopAsync();
+        // Force stop if playing
+        if (status.isPlaying) {
+          await soundToStop.stopAsync();
+          // Wait a brief moment to ensure stop completes
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
     } catch (error) {
       console.error('Error stopping current sound:', error);
     }
 
     try {
-      await this.currentSound.unloadAsync();
+      await soundToStop.unloadAsync();
     } catch (error) {
       console.error('Error unloading current sound:', error);
     }
-
-    this.currentSound = null;
 
     if (activeChunkIndex >= 0) {
       this.loadedSounds.delete(activeChunkIndex);
@@ -470,7 +518,11 @@ export class AudioChunkManager {
 
   private async playChunkInternal(chunkIndex: number) {
     try {
+      console.log(`[PlayChunkInternal] START chunk ${chunkIndex}, currentChunkIndex=${this.currentChunkIndex}, isPlaying=${this.isPlaying}`);
+
       const resumeOnReady = this.shouldResumeAfterBuffer || this.isPlaying;
+
+      // CRITICAL: Ensure previous sound is completely stopped before proceeding
       await this.stopAndUnloadCurrentSound();
 
       const loadedChunk = await this.preloadChunk(chunkIndex);
@@ -498,9 +550,16 @@ export class AudioChunkManager {
         if (!status.isLoaded || !status.didJustFinish) {
           return;
         }
-        if (this.currentChunkIndex !== chunkIndex) {
+        // CRITICAL: Only process if this sound is still the current sound
+        if (this.currentSound !== loadedChunk.sound) {
+          console.log(`[didJustFinish] Skipping chunk ${chunkIndex} - sound no longer current`);
           return;
         }
+        if (this.currentChunkIndex !== chunkIndex) {
+          console.log(`[didJustFinish] Skipping chunk ${chunkIndex} - current index is ${this.currentChunkIndex}`);
+          return;
+        }
+        console.log(`[didJustFinish] Chunk ${chunkIndex} completed, calling handleChunkComplete`);
         try {
           await this.handleChunkComplete(chunkIndex);
         } catch (error) {
@@ -508,8 +567,19 @@ export class AudioChunkManager {
         }
       });
 
-      console.log(`Playing chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
+      console.log(`[PlayChunkInternal] About to start playback of chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
+
+      // CRITICAL: Verify sound is not already playing before starting
+      const prePlayStatus = await loadedChunk.sound.getStatusAsync();
+      if (prePlayStatus.isLoaded && prePlayStatus.isPlaying) {
+        console.warn(`[PlayChunkInternal] Sound already playing for chunk ${chunkIndex}, stopping first`);
+        await loadedChunk.sound.stopAsync();
+        await loadedChunk.sound.setPositionAsync(0);
+      }
+
       await loadedChunk.sound.playAsync();
+      console.log(`[PlayChunkInternal] Playback STARTED for chunk ${chunkIndex + 1}`);
+
       if (chunkIndex === 0) {
         PerfTracer.mark('first_playback');
       }
@@ -536,49 +606,66 @@ export class AudioChunkManager {
 
   /**
    * Handle chunk completion
+   * NOTE: This is called from within the didJustFinish callback and must acquire its own lock
+   * to ensure sequential chunk transitions
    */
   private async handleChunkComplete(chunkIndex: number) {
     await this.withPlaybackLock(`chunk-${chunkIndex}-complete`, async () => {
-      await this.handleChunkCompleteInternal(chunkIndex);
+      console.log(`[HandleChunkComplete] Chunk ${chunkIndex + 1} completed`);
+      console.log(`[HandleChunkComplete] shouldResumeAfterBuffer=${this.shouldResumeAfterBuffer}, isPlaying=${this.isPlaying}`);
+
+      if (this.onChunkComplete) {
+        this.onChunkComplete(chunkIndex);
+      }
+
+      const nextIndex = chunkIndex + 1;
+      const hasMore = this.expectedTotalChunks > 0
+        ? nextIndex < this.expectedTotalChunks
+        : nextIndex < this.chunks.size;
+
+      console.log(`[HandleChunkComplete] nextIndex=${nextIndex}, hasMore=${hasMore}, expectedTotalChunks=${this.expectedTotalChunks}`);
+
+      if (!this.shouldResumeAfterBuffer && !this.isPlaying) {
+        console.log(`[HandleChunkComplete] Skipping completion handling for chunk ${chunkIndex + 1} (playback inactive)`);
+        return;
+      }
+
+      if (hasMore && this.shouldResumeAfterBuffer) {
+        console.log(`[HandleChunkComplete] Transitioning to chunk ${nextIndex + 1}`);
+        await this.playChunkInternal(nextIndex);
+        return;
+      }
+
+      console.log(`[HandleChunkComplete] All chunks complete, staying at end position`);
+      // Don't unload the sound - keep it at the end position so user can see progress
+      // Just stop playback and tracking
+      if (this.currentSound) {
+        try {
+          const status = await this.currentSound.getStatusAsync();
+          if (status.isLoaded && status.isPlaying) {
+            await this.currentSound.pauseAsync();
+          }
+        } catch (error) {
+          console.error('Error pausing at completion:', error);
+        }
+      }
+      await this.handleAllChunksCompleteInternal();
     });
-  }
-
-  private async handleChunkCompleteInternal(chunkIndex: number) {
-    console.log(`Chunk ${chunkIndex + 1} completed`);
-
-    if (this.onChunkComplete) {
-      this.onChunkComplete(chunkIndex);
-    }
-
-    const nextIndex = chunkIndex + 1;
-    const hasMore = this.expectedTotalChunks > 0
-      ? nextIndex < this.expectedTotalChunks
-      : nextIndex < this.chunks.size;
-
-    if (!this.shouldResumeAfterBuffer && !this.isPlaying) {
-      console.log(`[AudioChunkManager] Skipping completion handling for chunk ${chunkIndex + 1} (playback inactive)`);
-      return;
-    }
-
-    if (hasMore && this.shouldResumeAfterBuffer) {
-      await this.playChunkInternal(nextIndex);
-      return;
-    }
-
-    await this.stopAndUnloadCurrentSound();
-    await this.handleAllChunksCompleteInternal();
   }
 
   /**
    * Handle all chunks complete
    */
   private async handleAllChunksCompleteInternal() {
-    console.log('All chunks completed');
+    console.log('All chunks completed - staying at end position');
     this.isPlaying = false;
     this.shouldResumeAfterBuffer = false;
     this.isBuffering = false;
     this.waitingForChunkIndex = null;
     this.stopPositionTracking();
+
+    // Note: We keep currentSound and currentChunkIndex intact so the player
+    // shows the final position at the end of the last chunk
 
     if (this.onAllChunksComplete) {
       this.onAllChunksComplete();
@@ -672,13 +759,34 @@ export class AudioChunkManager {
    */
   private startPositionTracking() {
     this.stopPositionTracking();
-    
+
+    let checkCounter = 0;
     this.positionUpdateInterval = setInterval(async () => {
       if (this.currentSound && this.isPlaying) {
         try {
           const status = await this.currentSound.getStatusAsync();
           if (status.isLoaded) {
             this.emitStateChange();
+          }
+
+          // Every 10 position updates (~1 second), check for rogue playing sounds
+          checkCounter++;
+          if (checkCounter >= 10) {
+            checkCounter = 0;
+            for (const [idx, loaded] of this.loadedSounds.entries()) {
+              if (idx !== this.currentChunkIndex) {
+                try {
+                  const loadedStatus = await loaded.sound.getStatusAsync();
+                  if (loadedStatus.isLoaded && loadedStatus.isPlaying) {
+                    console.warn(`[PositionTracking] Found rogue playing sound for chunk ${idx}, stopping it`);
+                    await loaded.sound.stopAsync();
+                    await loaded.sound.setPositionAsync(0);
+                  }
+                } catch (error) {
+                  // Ignore errors checking other sounds
+                }
+              }
+            }
           }
         } catch (error) {
           console.error('Error tracking position:', error);

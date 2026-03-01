@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 import type { MaterialIconName } from '../../types/icons';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { usePurchase } from '../../contexts/PurchaseContext';
+import { usePaywallFlow, useSubscriptionManagement } from '../../hooks/usePurchaseIntegration';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface SubscriptionManagerProps {
@@ -33,10 +33,10 @@ export const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({
     entitlements,
     subscriptionPlans,
     attractionPackages,
-    restorePurchases,
     isLoading,
-    showPaywall,
-  } = usePurchase();
+    handleRestorePurchases,
+  } = useSubscriptionManagement();
+  const { showPaywall } = usePaywallFlow();
 
   const [isRestoring, setIsRestoring] = useState(false);
 
@@ -44,14 +44,17 @@ export const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({
     try {
       setIsRestoring(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await restorePurchases();
+      const restored = await handleRestorePurchases();
+      if (!restored) {
+        Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+      }
     } catch (error) {
       console.error('Restore error:', error);
       Alert.alert('Error', 'Failed to restore purchases. Please try again.');
     } finally {
       setIsRestoring(false);
     }
-  }, [restorePurchases]);
+  }, [handleRestorePurchases]);
 
   const handleManageBilling = useCallback(() => {
     if (onManageBilling) {
@@ -244,7 +247,7 @@ export const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({
                 <View style={styles.packageInfo}>
                   <Text style={styles.packageName}>{pkg.name}</Text>
                   <Text style={styles.packageDescription}>
-                    {pkg.attractions.length} attractions included
+                    {'attraction_count' in pkg ? pkg.attraction_count : 0} attractions included
                   </Text>
                 </View>
                 <MaterialIcons name="check-circle" size={20} color="#10B981" />

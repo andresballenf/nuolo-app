@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { AppState, AppStateStatus } from 'react-native';
 import { monetizationService, SubscriptionStatus, UserEntitlements, AttractionPack, AttractionPackage } from '../services/MonetizationService';
 import { useAuth } from './AuthContext';
+import { logger } from '../lib/logger';
 
 type PaywallTrigger = 'free_limit' | 'premium_attraction' | 'manual';
 
@@ -81,16 +82,16 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       initializeMonetization().then(() => {
         // Only set user ID AFTER initialization completes
         monetizationService.setUserId(user.id).catch(error => {
-          console.error('Failed to set RevenueCat user ID:', error);
+          logger.error('Failed to set RevenueCat user ID', error);
         });
       }).catch(error => {
-        console.error('Monetization initialization failed:', error);
+        logger.error('Monetization initialization failed', error);
       });
     } else {
       resetToFreeState();
       // Only log out if RevenueCat is initialized
       monetizationService.logoutUser().catch(error => {
-        console.error('Failed to logout RevenueCat user:', error);
+        logger.error('Failed to logout RevenueCat user', error);
       });
     }
   }, [isAuthenticated, user]);
@@ -100,7 +101,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     return () => {
       // Cleanup monetization service when component unmounts
       monetizationService.cleanup().catch(error => {
-        console.error('Error cleaning up monetization service:', error);
+        logger.error('Error cleaning up monetization service', error);
       });
     };
   }, []);
@@ -122,7 +123,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       ]);
 
       setInitialized(true);
-      console.log('MonetizationProvider initialized successfully');
+      logger.info('MonetizationProvider initialized successfully');
 
       // Refresh entitlements AFTER initialization is complete
       if (user) {
@@ -131,7 +132,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to initialize monetization';
       setError(errorMessage);
-      console.error('MonetizationProvider initialization failed:', errorMessage);
+      logger.error('MonetizationProvider initialization failed', err, { errorMessage });
     } finally {
       setLoading(false);
     }
@@ -142,7 +143,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       const packs = await monetizationService.getAttractionPacks();
       setAttractionPacks(packs);
     } catch (err) {
-      console.error('Failed to load attraction packs:', err);
+      logger.error('Failed to load attraction packs', err);
     }
   };
 
@@ -151,7 +152,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       const packages = await monetizationService.getAttractionPackages();
       setAttractionPackages(packages);
     } catch (err) {
-      console.error('Failed to load attraction packages:', err);
+      logger.error('Failed to load attraction packages', err);
     }
   };
 
@@ -167,14 +168,14 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       setSubscription(subStatus);
       setEntitlements(userEntitlements);
       
-      console.log('Entitlements refreshed:', {
+      logger.info('Entitlements refreshed', {
         subscription: subStatus,
         entitlements: userEntitlements,
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to refresh entitlements';
       setError(errorMessage);
-      console.error('Failed to refresh entitlements:', errorMessage);
+      logger.error('Failed to refresh entitlements', err, { errorMessage });
     }
   }, [user]);
 
@@ -182,7 +183,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     if (!initialized || !user) return;
 
     refreshEntitlements().catch(error => {
-      console.error('Failed to refresh entitlements after initialization:', error);
+      logger.error('Failed to refresh entitlements after initialization', error);
     });
   }, [initialized, user?.id, refreshEntitlements]);
 
@@ -192,7 +193,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         refreshEntitlements().catch(error => {
-          console.error('Failed to refresh entitlements on app resume:', error);
+          logger.error('Failed to refresh entitlements on app resume', error);
         });
       }
     };
@@ -243,13 +244,13 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       if (success) {
         await refreshEntitlements();
         setShowPaywall(false); // Close paywall on successful purchase
-        console.log('Successfully purchased attraction:', attractionId);
+        logger.info('Successfully purchased attraction', { attractionId });
       }
       return success;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Purchase failed';
       setError(errorMessage);
-      console.error('Attraction purchase failed:', errorMessage);
+      logger.error('Attraction purchase failed', err, { errorMessage });
       return false;
     } finally {
       setLoading(false);
@@ -270,13 +271,13 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       if (success) {
         await refreshEntitlements();
         setShowPaywall(false); // Close paywall on successful purchase
-        console.log('Successfully purchased pack:', packId);
+        logger.info('Successfully purchased pack', { packId });
       }
       return success;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Purchase failed';
       setError(errorMessage);
-      console.error('Pack purchase failed:', errorMessage);
+      logger.error('Pack purchase failed', err, { errorMessage });
       return false;
     } finally {
       setLoading(false);
@@ -298,13 +299,13 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       if (success) {
         await refreshEntitlements();
         setShowPaywall(false); // Close paywall on successful purchase
-        console.log('Successfully purchased unlimited monthly subscription');
+        logger.info('Successfully purchased unlimited monthly subscription');
       }
       return success;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Subscription purchase failed';
       setError(errorMessage);
-      console.error('Subscription purchase failed:', errorMessage);
+      logger.error('Subscription purchase failed', err, { errorMessage });
       return false;
     } finally {
       setLoading(false);
@@ -325,13 +326,13 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
       if (success) {
         await refreshEntitlements();
         setShowPaywall(false); // Close paywall on successful purchase
-        console.log('Successfully purchased package:', packageId);
+        logger.info('Successfully purchased package', { packageId });
       }
       return success;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Package purchase failed';
       setError(errorMessage);
-      console.error('Package purchase failed:', errorMessage);
+      logger.error('Package purchase failed', err, { errorMessage });
       return false;
     } finally {
       setLoading(false);
@@ -345,11 +346,11 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     try {
       await monetizationService.restorePurchases();
       await refreshEntitlements();
-      console.log('Purchases restored successfully');
+      logger.info('Purchases restored successfully');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Restore failed';
       setError(errorMessage);
-      console.error('Restore purchases failed:', errorMessage);
+      logger.error('Restore purchases failed', err, { errorMessage });
     } finally {
       setLoading(false);
     }
@@ -361,7 +362,7 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     try {
       return await monetizationService.canUserAccessAttraction(user.id, attractionId);
     } catch (err) {
-      console.error('Failed to check attraction access:', err);
+      logger.error('Failed to check attraction access', err);
       return false;
     }
   }, [user]);
@@ -397,9 +398,9 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
 
       // Refresh entitlements to update remaining free attractions count
       await refreshEntitlements();
-      console.log('Recorded attraction usage:', attractionId);
+      logger.info('Recorded attraction usage', { attractionId });
     } catch (err) {
-      console.error('Failed to record attraction usage:', err);
+      logger.error('Failed to record attraction usage', err);
     }
   }, [user, subscription.isActive, subscription.type, refreshEntitlements]);
 
@@ -420,9 +421,9 @@ export function MonetizationProvider({ children }: { children: ReactNode }) {
     try {
       await monetizationService.resetUserAttractionUsage(user.id);
       await refreshEntitlements();
-      console.log('Free counter reset successfully');
+      logger.info('Free counter reset successfully');
     } catch (err) {
-      console.error('Failed to reset free counter:', err);
+      logger.error('Failed to reset free counter', err);
     }
   }, [user, refreshEntitlements]);
 

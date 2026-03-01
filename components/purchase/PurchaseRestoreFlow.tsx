@@ -21,7 +21,7 @@ import Animated, {
 
 import type { MaterialIconName } from '../../types/icons';
 import { Button } from '../ui/Button';
-import { usePurchase } from '../../contexts/PurchaseContext';
+import { useSubscriptionManagement } from '../../hooks/usePurchaseIntegration';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface PurchaseRestoreFlowProps {
@@ -52,11 +52,10 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const {
-    restorePurchases,
     entitlements,
     purchaseError,
-    clearError,
-  } = usePurchase();
+    handleRestorePurchases,
+  } = useSubscriptionManagement();
 
   const [currentStep, setCurrentStep] = useState<RestoreStep>('initial');
   const [restoredCount, setRestoredCount] = useState(0);
@@ -74,7 +73,6 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
       iconScale.value = 1;
       progressOpacity.value = 0;
       resultOpacity.value = 0;
-      clearError();
 
       // Auto-start restore if triggered by login
       if (trigger === 'login') {
@@ -98,7 +96,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      const success = await restorePurchases();
+      const success = await handleRestorePurchases();
       
       if (success) {
         // Calculate restored items
@@ -136,7 +134,7 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       resultOpacity.value = withDelay(300, withSpring(1, { damping: 15 }));
     }
-  }, [restorePurchases, entitlements, onRestoreSuccess]);
+  }, [handleRestorePurchases, entitlements, onRestoreSuccess]);
 
   const handleClose = useCallback(() => {
     if (currentStep === 'restoring') {
@@ -235,7 +233,6 @@ export const PurchaseRestoreFlow: React.FC<PurchaseRestoreFlowProps> = ({
         break;
       case 'error':
         setCurrentStep('initial');
-        clearError();
         break;
       default:
         handleClose();

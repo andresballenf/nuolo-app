@@ -51,17 +51,19 @@ export default function LoginScreen() {
     // Show biometric prompt if available and user has used it before
     const checkAndPromptBiometric = async () => {
       if (biometricAvailable) {
-        // Check if user has stored credentials
+        // Check if user has stored credentials (using new key)
         const hasStoredCredentials = await AsyncStorage.getItem('hasBiometricCredentials');
+        console.log('🔐 Auto-prompt check - hasCredentials:', hasStoredCredentials);
         if (hasStoredCredentials === 'true') {
           // Small delay to ensure screen is fully rendered
           setTimeout(() => {
+            console.log('🔐 Auto-prompting biometric login...');
             handleBiometricLogin();
           }, 500);
         }
       }
     };
-    
+
     checkAndPromptBiometric();
   }, [biometricAvailable]);
   
@@ -93,24 +95,24 @@ export default function LoginScreen() {
       );
       return;
     }
-    
+
     if (!validateForm()) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
-    
+
     setLoading(true);
     Keyboard.dismiss();
-    
+
     try {
-      const { error } = await signIn(email.trim(), password);
-      
+      const { error, biometricSaved } = await signIn(email.trim(), password);
+
       if (error) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        
+
         if (error.message?.includes('Invalid login credentials')) {
           setErrors({ password: 'Invalid email or password' });
-          
+
           if (loginAttempts >= 3) {
             Alert.alert(
               'Multiple Failed Attempts',
@@ -123,6 +125,15 @@ export default function LoginScreen() {
         }
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Log biometric save status for debugging
+        if (biometricSaved) {
+          console.log('✅ Biometric credentials saved - biometric login enabled for next time');
+        } else if (biometricAvailable) {
+          console.warn('⚠️ Biometric available but credentials were not saved');
+        }
+
+        // Navigate to map after successful login and credential save
         router.replace('/map');
       }
     } catch (error) {
@@ -151,11 +162,9 @@ export default function LoginScreen() {
   const handleBiometricLogin = async (showErrors = false) => {
     try {
       const { error } = await signInWithBiometric();
-      
+
       if (!error) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        // Mark that user has successfully used biometric
-        await AsyncStorage.setItem('hasBiometricCredentials', 'true');
         router.replace('/map');
       } else if (showErrors) {
         // Only show errors when manually triggered

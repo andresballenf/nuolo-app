@@ -50,6 +50,7 @@ export interface AIGenerationOptions {
     audioLength?: 'short' | 'medium' | 'deep-dive';
     language?: string;
     voiceStyle?: 'casual' | 'formal' | 'energetic' | 'calm';
+    narrativeMode?: 'story-driven' | 'fact-driven';
   };
 }
 

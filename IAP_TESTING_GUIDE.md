@@ -182,7 +182,7 @@ eas build --profile preview --platform android
 
 ### Issue: "Already connected" error
 **Cause:** Multiple contexts trying to connect
-**Solution:** Already fixed - PurchaseContext is marked as legacy
+**Solution:** Already fixed - PurchaseContext has been removed and RevenueCat is the official paywall path
 
 ### Issue: Testing in Expo Go
 **Error:** IAP module not available

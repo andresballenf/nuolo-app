@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
-import { Modal, StyleSheet, Platform, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 import RevenueCatUI from 'react-native-purchases-ui';
 import { useMonetization } from '../../contexts/MonetizationContext';
 import { logger } from '../../lib/logger';
+import { TelemetryService } from '../../services/TelemetryService';
 
 interface RevenueCatPaywallModalProps {
   visible: boolean;
@@ -37,11 +38,13 @@ export const RevenueCatPaywallModal: React.FC<RevenueCatPaywallModalProps> = ({
 
   useEffect(() => {
     if (visible) {
+      TelemetryService.increment('paywall_open_success');
       logger.info('RevenueCat paywall opened', { trigger, attractionId, attractionName });
     }
   }, [visible, trigger, attractionId, attractionName]);
 
   const handleDismiss = async () => {
+    TelemetryService.increment('paywall_dismissed');
     logger.info('RevenueCat paywall dismissed');
 
     // Refresh entitlements to check if a purchase was made
@@ -52,12 +55,26 @@ export const RevenueCatPaywallModal: React.FC<RevenueCatPaywallModalProps> = ({
   };
 
   const handleRestoreCompleted = async ({ customerInfo }: any) => {
+    TelemetryService.increment('paywall_restore_success');
     logger.info('RevenueCat restore completed', {
       hasActiveSubscription: customerInfo?.entitlements?.active !== undefined,
     });
 
     // Refresh entitlements after restore
     await refreshEntitlements();
+  };
+
+  const handlePurchaseCompleted = async ({ customerInfo }: any) => {
+    TelemetryService.increment('paywall_purchase_success');
+    logger.info('RevenueCat purchase completed', {
+      hasActiveSubscription: customerInfo?.entitlements?.active !== undefined,
+    });
+    await refreshEntitlements();
+  };
+
+  const handlePurchaseError = ({ error }: { error: unknown }) => {
+    TelemetryService.increment('paywall_purchase_error');
+    logger.error('RevenueCat purchase failed', error);
   };
 
   // Don't show paywall if MonetizationService isn't initialized
@@ -92,6 +109,8 @@ export const RevenueCatPaywallModal: React.FC<RevenueCatPaywallModalProps> = ({
             // If not specified, it will use the current offering
             // offering: specificOffering,
           }}
+          onPurchaseCompleted={handlePurchaseCompleted}
+          onPurchaseError={handlePurchaseError}
           onRestoreCompleted={handleRestoreCompleted}
           onDismiss={handleDismiss}
         />

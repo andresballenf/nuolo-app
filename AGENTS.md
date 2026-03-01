@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Agent Bootstrap
+- Start with `AGENT_BRIEF.md` for a compact architecture + file map before deep dives.
+- Keep it as the primary low-token context file for coding agents.
+
 ## Project Structure & Module Organization
 - `app/` holds Expo Router routes; keep feature state near its owning screen.
 - Shared UI and state live in `components/`, `hooks/`, and `contexts/`; extend existing patterns when adding flows.

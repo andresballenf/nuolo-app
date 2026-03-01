@@ -276,7 +276,7 @@ curl -X POST https://your-project.supabase.co/functions/v1/verify-receipt \
 **Vulnerability**: `.env` and `credentials.json` committed to git repository.
 
 **Exposed Secrets**:
-- Google Maps API key: `AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk`
+- Google Maps API key: `YOUR_GOOGLE_MAPS_API_KEY`
 - Supabase URL and anon key
 - iOS distribution certificate password
 

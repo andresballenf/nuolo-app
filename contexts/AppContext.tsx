@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { storage } from '../lib/utils';
-import { PreferencesService } from '../services/PreferencesService';
+import { PreferencesService, NarrativeMode } from '../services/PreferencesService';
 import { supabase } from '../lib/supabase';
 
 export type Theme = 'history' | 'nature' | 'architecture' | 'culture' | 'general';
@@ -18,6 +18,7 @@ export type Language =
   | 'ko';
 export type VoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';
 export type AIProvider = 'openai' | 'gemini';
+export type { NarrativeMode };
 
 interface GpsStatus {
   active: boolean;
@@ -37,6 +38,7 @@ export interface UserPreferences {
   locationLock?: boolean;
   autoFix?: boolean;
   aiProvider?: AIProvider;
+  narrativeMode?: NarrativeMode;
 }
 
 interface SelectedAttraction {
@@ -82,6 +84,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     voiceStyle: 'casual',
     batteryOptimization: false,
     aiProvider: 'openai',
+    narrativeMode: 'fact-driven',
   });
 
   const [selectedAttraction, setSelectedAttraction] = useState<SelectedAttraction | null>(null);
@@ -139,6 +142,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           voiceStyle: supabasePrefs.voiceStyle as VoiceStyle,
           batteryOptimization: supabasePrefs.batteryOptimization,
           aiProvider: (supabasePrefs.aiProvider as AIProvider) || 'openai',
+          narrativeMode: supabasePrefs.narrativeMode || 'fact-driven',
         };
         setUserPreferencesState(preferences);
         // Also save to local storage for offline access
@@ -177,6 +181,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           language: newPreferences.language,
           batteryOptimization: newPreferences.batteryOptimization,
           aiProvider: newPreferences.aiProvider,
+          narrativeMode: newPreferences.narrativeMode || 'fact-driven',
         };
         await PreferencesService.saveUserPreferences(currentUserId, supabasePrefs);
       }

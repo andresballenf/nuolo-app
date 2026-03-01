@@ -86,6 +86,31 @@ export interface PurchaseResult {
   error?: string;
 }
 
+interface RevenueCatStatus {
+  initialized: boolean;
+  configured: boolean;
+  hasCurrentOffering: boolean;
+  currentOfferingIdentifier: string | null;
+  availablePackageCount: number;
+}
+
+interface SubscriptionStateV2Row {
+  is_active?: boolean;
+  subscription_type?: string | null;
+  expires_at?: string | null;
+  in_grace_period?: boolean;
+  in_trial?: boolean;
+  trial_ends_at?: string | null;
+}
+
+interface UserEntitlementsV2Row {
+  has_unlimited_access?: boolean;
+  total_attraction_limit?: number | string | null;
+  attractions_used?: number | string | null;
+  attractions_remaining?: number | string | null;
+  owned_packages?: unknown;
+}
+
 export class MonetizationService {
   private static instance: MonetizationService | null = null;
   private initialized = false;
@@ -284,7 +309,7 @@ export class MonetizationService {
       .order('price_cents', { ascending: true });
 
     if (error) {
-      console.error('Failed to fetch attraction packs:', error);
+      logger.error('Failed to fetch attraction packs', error);
       return [];
     }
 
@@ -299,7 +324,7 @@ export class MonetizationService {
       .order('sort_order', { ascending: true });
 
     if (error) {
-      console.error('Failed to fetch attraction packages:', error);
+      logger.error('Failed to fetch attraction packages', error);
       return [];
     }
 
@@ -437,13 +462,7 @@ export class MonetizationService {
   /**
    * Exposes current RevenueCat configuration/offerings status for diagnostics.
    */
-  getRevenueCatStatus(): {
-    initialized: boolean;
-    configured: boolean;
-    hasCurrentOffering: boolean;
-    currentOfferingIdentifier: string | null;
-    availablePackageCount: number;
-  } {
+  getRevenueCatStatus(): RevenueCatStatus {
     const current = this.currentOfferings?.current ?? null;
     return {
       initialized: this.initialized,
@@ -460,7 +479,7 @@ export class MonetizationService {
    */
   async ensurePurchasesReady(timeoutMs = 6000): Promise<{
     ready: boolean;
-    status: ReturnType<typeof this.getRevenueCatStatus>;
+    status: RevenueCatStatus;
     offerings?: PurchasesOfferings | null;
     reason?: string;
   }> {
@@ -544,39 +563,8 @@ export class MonetizationService {
   async getSubscriptionStatus(userId: string): Promise<SubscriptionStatus> {
     try {
       if (!this.revenueCatConfigured) {
-        logger.warn('RevenueCat not configured, returning free tier status');
-        // Return default free tier status without making RevenueCat calls
-        const { data, error } = await supabase
-          .from('user_subscriptions')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('is_active', true)
-          .order('expiration_date', { ascending: false })
-          .limit(1);
-
-        if (!error && data && data.length > 0) {
-          const subscription = data[0];
-          const expiresAt = subscription.expiration_date ? new Date(subscription.expiration_date) : null;
-          const isActive = subscription.is_active && (!expiresAt || expiresAt > new Date());
-
-          return {
-            isActive,
-            type: subscription.subscription_type,
-            expiresAt,
-            inGracePeriod: false,
-            inTrial: false,
-            trialEndsAt: null,
-          };
-        }
-
-        return {
-          isActive: false,
-          type: 'free',
-          expiresAt: null,
-          inGracePeriod: false,
-          inTrial: false,
-          trialEndsAt: null,
-        };
+        logger.warn('RevenueCat not configured, falling back to subscription RPC v2');
+        return this.getSubscriptionStatusFromRpcV2(userId);
       }
 
       const customerInfo = await Purchases.getCustomerInfo();
@@ -627,44 +615,14 @@ export class MonetizationService {
         };
       }
 
-      // Check Supabase for legacy subscriptions
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .order('expiration_date', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        logger.error('Failed to get subscription status from Supabase', error);
-      }
-
-      if (data && data.length > 0) {
-        const subscription = data[0];
-        const expiresAt = subscription.expiration_date ? new Date(subscription.expiration_date) : null;
-        const isActive = subscription.is_active && (!expiresAt || expiresAt > new Date());
-
-        return {
-          isActive,
-          type: subscription.subscription_type,
-          expiresAt,
-          inGracePeriod: false,
-          inTrial: false,
-          trialEndsAt: null,
-        };
-      }
-
-      return {
-        isActive: false,
-        type: 'free',
-        expiresAt: null,
-        inGracePeriod: false,
-        inTrial: false,
-        trialEndsAt: null,
-      };
+      return this.getSubscriptionStatusFromRpcV2(userId);
     } catch (error: unknown) {
       logger.error('Failed to get subscription status', error);
+      try {
+        return await this.getSubscriptionStatusFromRpcV2(userId);
+      } catch (fallbackError) {
+        logger.error('Subscription status RPC fallback failed', fallbackError);
+      }
       return {
         isActive: false,
         type: 'free',
@@ -678,132 +636,49 @@ export class MonetizationService {
 
   async getUserEntitlements(userId: string): Promise<UserEntitlements> {
     try {
+      let hasUnlimitedFromRevenueCat = false;
+
       if (!this.revenueCatConfigured) {
-        logger.warn('RevenueCat not configured, returning default entitlements');
-
-        const { data: usage } = await supabase
-          .from('user_usage')
-          .select('usage_count, package_limit')
-          .eq('user_id', userId)
-          .single();
-
-        let totalAttractionLimit = this.parseNumber(usage?.package_limit, 2);
-        let attractionsUsed = this.parseNumber(usage?.usage_count, 0);
-        let ownedPackages: string[] = [];
-        let packageDetails: AttractionPackage[] = [];
-
+        logger.warn('RevenueCat not configured, using entitlement RPC v2 only');
+      } else {
         try {
-          const { data: packageEntitlements } = await supabase.rpc(
-            'get_user_package_entitlements',
-            { user_uuid: userId }
-          );
+          const customerInfo = await Purchases.getCustomerInfo();
+          await this.syncCustomerInfo(customerInfo);
 
-          if (packageEntitlements && packageEntitlements.length > 0) {
-            const entitlementsRow = packageEntitlements[0];
-            totalAttractionLimit = this.parseNumber(
-              entitlementsRow.total_attraction_limit,
-              totalAttractionLimit
+          const activeEntitlements = customerInfo.entitlements?.active ?? {};
+          const activeEntitlementValues = Object.values(activeEntitlements) as PurchasesEntitlementInfo[];
+          const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
+
+          const unlimitedEntitlement =
+            activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
+            activeEntitlementValues.find(
+              entitlement => entitlement.productIdentifier === MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY
             );
-            attractionsUsed = this.parseNumber(
-              entitlementsRow.attractions_used,
-              attractionsUsed
-            );
-            if (Array.isArray(entitlementsRow.owned_packages)) {
-              ownedPackages = entitlementsRow.owned_packages.filter(
-                (pkg: unknown): pkg is string => typeof pkg === 'string'
-              );
-            }
-          }
+
+          hasUnlimitedFromRevenueCat =
+            Boolean(unlimitedEntitlement) ||
+            activeSubscriptions.has(MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY);
         } catch (error) {
-          logger.error('Failed to load package entitlements without RevenueCat', error);
+          logger.error('Failed to read RevenueCat entitlements; using RPC v2 fallback', error);
         }
-
-        if (ownedPackages.length > 0) {
-          const { data: packagesData, error: packagesError } = await supabase
-            .from('attraction_packages')
-            .select('*')
-            .in('id', ownedPackages)
-            .eq('is_active', true);
-
-          if (packagesError) {
-            logger.error('Failed to fetch owned attraction packages (no RevenueCat)', packagesError);
-          } else if (packagesData) {
-            packageDetails = packagesData;
-          }
-        }
-
-        const remainingFreeAttractions = Math.max(0, totalAttractionLimit - attractionsUsed);
-
-        return {
-          hasUnlimitedAccess: false,
-          totalAttractionLimit,
-          remainingFreeAttractions,
-          attractionsUsed,
-          ownedAttractions: [],
-          ownedPacks: ownedPackages,
-          ownedPackages: packageDetails,
-        };
       }
 
-      const customerInfo = await Purchases.getCustomerInfo();
-      await this.syncCustomerInfo(customerInfo);
+      const rpcState = await this.getUserEntitlementsFromRpcV2(userId);
+      const hasUnlimitedAccess = hasUnlimitedFromRevenueCat || rpcState.hasUnlimitedAccess;
+      const totalAttractionLimit = hasUnlimitedAccess
+        ? MonetizationService.UNLIMITED_USAGE_LIMIT
+        : Math.max(2, rpcState.totalAttractionLimit);
+      const attractionsUsed = Math.max(0, rpcState.attractionsUsed);
+      const remainingAttractions = hasUnlimitedAccess
+        ? MonetizationService.UNLIMITED_USAGE_LIMIT
+        : Math.max(0, totalAttractionLimit - attractionsUsed);
 
-      const activeEntitlements = customerInfo.entitlements?.active ?? {};
-      const activeEntitlementValues = Object.values(activeEntitlements) as PurchasesEntitlementInfo[];
-      const activeSubscriptions = new Set(customerInfo.activeSubscriptions ?? []);
-
-      const unlimitedEntitlement =
-        activeEntitlements[MonetizationService.ENTITLEMENTS.UNLIMITED] ||
-        activeEntitlementValues.find(
-          entitlement => entitlement.productIdentifier === MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY
-        );
-
-      const hasUnlimitedAccess =
-        Boolean(unlimitedEntitlement) ||
-        activeSubscriptions.has(MonetizationService.PRODUCT_IDS.UNLIMITED_MONTHLY);
-
-      let totalAttractionLimit = 2;
-      let attractionsUsed = 0;
-      let ownedPackages: string[] = [];
       let packageDetails: AttractionPackage[] = [];
-
-      try {
-        const { data: packageEntitlements, error: packageEntitlementsError } = await supabase.rpc(
-          'get_user_package_entitlements',
-          { user_uuid: userId }
-        );
-
-        if (packageEntitlementsError) {
-          logger.error('Failed to load package entitlements', packageEntitlementsError);
-        } else if (packageEntitlements && packageEntitlements.length > 0) {
-          const entitlementsRow = packageEntitlements[0];
-          totalAttractionLimit = this.parseNumber(
-            entitlementsRow.total_attraction_limit,
-            totalAttractionLimit
-          );
-          attractionsUsed = this.parseNumber(
-            entitlementsRow.attractions_used,
-            attractionsUsed
-          );
-          if (Array.isArray(entitlementsRow.owned_packages)) {
-            ownedPackages = entitlementsRow.owned_packages.filter(
-              (pkg: unknown): pkg is string => typeof pkg === 'string'
-            );
-          }
-        }
-      } catch (error) {
-        logger.error('Error while retrieving package entitlements', error);
-      }
-
-      if (hasUnlimitedAccess) {
-        totalAttractionLimit = MonetizationService.UNLIMITED_USAGE_LIMIT;
-      }
-
-      if (ownedPackages.length > 0) {
+      if (rpcState.ownedPackages.length > 0) {
         const { data: packagesData, error: packagesError } = await supabase
           .from('attraction_packages')
           .select('*')
-          .in('id', ownedPackages)
+          .in('id', rpcState.ownedPackages)
           .eq('is_active', true);
 
         if (packagesError) {
@@ -813,58 +688,93 @@ export class MonetizationService {
         }
       }
 
-      const remainingAttractions = Math.max(0, totalAttractionLimit - attractionsUsed);
-
       return {
         hasUnlimitedAccess,
         totalAttractionLimit,
         remainingFreeAttractions: remainingAttractions,
         attractionsUsed,
         ownedAttractions: [],
-        ownedPacks: ownedPackages,
+        ownedPacks: rpcState.ownedPackages,
         ownedPackages: packageDetails,
       };
     } catch (error: unknown) {
       logger.error('Failed to get user entitlements', error);
-      return {
-        hasUnlimitedAccess: false,
-        totalAttractionLimit: 2,
-        remainingFreeAttractions: 2,
-        attractionsUsed: 0,
-        ownedAttractions: [],
-        ownedPacks: [],
-        ownedPackages: [],
-      };
+      try {
+        const rpcState = await this.getUserEntitlementsFromRpcV2(userId);
+        const totalLimit = Math.max(2, rpcState.totalAttractionLimit);
+        return {
+          hasUnlimitedAccess: rpcState.hasUnlimitedAccess,
+          totalAttractionLimit: rpcState.hasUnlimitedAccess
+            ? MonetizationService.UNLIMITED_USAGE_LIMIT
+            : totalLimit,
+          remainingFreeAttractions: rpcState.hasUnlimitedAccess
+            ? MonetizationService.UNLIMITED_USAGE_LIMIT
+            : Math.max(0, totalLimit - rpcState.attractionsUsed),
+          attractionsUsed: rpcState.attractionsUsed,
+          ownedAttractions: [],
+          ownedPacks: rpcState.ownedPackages,
+          ownedPackages: [],
+        };
+      } catch (fallbackError) {
+        logger.error('Failed to get user entitlements from RPC fallback', fallbackError);
+        return {
+          hasUnlimitedAccess: false,
+          totalAttractionLimit: 2,
+          remainingFreeAttractions: 2,
+          attractionsUsed: 0,
+          ownedAttractions: [],
+          ownedPacks: [],
+          ownedPackages: [],
+        };
+      }
     }
   }
 
   async recordAttractionUsage(userId: string, attractionId: string): Promise<void> {
+    if (!userId || !attractionId) {
+      logger.warn('Skipping attraction usage recording: missing userId or attractionId');
+      return;
+    }
+
     try {
-      if (!userId || !attractionId) {
-        console.log('Skipping attraction usage recording - missing userId or attractionId');
+      const { data, error } = await supabase.rpc('record_attraction_usage_v2', {
+        user_uuid: userId,
+        attraction_id: attractionId,
+      });
+
+      if (!error) {
+        const result = Array.isArray(data) ? data[0] : data;
+        logger.info('Attraction usage recorded via RPC v2', {
+          recorded: (result as { recorded?: boolean } | undefined)?.recorded ?? null,
+          reason: (result as { reason?: string } | undefined)?.reason ?? null,
+        });
         return;
       }
 
-      // Check if user has unlimited access
+      logger.warn('record_attraction_usage_v2 failed; using legacy fallback path', error);
+    } catch (rpcError) {
+      logger.warn('record_attraction_usage_v2 threw; using legacy fallback path', rpcError);
+    }
+
+    try {
       const subscription = await this.getSubscriptionStatus(userId);
       if (subscription.isActive && subscription.type !== 'free') {
-        return; // Skip recording for premium users
+        return;
       }
 
-      // Get actual entitlements from database function (calculates SUM of packages)
       const { data: entitlementsData, error: entitlementsError } = await supabase.rpc(
         'get_user_package_entitlements',
         { user_uuid: userId }
       );
 
       if (entitlementsError) {
-        console.error('Failed to get user entitlements:', entitlementsError);
+        logger.error('Failed to get user entitlements', entitlementsError);
         return;
       }
 
       const entitlements = entitlementsData?.[0];
       if (!entitlements) {
-        console.error('No entitlements found for user:', userId);
+        logger.error('No entitlements found for user', { userId });
         return;
       }
 
@@ -873,11 +783,14 @@ export class MonetizationService {
       const newCount = currentCount + 1;
 
       if (newCount > actualLimit) {
-        console.log(`Usage would exceed actual limit (${actualLimit}) for user ${userId}`);
+        logger.info('Skipping usage update: user is at entitlement limit', {
+          userId,
+          actualLimit,
+          currentCount,
+        });
         return;
       }
 
-      // Get current usage row for update/insert
       const { data: currentUsage, error: fetchError } = await supabase
         .from('user_usage')
         .select('usage_count')
@@ -885,10 +798,9 @@ export class MonetizationService {
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('Failed to fetch user_usage:', fetchError);
+        logger.error('Failed to fetch user_usage', fetchError);
       }
 
-      // Update or insert usage record
       if (currentUsage) {
         const { error: updateError } = await supabase
           .from('user_usage')
@@ -900,9 +812,13 @@ export class MonetizationService {
           .eq('user_id', userId);
 
         if (updateError) {
-          console.error('Failed to update user_usage:', updateError);
+          logger.error('Failed to update user_usage', updateError);
         } else {
-          console.log(`Updated attraction usage count: ${newCount}/${actualLimit} for user ${userId}`);
+          logger.info('Updated attraction usage count in fallback path', {
+            userId,
+            usageCount: newCount,
+            limit: actualLimit,
+          });
         }
       } else {
         const { error: insertError } = await supabase
@@ -915,13 +831,17 @@ export class MonetizationService {
           });
 
         if (insertError) {
-          console.error('Failed to insert user_usage:', insertError);
+          logger.error('Failed to insert user_usage', insertError);
         } else {
-          console.log(`Created new usage record with count: ${newCount}/${actualLimit} for user ${userId}`);
+          logger.info('Created new usage record in fallback path', {
+            userId,
+            usageCount: newCount,
+            limit: actualLimit,
+          });
         }
       }
     } catch (error: unknown) {
-      console.error('Failed to record attraction usage:', error);
+      logger.error('Failed to record attraction usage', error);
     }
   }
 
@@ -944,9 +864,12 @@ export class MonetizationService {
           .eq('user_id', userId);
 
         if (updateError) {
-          console.error('Failed to reset user attraction usage:', updateError);
+          logger.error('Failed to reset user attraction usage', updateError);
         } else {
-          console.log(`Reset attraction usage from ${existingUsage.usage_count} to 0 for user ${userId}`);
+          logger.info('Reset attraction usage', {
+            userId,
+            previousUsageCount: existingUsage.usage_count,
+          });
         }
       } else {
         const { error: insertError } = await supabase
@@ -960,18 +883,31 @@ export class MonetizationService {
           });
 
         if (insertError) {
-          console.error('Failed to create user usage record:', insertError);
+          logger.error('Failed to create user usage record', insertError);
         } else {
-          console.log(`Created new usage record with 0/2 attractions for user ${userId}`);
+          logger.info('Created new user usage record', { userId });
         }
       }
     } catch (error: unknown) {
-      console.error('Failed to reset attraction usage:', error);
+      logger.error('Failed to reset attraction usage', error);
     }
   }
 
   async canUserAccessAttraction(userId: string, attractionId: string): Promise<boolean> {
     try {
+      const { data: v2Data, error: v2Error } = await supabase.rpc('can_user_access_attraction_v2', {
+        user_uuid: userId,
+        attraction_id: attractionId,
+      });
+
+      if (!v2Error && v2Data !== null) {
+        return Boolean(v2Data);
+      }
+
+      if (v2Error) {
+        logger.warn('can_user_access_attraction_v2 failed; falling back to legacy RPCs', v2Error);
+      }
+
       const { data, error } = await supabase.rpc('can_user_access_attraction_with_packages', {
         user_uuid: userId,
         attraction_id: attractionId,
@@ -988,13 +924,13 @@ export class MonetizationService {
       });
 
       if (legacyError) {
-        console.error('Failed to check attraction access:', legacyError);
+        logger.error('Failed to check attraction access', legacyError);
         return false;
       }
 
       return legacyData || false;
     } catch (error: unknown) {
-      console.error('Failed to check attraction access:', error);
+      logger.error('Failed to check attraction access', error);
       return false;
     }
   }
@@ -1009,9 +945,9 @@ export class MonetizationService {
       this.initialized = false;
       this.revenueCatConfigured = false;
       this.currentOfferings = null;
-      console.log('MonetizationService cleaned up successfully');
+      logger.info('MonetizationService cleaned up successfully');
     } catch (error: unknown) {
-      console.error('Error during MonetizationService cleanup:', error);
+      logger.error('Error during MonetizationService cleanup', error);
     }
   }
 
@@ -1102,6 +1038,137 @@ export class MonetizationService {
 
   private isPackage(productId: string): boolean {
     return productId.includes('package');
+  }
+
+  private async getSubscriptionStatusFromRpcV2(userId: string): Promise<SubscriptionStatus> {
+    const { data, error } = await supabase.rpc('get_user_subscription_state_v2', {
+      user_uuid: userId,
+    });
+
+    if (error) {
+      logger.error('Failed to load subscription state from RPC v2', error);
+      return {
+        isActive: false,
+        type: 'free',
+        expiresAt: null,
+        inGracePeriod: false,
+        inTrial: false,
+        trialEndsAt: null,
+      };
+    }
+
+    const row = (Array.isArray(data) ? data[0] : data) as SubscriptionStateV2Row | null;
+    if (!row) {
+      return {
+        isActive: false,
+        type: 'free',
+        expiresAt: null,
+        inGracePeriod: false,
+        inTrial: false,
+        trialEndsAt: null,
+      };
+    }
+
+    const type = row.subscription_type ?? 'free';
+    return {
+      isActive: this.parseBoolean(row.is_active, false),
+      type: (type as SubscriptionStatus['type']) ?? 'free',
+      expiresAt: this.parseDate(row.expires_at),
+      inGracePeriod: this.parseBoolean(row.in_grace_period, false),
+      inTrial: this.parseBoolean(row.in_trial, false),
+      trialEndsAt: this.parseDate(row.trial_ends_at),
+    };
+  }
+
+  private async getUserEntitlementsFromRpcV2(userId: string): Promise<{
+    hasUnlimitedAccess: boolean;
+    totalAttractionLimit: number;
+    attractionsUsed: number;
+    attractionsRemaining: number;
+    ownedPackages: string[];
+  }> {
+    const { data, error } = await supabase.rpc('get_user_entitlements_v2', {
+      user_uuid: userId,
+    });
+
+    if (!error && data) {
+      const row = (Array.isArray(data) ? data[0] : data) as UserEntitlementsV2Row | null;
+      if (row) {
+        const totalAttractionLimit = Math.max(0, this.parseNumber(row.total_attraction_limit, 2));
+        const attractionsUsed = Math.max(0, this.parseNumber(row.attractions_used, 0));
+        const attractionsRemaining = Math.max(
+          0,
+          this.parseNumber(row.attractions_remaining, totalAttractionLimit - attractionsUsed)
+        );
+        return {
+          hasUnlimitedAccess: this.parseBoolean(row.has_unlimited_access, false),
+          totalAttractionLimit,
+          attractionsUsed,
+          attractionsRemaining,
+          ownedPackages: this.parseStringArray(row.owned_packages),
+        };
+      }
+    } else if (error) {
+      logger.warn('Failed to load entitlements from RPC v2; using legacy RPC fallback', error);
+    }
+
+    const { data: packageEntitlements, error: packageEntitlementsError } = await supabase.rpc(
+      'get_user_package_entitlements',
+      { user_uuid: userId }
+    );
+
+    if (packageEntitlementsError) {
+      logger.error('Failed to load package entitlements from legacy RPC', packageEntitlementsError);
+      return {
+        hasUnlimitedAccess: false,
+        totalAttractionLimit: 2,
+        attractionsUsed: 0,
+        attractionsRemaining: 2,
+        ownedPackages: [],
+      };
+    }
+
+    const legacyRow = Array.isArray(packageEntitlements) ? packageEntitlements[0] : packageEntitlements;
+    const totalAttractionLimit = Math.max(2, this.parseNumber(legacyRow?.total_attraction_limit, 2));
+    const attractionsUsed = Math.max(0, this.parseNumber(legacyRow?.attractions_used, 0));
+    return {
+      hasUnlimitedAccess: this.parseBoolean(legacyRow?.has_unlimited_access, false),
+      totalAttractionLimit,
+      attractionsUsed,
+      attractionsRemaining: Math.max(0, totalAttractionLimit - attractionsUsed),
+      ownedPackages: this.parseStringArray(legacyRow?.owned_packages),
+    };
+  }
+
+  private parseBoolean(value: unknown, fallback = false): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+    return fallback;
+  }
+
+  private parseDate(value: unknown): Date | null {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.valueOf())) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.valueOf())) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  private parseStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.filter((entry): entry is string => typeof entry === 'string');
+    }
+    return [];
   }
 
   private parseNumber(value: unknown, fallback = 0): number {

@@ -20,11 +20,26 @@ type CounterMap = Record<string, number>;
 class TelemetryServiceImpl {
   private buffer: AudioMetricRow[] = [];
   private maxBuffer = 20;
+  private maxBufferCap = 200;
+  private autoFlushIntervalMs = 15_000;
+  private autoFlushTimer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
+  private analyticsConsentGranted = false;
   private static counters: CounterMap = {};
 
+  private isTelemetryEnabled(): boolean {
+    return getFeatureFlag('telemetry_enabled') && this.analyticsConsentGranted;
+  }
+
+  setAnalyticsConsent(granted: boolean) {
+    this.analyticsConsentGranted = granted;
+    if (!granted) {
+      this.buffer = [];
+    }
+  }
+
   recordTrace(trace: PerfTraceRecord) {
-    if (!getFeatureFlag('telemetry_enabled')) return;
+    if (!this.isTelemetryEnabled()) return;
     const durationMs =
       trace.metrics?.durationMs ??
       (trace.endTime != null ? trace.endTime - trace.startTime : null);
@@ -42,14 +57,35 @@ class TelemetryServiceImpl {
     };
 
     this.buffer.push(row);
+    if (this.buffer.length > this.maxBufferCap) {
+      const droppedCount = this.buffer.length - this.maxBufferCap;
+      this.buffer.splice(0, droppedCount);
+      TelemetryServiceImpl.increment('telemetry_dropped_buffer_overflow', droppedCount);
+    }
+
     if (this.buffer.length >= this.maxBuffer) {
       this.flush().catch(() => {});
     }
   }
 
+  startAutoFlush(intervalMs: number = this.autoFlushIntervalMs) {
+    if (this.autoFlushTimer) return;
+
+    this.autoFlushIntervalMs = Math.max(5_000, intervalMs);
+    this.autoFlushTimer = setInterval(() => {
+      this.flush().catch(() => {});
+    }, this.autoFlushIntervalMs);
+  }
+
+  stopAutoFlush() {
+    if (!this.autoFlushTimer) return;
+    clearInterval(this.autoFlushTimer);
+    this.autoFlushTimer = null;
+  }
+
   async flush(): Promise<void> {
     if (this.flushing || this.buffer.length === 0) return;
-    if (!getFeatureFlag('telemetry_enabled')) {
+    if (!this.isTelemetryEnabled()) {
       this.buffer = [];
       return;
     }
@@ -62,6 +98,11 @@ class TelemetryServiceImpl {
       if (error) {
         // Put back on buffer for a later attempt
         this.buffer.unshift(...payload);
+        if (this.buffer.length > this.maxBufferCap) {
+          const droppedCount = this.buffer.length - this.maxBufferCap;
+          this.buffer.splice(0, droppedCount);
+          TelemetryServiceImpl.increment('telemetry_dropped_retry_overflow', droppedCount);
+        }
       }
     } finally {
       this.flushing = false;
@@ -76,6 +117,7 @@ class TelemetryServiceImpl {
     durationMs?: number;
     errorMessage?: string;
   }) {
+    if (!this.isTelemetryEnabled()) return;
     // For now, just attach a perf mark to the active audio trace
     PerfTracer.mark('rq_event', {
       type: event.type,

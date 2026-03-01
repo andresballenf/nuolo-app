@@ -6,7 +6,14 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "check:supabase-functions": "node scripts/check-supabase-functions.js",
+    "check:secrets": "node scripts/check-secrets.js",
+    "check:legacy-purchase-imports": "node scripts/check-legacy-purchase-imports.js",
+    "check:official-paywall": "node scripts/check-official-paywall.js",
+    "check:release-gates": "node scripts/check-release-gates.js",
+    "check:repo": "npm run typecheck && npm run check:supabase-functions && npm run check:secrets && npm run check:legacy-purchase-imports && npm run check:official-paywall && npm run check:release-gates"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

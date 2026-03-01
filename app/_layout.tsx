@@ -3,11 +3,13 @@ import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import * as Linking from 'expo-linking';
 import * as SplashScreen from 'expo-splash-screen';
-import { View } from 'react-native';
+import { View, AppState, AppStateStatus } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
+import { parseDeepLink } from '../lib/deepLink';
 import { AppProvider } from '../contexts/AppContext';
 import { AuthProvider } from '../contexts/AuthContext';
 import { OnboardingProvider } from '../contexts/OnboardingContext';
@@ -18,6 +20,7 @@ import { MapSettingsProvider } from '../contexts/MapSettingsContext';
 import { OnboardingFlow } from '../components/onboarding/OnboardingFlow';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { TelemetryService } from '../services/TelemetryService';
+import { runStartupHealthChecks } from '../services/RuntimeHealthService';
 import { DiagnosticsOverlay } from '../components/diagnostics/DiagnosticsOverlay';
 
 // Keep native splash screen visible until our JS tree has mounted and laid out
@@ -73,87 +76,105 @@ export default function RootLayout() {
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
+  const handledDeepLinks = useRef<Set<string>>(new Set());
 
-  // Handle deep links from email confirmation and password reset
   useEffect(() => {
-    const handleDeepLink = async (event: { url: string }) => {
-      try {
-        const { hostname, path, queryParams } = Linking.parse(event.url);
+    runStartupHealthChecks();
 
-        // Parse hash fragment for session tokens (Supabase returns them in URL hash)
-        const hashParams: Record<string, string> = {};
-        if (event.url.includes('#')) {
-          const hashString = event.url.split('#')[1];
-          if (hashString) {
-            hashString.split('&').forEach(param => {
-              const [key, value] = param.split('=');
-              if (key && value) {
-                hashParams[key] = decodeURIComponent(value);
-              }
-            });
-          }
-        }
+    TelemetryService.startAutoFlush();
 
-        console.log('Deep link received:', {
-          hostname,
-          path,
-          queryParams,
-          hashParams,
-          fullUrl: event.url
-        });
-
-        // If we have session tokens in hash, set the session
-        if (hashParams.access_token && hashParams.refresh_token) {
-          console.log('Setting session from URL tokens');
-          const { error } = await supabase.auth.setSession({
-            access_token: hashParams.access_token,
-            refresh_token: hashParams.refresh_token,
-          });
-
-          if (error) {
-            console.error('Error setting session from URL:', error);
-          } else {
-            console.log('Session set successfully from URL');
-          }
-        }
-
-        // Handle email confirmation (signup verification)
-        if (path === 'auth/confirm') {
-          // Session should already be set from hash params above
-          router.push('/auth/confirm');
-        }
-
-        // Handle password reset
-        if (path === 'auth/reset-password' || path === 'auth/update-password') {
-          // Session should already be set from hash params above
-          router.push('/auth/update-password');
-        }
-
-        // Handle OAuth callback
-        if (path === 'auth/callback') {
-          const { access_token, refresh_token } = queryParams as Record<string, string>;
-          if (access_token && refresh_token) {
-            // OAuth callback will be handled by AuthContext's onAuthStateChange
-            router.replace('/map');
-          }
-        }
-      } catch (error) {
-        console.error('Error handling deep link:', error);
-      }
-    };
-
-    // Listen for deep links while app is open
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-
-    // Handle initial URL if app was closed and opened via deep link
-    Linking.getInitialURL().then(url => {
-      if (url) {
-        handleDeepLink({ url });
+    const appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState !== 'active') {
+        TelemetryService.flush().catch(() => {});
       }
     });
 
-    return () => subscription.remove();
+    return () => {
+      appStateSubscription.remove();
+      TelemetryService.stopAutoFlush();
+      TelemetryService.flush().catch(() => {});
+    };
   }, []);
+
+  const handleDeepLink = useCallback(async (event: { url: string }) => {
+    const url = event.url;
+    if (!url) return;
+
+    if (handledDeepLinks.current.has(url)) {
+      return;
+    }
+    handledDeepLinks.current.add(url);
+    if (handledDeepLinks.current.size > 100) {
+      handledDeepLinks.current.clear();
+      handledDeepLinks.current.add(url);
+    }
+
+    try {
+      const parsed = parseDeepLink(url);
+      logger.info('Deep link received', {
+        path: parsed.path,
+        hasQueryParams: Object.keys(parsed.queryParams).length > 0,
+        hasSessionTokens: parsed.hasSessionTokens,
+      });
+
+      const accessToken = parsed.hashParams.access_token ?? parsed.queryParams.access_token;
+      const refreshToken = parsed.hashParams.refresh_token ?? parsed.queryParams.refresh_token;
+
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+
+        if (error) {
+          TelemetryService.increment('auth_deep_link_session_set_failure');
+          logger.error('Failed to set session from deep link', error, {
+            path: parsed.path,
+          });
+        } else {
+          TelemetryService.increment('auth_deep_link_session_set_success');
+        }
+      }
+
+      switch (parsed.path) {
+        case 'auth/confirm':
+          router.replace('/auth/confirm');
+          return;
+        case 'auth/reset-password':
+        case 'auth/update-password':
+          router.replace('/auth/update-password');
+          return;
+        case 'auth/callback':
+          TelemetryService.increment('auth_oauth_callback_received');
+          if (accessToken && refreshToken) {
+            router.replace('/map');
+          }
+          return;
+        default:
+          return;
+      }
+    } catch (error) {
+      TelemetryService.increment('auth_deep_link_handler_error');
+      logger.error('Error handling deep link', error, { url });
+    }
+  }, []);
+
+  // Handle deep links from email confirmation and password reset
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+    Linking.getInitialURL()
+      .then(url => {
+        if (url) {
+          return handleDeepLink({ url });
+        }
+        return undefined;
+      })
+      .catch(error => {
+        logger.error('Failed to read initial deep link URL', error);
+      });
+
+    return () => subscription.remove();
+  }, [handleDeepLink]);
 
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded) {
@@ -161,7 +182,7 @@ export default function RootLayout() {
       try {
         await SplashScreen.hideAsync();
       } catch (error) {
-        console.warn('Unable to hide splash screen:', error);
+        logger.warn('Unable to hide splash screen', error);
       }
     }
   }, [fontsLoaded]);

@@ -4,7 +4,8 @@ export type FeatureFlagKey =
   | 'audio_chunked_pipeline'
   | 'audio_streaming_pipeline'
   | 'telemetry_enabled'
-  | 'perf_overlay_enabled';
+  | 'perf_overlay_enabled'
+  | 'show_narrative_mode_toggle';
 
 export type FeatureFlagsState = Record<FeatureFlagKey, boolean>;
 
@@ -24,6 +25,7 @@ const defaultFlags: FeatureFlagsState = {
   audio_streaming_pipeline: envDefault('EXPO_PUBLIC_FF_AUDIO_STREAMING', false),
   telemetry_enabled: envDefault('EXPO_PUBLIC_FF_TELEMETRY', true),
   perf_overlay_enabled: envDefault('EXPO_PUBLIC_FF_PERF_OVERLAY', false),
+  show_narrative_mode_toggle: envDefault('EXPO_PUBLIC_FF_SHOW_NARRATIVE_MODE', true),
 };
 
 let state: FeatureFlagsState = { ...defaultFlags };

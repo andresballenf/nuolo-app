@@ -11,7 +11,7 @@ import type { PointOfInterest } from '../services/GooglePlacesService';
 import { PerfTracer } from '../utils/perfTrace';
 import { TelemetryService } from '../services/TelemetryService';
 
-export type AudioTheme = 'history' | 'nature' | 'architecture' | 'culture';
+export type AudioTheme = 'history' | 'nature' | 'architecture' | 'culture' | 'general';
 export type AudioLengthPreference = 'short' | 'medium' | 'deep-dive';
 export type AudioLanguage = 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'it' | 'pt' | 'ru' | 'ko';
 export type AudioVoiceStyle = 'casual' | 'formal' | 'energetic' | 'calm';

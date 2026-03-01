@@ -9,6 +9,7 @@ export interface AttractionPreferences {
   audioLength?: 'short' | 'medium' | 'deep-dive';
   language?: SupportedLanguage;
   voiceStyle?: 'casual' | 'formal' | 'energetic' | 'calm';
+  narrativeMode?: 'story-driven' | 'fact-driven';
 }
 
 interface ThemeWeighting {
@@ -315,6 +316,222 @@ function buildWikipediaGuideBlock(wikipediaData: any): string {
 }
 
 /**
+ * Block 7: Story Structure (Story-Driven Mode)
+ * Character-conflict-plot framework with 70/30 storytelling rule
+ */
+function buildStoryStructureBlock(): string {
+  return `\nStory structure framework (70% story, 30% facts):
+
+Character introduction (30-60 seconds):
+- Introduce a relatable person, group, or personified place connected to this attraction
+- Make them human and memorable with specific details
+- Examples: historical figure with personality, local resident with a story, the building itself as character
+- Show their motivations, struggles, dreams - make listeners care
+
+Conflict/tension (middle section):
+- Present challenge, mystery, or transformation that creates narrative momentum
+- Universal emotions work best: fear, joy, frustration, love, triumph, loss
+- Stakes should be clear - what was at risk? What could have been lost?
+- Build emotional investment through rising action
+
+Plot resolution:
+- Show how tension resolves or transforms
+- Connect resolution to visitor's present experience
+- Leave with insight or thought-provoking question
+- Create a sense of completion while opening new perspectives
+
+Narrative arc options (choose best fit for this attraction's story):
+- Man in a hole: fall → rise (overcome challenge, resilience story)
+- Rags to riches: rise (transformation, growth, achievement)
+- Cinderella: rise → fall → rise (setback and comeback, perseverance)
+- Tragedy: rise → fall (loss, sacrifice, what was left behind)
+- Apply arc to attraction's story, not just timeline of facts
+
+Content balance guideline:
+- 70% storytelling: Character moments, scenes, emotional beats, human experiences
+- 30% facts: Historical dates, dimensions, technical details - EMBEDDED in narrative
+- Maximum 3-5 key facts per tour - quality over quantity
+- Human interest stories take priority over chronological completeness`;
+}
+
+/**
+ * Block 8: Story-Driven Opening Beat
+ * Hook-focused opener for emotional capture
+ */
+function buildStoryDrivenOpeningBeat(): string {
+  return `\nOpening beat - HOOK (First 15-30 seconds - CRITICAL FOR ENGAGEMENT):
+
+Start with ONE powerful attention-grabber:
+- Universal emotion: Tap into fear, wonder, joy, mystery, curiosity
+- Surprising fact: Something that challenges assumptions or reveals the unexpected
+- Vivid sensory detail: Pull listener into the scene immediately with specific sensations
+- Intriguing question: "What if I told you...", "Have you ever wondered..."
+- Character moment: Drop listener into a compelling human story mid-scene
+
+Examples of strong hooks:
+✅ "Imagine standing here 200 years ago, hearing church bells ring as the city burned..."
+✅ "Listen closely—can you hear the echo? That's not just sound. That's history talking."
+✅ "Everyone thinks this building is 100 years old. It's actually been standing for 300."
+✅ "Maria was 22 when she opened her café here. She had no idea it would spark a revolution."
+
+Examples of weak hooks to AVOID:
+❌ "Welcome to [attraction name]. This is located at [address]."
+❌ "Today we're going to learn about the history of this place."
+❌ "This attraction is known for its architectural features."
+
+Goal: Capture attention and create curiosity BEFORE providing orientation details
+Orientation can come after the hook - first make them want to listen`;
+}
+
+/**
+ * Block 9: Sensory Immersion (Story-Driven Mode)
+ * Multi-sensory engagement directives for memory retention
+ */
+function buildSensoryImmersionBlock(): string {
+  return `\nSensory immersion directives (throughout narrative - ENHANCES MEMORY):
+
+Multi-sensory engagement (minimum 3 of 5 senses per tour):
+- Sight: Precise visual details, not generic descriptions
+  * Good: "Notice the worn limestone steps, polished smooth by centuries of footsteps"
+  * Avoid: "The building looks old and interesting"
+- Sound: What listeners can hear around them right now
+  * Good: "The echo you hear is the same acoustics musicians heard in 1847"
+  * Avoid: "There were sounds here in the past"
+- Smell: Aromas that define this place, past or present
+  * Good: "The aroma of fresh-baked empanadas still fills this corner at dawn"
+  * Avoid: "There were smells associated with this place"
+- Touch: Textures, temperatures, physical sensations
+  * Good: "Run your hand along the rough limestone—it's been here since 1847"
+  * Avoid: "The walls are made of stone"
+- Taste: If relevant to food/culture attractions
+  * Good: "The recipe hasn't changed—same sweet cinnamon locals tasted in 1920"
+  * Avoid: Generic food references
+
+Pacing and balance:
+- Target: 1 sensory detail per 100 words (roughly every 40 seconds of speech)
+- Don't overload - be selective and precise
+- Vary which senses you engage to maintain interest
+- Connect sensory details to emotional or historical significance
+
+Purpose: Pull listeners INTO the story, make them feel present in the narrative
+Sensory details create vivid mental pictures that enhance memory retention by 40-60%`;
+}
+
+/**
+ * Block 10: Show Don't Tell (Story-Driven Mode)
+ * Audio-adapted techniques for discovery vs. exposition
+ */
+function buildShowDontTellBlock(): string {
+  return `\n"Show Don't Tell" directives (audio adaptation - CREATE DISCOVERY):
+
+Core principle: Let listeners discover insights through scenes and details rather than stating conclusions
+
+Create "Aha!" moments:
+- Present evidence and let listeners connect the dots
+- Use concrete examples instead of abstract concepts
+- Show through scenes, characters, and details rather than explaining
+- Trust your listener to make connections
+
+Scene-building for audio:
+- Drop listeners into specific moments with vivid details
+- Use dialogue or quotes to bring characters alive
+- Build atmosphere through sound cues and pacing
+- Let actions reveal character and meaning
+
+Examples of SHOWING vs. TELLING:
+
+SHOWING (Good):
+✅ "Maria stood at this very corner every morning at 5 AM, watching the neighborhood change. One by one, her neighbors left. But she stayed, rolling out dough while the bulldozers moved in across the street."
+✅ "The silence here tells you everything. No echo. No resonance. The acoustics were deliberately killed when they converted it from a church—couldn't have sound carrying during speeches."
+✅ "Look at the doorframe—see those marks? Each one is a family's height measurement. The Johnsons, 1952. The Lees, 1963. The Garcias, 1978. Generations watching their children grow right here."
+
+TELLING (Avoid):
+❌ "This was an important historical event that changed things."
+❌ "Many people were affected by this development."
+❌ "The building has cultural significance."
+❌ "This place played a role in the community."
+
+Avoid spoon-feeding conclusions:
+- Don't say "This shows that..." or "This proves..."
+- Present the evidence and let insight emerge naturally
+- Use specific details over general statements
+- Create moments of realization rather than stating facts`;
+}
+
+/**
+ * Block 11: Story-Driven Orchestration
+ * Enhanced narrative structure with 70/30 rule
+ */
+function buildStoryDrivenOrchestration(audioLength: string): string {
+  const isDeepDive = audioLength === 'deep-dive';
+
+  const baseDirectives = `\nNarrative orchestration (story-driven mode):
+
+Content balance: 70% storytelling, 30% facts
+- Facts should be EMBEDDED in narrative, not listed separately
+- Maximum 3-5 key facts per tour (quality over quantity)
+- Human interest stories take priority over chronological completeness
+- If you must choose between a great story and a minor fact, choose the story
+
+Opening hook (15-30 sec):
+- Emotional attention-grabber (see opening beat block)
+- Create immediate curiosity and engagement
+- Hook comes BEFORE orientation
+
+Character introduction (30-60 sec):
+- Relatable person/place with specific human elements
+- Make them memorable with personality, quirks, struggles
+- Establish emotional connection early
+
+Story arc (middle section):
+- Rising action: Build narrative momentum and tension
+- Conflict: Present challenge, mystery, or transformation
+- Resolution: Show how tension resolves or transforms
+- Use callbacks to earlier points for coherence
+
+Human connection (REQUIRED - not optional):
+- Minimum 1-2 personal anecdotes or character spotlights
+- At least 1 light humor moment (culturally appropriate, natural)
+- Local legends or personal stories prioritized over generic history
+- Micro-anecdotes (brief, vivid scenes) create memorability
+
+Sensory weaving (throughout):
+- Engage minimum 3 of 5 senses
+- Target: 1 sensory detail per 100 words
+- Connect sensory details to emotional significance
+- Vary senses to maintain interest
+
+Transitions and flow:
+- Natural callbacks to previous points
+- "Remember when I mentioned..." creates coherence
+- Use transitional phrases that imply reflection
+- Vary pacing: fast exciting moments + slow reflective pauses
+
+Closing insight (final 30 seconds):
+- Thought-provoking question or forward-looking connection
+- Link story to visitor's ongoing experience
+- Leave them with something to notice, think about, or explore
+- Create sense of completion while opening new perspectives`;
+
+  if (isDeepDive) {
+    return baseDirectives + `\n
+Deep-dive enhancements (story-driven mode):
+- Extended arc: introduction → origin story → pivotal era → transformation → lasting impact → insight
+- Target 2-3 character spotlights or mini-scenes for sustained engagement
+- Build multiple emotional beats (not just one arc) - create emotional variety
+- Layer sensory details to create rich atmosphere throughout
+- Target 1,200-1,800 words (8-12 min spoken) - sweet spot for attention
+- Vary pacing dramatically: intense moments followed by reflective breathing room
+- Use "chapter" transitions: "Now, here's what changed everything..."
+- Include surprising twists or lesser-known details that challenge assumptions
+- Weave multiple narrative threads that connect by the end
+- Aim for 5-7 memorable takeaways (stories, not facts) that stick with listener`;
+  }
+
+  return baseDirectives;
+}
+
+/**
  * Main prompt generation function
  * Assembles modular blocks dynamically
  */
@@ -330,23 +547,54 @@ export function generatePrompt(
 ): string {
   const lang = preferences.language || 'en';
   const audioLength = preferences.audioLength || 'medium';
+  const narrativeMode = preferences.narrativeMode || 'fact-driven'; // Default to fact-driven (V2.0 behavior)
 
-  // Assemble blocks
+  // Start with common blocks
   const blocks: string[] = [
     buildSystemPersona(lang),
     buildContextBlock(attractionAddress, spatialHints, lang, situationalContext),
     buildWikipediaGuideBlock(wikipediaData),
-    buildAudienceBlock(preferences),
-    buildNarrativeOrchestration(audioLength),
+    buildAudienceBlock(preferences)
+  ];
+
+  // Conditional block assembly based on narrative mode
+  if (narrativeMode === 'story-driven') {
+    // Story-driven mode: Add storytelling-enhanced blocks
+    blocks.push(
+      buildStoryStructureBlock(),           // Character-conflict-plot framework
+      buildStoryDrivenOpeningBeat(),        // Emotional hook guidance
+      buildSensoryImmersionBlock(),         // Multi-sensory engagement
+      buildShowDontTellBlock(),             // Discovery vs. exposition
+      buildStoryDrivenOrchestration(audioLength)  // 70/30 rule orchestration
+    );
+  } else {
+    // Fact-driven mode: Keep current V2.0 blocks (default)
+    blocks.push(
+      buildNarrativeOrchestration(audioLength)  // Current V2.0 flexible beats
+    );
+  }
+
+  // Common blocks for both modes
+  blocks.push(
     buildAccuracyBlock(),
     buildCriticalInstructions(lang)
-  ].filter(block => block.length > 0); // Filter out empty blocks
+  );
 
-  // Add user request
-  const userRequest = `\nYour task:
+  // Filter out empty blocks
+  const assembledBlocks = blocks.filter(block => block.length > 0);
+
+  // Add user request (different for each mode)
+  const userRequest = narrativeMode === 'story-driven'
+    ? `\nYour task:
+Create a STORY-DRIVEN audio tour for "${attractionName}".
+Remember the 70/30 rule: 70% storytelling, 30% facts embedded naturally.
+Lead with narrative, create emotional connection, make it memorable.
+Prioritize human stories and sensory experiences over comprehensive factual coverage.
+If you don't have compelling stories to tell, it's better to deliver shorter, authentic narration than to pad with generic descriptions.`
+    : `\nYour task:
 Create an audio tour narrative for "${attractionName}".
 Follow the guidance above, but remember: authenticity and clarity trump hitting exact word counts.
 If you don't have enough verified information, it's better to deliver a shorter, truthful narration than to pad with generic filler.`;
 
-  return blocks.join('\n') + userRequest;
+  return assembledBlocks.join('\n') + userRequest;
 }

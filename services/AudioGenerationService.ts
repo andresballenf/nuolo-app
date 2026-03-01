@@ -430,8 +430,10 @@ export class AudioGenerationService {
     }
 
     // Register this generation as in-flight so parallel callers dedupe
-    let resolveInFlight: ((val: AudioChunkData | null) => void) | null = null;
-    const inFlightPromise = new Promise<AudioChunkData | null>((resolve) => { resolveInFlight = resolve; });
+    let resolveInFlight!: (val: AudioChunkData | null) => void;
+    const inFlightPromise = new Promise<AudioChunkData | null>((resolve) => {
+      resolveInFlight = resolve;
+    });
     AudioGenerationService.inFlightRequests.set(cacheKey, inFlightPromise);
 
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -595,10 +597,8 @@ export class AudioGenerationService {
         }
 
         console.log(`Chunk ${chunk.chunkIndex + 1} generated successfully`);
-        if (resolveInFlight) {
-          resolveInFlight(audioChunk);
-          AudioGenerationService.inFlightRequests.delete(cacheKey);
-        }
+        resolveInFlight(audioChunk);
+        AudioGenerationService.inFlightRequests.delete(cacheKey);
         return audioChunk;
 
       } catch (error: any) {
@@ -633,10 +633,8 @@ export class AudioGenerationService {
 
     const errorMessage = lastError?.message || 'Unknown error occurred';
     console.error(`Failed to generate chunk ${chunk.chunkIndex} after ${retries} attempts:`, errorMessage);
-    if (resolveInFlight) {
-      resolveInFlight(null);
-      AudioGenerationService.inFlightRequests.delete(cacheKey);
-    }
+    resolveInFlight(null);
+    AudioGenerationService.inFlightRequests.delete(cacheKey);
     return null;
   }
 

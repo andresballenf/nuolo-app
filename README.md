@@ -2,6 +2,8 @@
 
 Audio tour guide app built with Expo and React Native.
 
+> For coding agents: start with `AGENT_BRIEF.md` (compact architecture/context map).
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -88,7 +90,11 @@ Create a `.env` file with:
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_key
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=your_revenuecat_ios_key
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=your_revenuecat_android_key
 ```
+
+For EAS builds, store these values in EAS secrets/environments and keep `eas.json` free of sensitive values.
 
 ## 🔧 Troubleshooting
 

@@ -26,8 +26,10 @@ import { useMapSettings } from '../contexts/MapSettingsContext';
 import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
 import { logger } from '../lib/logger';
 import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
+import { getFeatureFlag } from '../config/featureFlags';
 
 export default function MapScreen() {
+  // All context hooks first
   const { isAuthenticated, loading: authLoading } = useAuth();
   const { setSelectedAttraction, setIsBottomSheetOpen, gpsStatus, userPreferences, setGpsStatus } = useApp();
   const { resetOnboarding } = useOnboarding();
@@ -36,6 +38,7 @@ export default function MapScreen() {
   const { generateAudioGuideWithValidation } = useContentAccess();
   const telemetry = useAudioGenerationTelemetry();
 
+  // All state hooks before any conditional returns
   // Test location state
   const [isTestModeEnabled, setIsTestModeEnabled] = useState(false);
   const [testLocation, setTestLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -51,7 +54,30 @@ export default function MapScreen() {
   const [attractionAudio, setAttractionAudio] = useState<string | null>(null);
   const [isGeneratingInfo, setIsGeneratingInfo] = useState(false);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[] | undefined>(undefined);
-  
+
+  // Material Bottom Sheet state
+  const [sheetContentType, setSheetContentType] = useState<SheetContentType>('attractions');
+  const [sheetState, setSheetState] = useState<SheetState>('hidden');
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Map controls state - centralized via MapSettingsContext
+  const { settings: mapSettings, setSettings: setMapSettings } = useMapSettings();
+  const mapType = mapSettings.mapType;
+  const mapTilt = mapSettings.tilt;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [triggerGPS, setTriggerGPS] = useState(0);
+  const [isEnablingGPS, setIsEnablingGPS] = useState(false);
+
+  // Search state
+  const [showSearchButton, setShowSearchButton] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const mapSearchRef = useRef<SearchAreaHandle | null>(null);
+  const mapRef = useRef<MapView | null>(null);
+
+  // Track if initial load has occurred
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
+
   // Build proportional sentence/word timings for karaoke highlighting
   function buildTranscriptSegments(text: string, durationMs: number): TranscriptSegment[] {
     const sentences = text
@@ -86,53 +112,13 @@ export default function MapScreen() {
       return { text: s, startMs, endMs, words };
     });
   }
-  
-  // Material Bottom Sheet state
-  const [sheetContentType, setSheetContentType] = useState<SheetContentType>('attractions');
-  const [sheetState, setSheetState] = useState<SheetState>('hidden');
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Map controls state - centralized via MapSettingsContext
-  const { settings: mapSettings, setSettings: setMapSettings } = useMapSettings();
-  const mapType = mapSettings.mapType;
-  const mapTilt = mapSettings.tilt;
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [triggerGPS, setTriggerGPS] = useState(0);
-  const [isEnablingGPS, setIsEnablingGPS] = useState(false);
-  
-  // Search state
-  const [showSearchButton, setShowSearchButton] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const mapSearchRef = useRef<SearchAreaHandle | null>(null);
-  const mapRef = useRef<MapView | null>(null);
-  
-  // Track if initial load has occurred
-  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
-
-  if (authLoading) {
-    return null;
-  }
-
-  if (!isAuthenticated) {
-    return <Redirect href="/auth" />;
-  }
-
-  // Popular locations for quick testing
-  const popularLocations = [
-    { name: "Paris", lat: 48.8566, lng: 2.3522 },
-    { name: "New York", lat: 40.7128, lng: -74.0060 },
-    { name: "Tokyo", lat: 35.6762, lng: 139.6503 },
-    { name: "Rome", lat: 41.9028, lng: 12.4964 },
-    { name: "Cairo", lat: 30.0444, lng: 31.2357 },
-    { name: "Cincinnati", lat: 39.1088, lng: -84.5175 }
-  ];
-
+  // All callbacks and effects before conditional returns
   const handlePointsOfInterestUpdate = useCallback((pois: PointOfInterest[], isManualSearch: boolean = false) => {
     // Always update the attractions data silently
     setAttractions(pois);
     console.log(`Found ${pois.length} attractions nearby`);
-    
+
     // Only update bottom sheet visibility on explicit user actions
     if (isManualSearch) {
       // Manual search via "Search this area" button
@@ -164,6 +150,132 @@ export default function MapScreen() {
       setUserLocation({ lat: testLocation.latitude, lng: testLocation.longitude });
     }
   }, [gpsStatus.latitude, gpsStatus.longitude, testLocation]);
+
+  // If backend didn't return timings, generate client-side timings once duration is known
+  useEffect(() => {
+    if (audioContext.duration > 0 && attractionInfo) {
+      if (!transcriptSegments || transcriptSegments.length === 0) {
+        const built = buildTranscriptSegments(attractionInfo, audioContext.duration);
+        setTranscriptSegments(built);
+      }
+    }
+  }, [audioContext.duration, attractionInfo, transcriptSegments]);
+
+  // Memoized callbacks to prevent re-renders
+  const handleSearchStateChange = useCallback((showButton: boolean, searching: boolean) => {
+    // Only update if values actually changed to prevent unnecessary re-renders
+    setShowSearchButton(prev => prev !== showButton ? showButton : prev);
+    setIsSearching(prev => prev !== searching ? searching : prev);
+  }, []);
+
+  const handleBottomSheetClose = useCallback(() => {
+    setIsBottomSheetVisible(false);
+  }, []);
+
+  const handleMapRecenter = useCallback((lat: number, lng: number) => {
+    // Recenter map on attraction with 3D view
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: lat,
+          longitude: lng,
+        },
+        pitch: mapTilt, // Maintain current tilt for 3D
+        heading: 0,
+        altitude: 600,
+        zoom: 17,  // Optimal for 3D buildings
+      }, { duration: 500 });
+    }
+  }, [mapTilt]);
+
+  const handleAttractionSelect = useCallback((attraction: PointOfInterest) => {
+    const index = attractions.findIndex(a => a.id === attraction.id);
+    setSelectedAttractionLocal(attraction);
+    setSelectedAttractionIndex(index >= 0 ? index : 0);
+    setAttractionInfo(null);
+    setAttractionAudio(null);
+    setTranscriptSegments(undefined);
+
+    // Recenter map on selected attraction with 3D view
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: attraction.coordinate.latitude,
+          longitude: attraction.coordinate.longitude,
+        },
+        pitch: mapTilt, // Maintain current tilt for 3D
+        heading: 0,
+        altitude: 600, // Closer view for selected attraction
+        zoom: 17,  // Optimal for 3D buildings
+      }, { duration: 500 });
+    }
+
+    // Switch to detail view
+    setSheetContentType('attraction-detail');
+    setSheetState('detail');
+
+    // Update global context
+    setSelectedAttraction({
+      id: attraction.id,
+      name: attraction.name,
+      position: {
+        lat: attraction.coordinate.latitude,
+        lng: attraction.coordinate.longitude,
+      },
+      description: attraction.description,
+      rating: attraction.rating,
+    });
+  }, [attractions, setSelectedAttraction, mapTilt]);
+
+  const handleBackToList = useCallback(() => {
+    setSheetContentType('attractions');
+    setSheetState('half');
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setSheetContentType('settings');
+    setIsBottomSheetVisible(true);
+    setSheetState('expanded');
+  }, []);
+
+  const handleOpenProfile = useCallback(() => {
+    setSheetContentType('profile');
+    setIsBottomSheetVisible(true);
+    setSheetState('expanded');
+  }, []);
+
+  // Memoized content components to prevent re-renders
+  const settingsContentMemo = useMemo(() => (
+    <SettingsContent
+      onClose={() => setIsBottomSheetVisible(false)}
+    />
+  ), []);
+
+  const profileContentMemo = useMemo(() => (
+    <ProfileContent
+      onResetOnboarding={resetOnboarding}
+      onClose={() => setIsBottomSheetVisible(false)}
+    />
+  ), [resetOnboarding]);
+
+  // Conditional returns AFTER all hooks
+  if (authLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/auth" />;
+  }
+
+  // Popular locations for quick testing
+  const popularLocations = [
+    { name: "Paris", lat: 48.8566, lng: 2.3522 },
+    { name: "New York", lat: 40.7128, lng: -74.0060 },
+    { name: "Tokyo", lat: 35.6762, lng: 139.6503 },
+    { name: "Rome", lat: 41.9028, lng: 12.4964 },
+    { name: "Cairo", lat: 30.0444, lng: 31.2357 },
+    { name: "Cincinnati", lat: 39.1088, lng: -84.5175 }
+  ];
 
   const handleMarkerPress = (poi: PointOfInterest) => {
     const index = attractions.findIndex(a => a.id === poi.id);
@@ -236,61 +348,6 @@ export default function MapScreen() {
     );
   };
 
-  const handleAttractionSelect = useCallback((attraction: PointOfInterest) => {
-    const index = attractions.findIndex(a => a.id === attraction.id);
-    setSelectedAttractionLocal(attraction);
-    setSelectedAttractionIndex(index >= 0 ? index : 0);
-    setAttractionInfo(null);
-    setAttractionAudio(null);
-    setTranscriptSegments(undefined);
-    
-    // Recenter map on selected attraction with 3D view
-    if (mapRef.current) {
-      mapRef.current.animateCamera({
-        center: {
-          latitude: attraction.coordinate.latitude,
-          longitude: attraction.coordinate.longitude,
-        },
-        pitch: mapTilt, // Maintain current tilt for 3D
-        heading: 0,
-        altitude: 600, // Closer view for selected attraction
-        zoom: 17,  // Optimal for 3D buildings
-      }, { duration: 500 });
-    }
-    
-    // Switch to detail view
-    setSheetContentType('attraction-detail');
-    setSheetState('detail');
-    
-    // Update global context
-    setSelectedAttraction({
-      id: attraction.id,
-      name: attraction.name,
-      position: {
-        lat: attraction.coordinate.latitude,
-        lng: attraction.coordinate.longitude,
-      },
-      description: attraction.description,
-      rating: attraction.rating,
-    });
-  }, [attractions, setSelectedAttraction]);
-  
-  const handleBackToList = useCallback(() => {
-    setSheetContentType('attractions');
-    setSheetState('half');
-  }, []);
-  
-  const handleOpenSettings = useCallback(() => {
-    setSheetContentType('settings');
-    setIsBottomSheetVisible(true);
-    setSheetState('expanded');
-  }, []);
-  
-  const handleOpenProfile = useCallback(() => {
-    setSheetContentType('profile');
-    setIsBottomSheetVisible(true);
-    setSheetState('expanded');
-  }, []);
 
   const handleGenerateInfo = async (attraction: PointOfInterest) => {
     setIsGeneratingInfo(true);
@@ -445,12 +502,10 @@ export default function MapScreen() {
       // Update UI with text immediately
       setAttractionInfo(text);
       
-      // Feature flag to enable new app-orchestrated chunked audio
-      // Set to true to use the new chunking system that bypasses the 4096 char limit
-      const USE_APP_CHUNKED_AUDIO = true; // Toggle this to switch between old and new methods
-      
+      // Feature flags for generation pipeline
+      const useAppChunkedAudio = getFeatureFlag('audio_chunked_pipeline');
       let audioGenerated = false;
-      const useChunkedStreaming = false; // Old streaming method - disabled
+      const useChunkedStreaming = getFeatureFlag('audio_streaming_pipeline');
       
       if (useChunkedStreaming) {
         try {
@@ -508,7 +563,7 @@ export default function MapScreen() {
       }
       
       // Use app-orchestrated chunked audio generation (NEW - unlimited text length!)
-      if (!audioGenerated && USE_APP_CHUNKED_AUDIO) {
+      if (!audioGenerated && useAppChunkedAudio) {
         try {
           console.log('Using new app-orchestrated chunked audio generation');
           
@@ -672,16 +727,6 @@ export default function MapScreen() {
     }
   };
 
-  // If backend didn't return timings, generate client-side timings once duration is known
-  useEffect(() => {
-    if (audioContext.duration > 0 && attractionInfo) {
-      if (!transcriptSegments || transcriptSegments.length === 0) {
-        const built = buildTranscriptSegments(attractionInfo, audioContext.duration);
-        setTranscriptSegments(built);
-      }
-    }
-  }, [audioContext.duration, attractionInfo]);
-
   // Update map camera when tilt changes - REMOVED to prevent drift
   // The tilt being related to drift speed indicates the camera animation is the issue
   // Let the user control tilt manually through map gestures instead
@@ -785,47 +830,6 @@ export default function MapScreen() {
     // The refresh will be handled by the MapView component
     setTimeout(() => setIsRefreshing(false), 1000);
   };
-
-  // Memoized callbacks to prevent re-renders - MUST be called before JSX
-  const handleSearchStateChange = useCallback((showButton: boolean, searching: boolean) => {
-    // Only update if values actually changed to prevent unnecessary re-renders
-    setShowSearchButton(prev => prev !== showButton ? showButton : prev);
-    setIsSearching(prev => prev !== searching ? searching : prev);
-  }, []);
-
-  const handleBottomSheetClose = useCallback(() => {
-    setIsBottomSheetVisible(false);
-  }, []);
-
-  const handleMapRecenter = useCallback((lat: number, lng: number) => {
-    // Recenter map on attraction with 3D view
-    if (mapRef.current) {
-      mapRef.current.animateCamera({
-        center: {
-          latitude: lat,
-          longitude: lng,
-        },
-        pitch: mapTilt, // Maintain current tilt for 3D
-        heading: 0,
-        altitude: 600,
-        zoom: 17,  // Optimal for 3D buildings
-      }, { duration: 500 });
-    }
-  }, [mapTilt]);
-
-  // Memoized content components to prevent re-renders
-  const settingsContentMemo = useMemo(() => (
-    <SettingsContent
-      onClose={() => setIsBottomSheetVisible(false)}
-    />
-  ), []);
-
-  const profileContentMemo = useMemo(() => (
-    <ProfileContent
-      onResetOnboarding={resetOnboarding}
-      onClose={() => setIsBottomSheetVisible(false)}
-    />
-  ), [resetOnboarding]);
 
   // Gracefully handle no GPS - show map with manual controls instead of blocking
   // Users can enable GPS via TopNavigationBar button or test mode controls

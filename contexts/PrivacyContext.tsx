@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TelemetryService } from '../services/TelemetryService';
 
 interface LocationConsent {
   granted: boolean;
@@ -77,6 +78,11 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     loadPrivacySettings();
   }, []);
+
+  // Keep telemetry consent synchronized with privacy settings.
+  useEffect(() => {
+    TelemetryService.setAnalyticsConsent(privacySettings.analyticsConsent);
+  }, [privacySettings.analyticsConsent]);
 
   const loadPrivacySettings = async () => {
     try {

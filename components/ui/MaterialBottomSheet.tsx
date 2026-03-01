@@ -144,6 +144,15 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
   // Refs
   const lastGestureY = useRef(0);
   const currentHeight = useRef(initialTranslateY);
+
+  const getCurrentTranslateY = useCallback((): number => {
+    let latestValue = currentHeight.current;
+    translateY.current.stopAnimation((stoppedValue: number) => {
+      latestValue = stoppedValue;
+      currentHeight.current = stoppedValue;
+    });
+    return latestValue;
+  }, []);
   
   // Get audio context
   const audioContext = useAudio();
@@ -275,7 +284,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
         return Math.abs(gestureState.dy) > 5;
       },
       onPanResponderGrant: () => {
-        lastGestureY.current = translateY.current.__getValue();
+        lastGestureY.current = getCurrentTranslateY();
       },
       onPanResponderMove: (_, gestureState) => {
         const newY = lastGestureY.current + gestureState.dy;
@@ -315,7 +324,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
             else if (sheetState === 'half') targetState = 'expanded';
           } else {
             // Snap to nearest state
-            const currentY = translateY.current.__getValue();
+            const currentY = getCurrentTranslateY();
             const states: SheetState[] = ['hidden', 'detail', 'collapsed', 'half', 'expanded'];
             let minDistance = SCREEN_HEIGHT;
             
@@ -333,7 +342,7 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
         animateToState(targetState);
       },
     }),
-    [sheetState, contentType, getSheetHeight, animateToState]
+    [sheetState, contentType, getSheetHeight, animateToState, getCurrentTranslateY]
   );
   
   // Handle back navigation

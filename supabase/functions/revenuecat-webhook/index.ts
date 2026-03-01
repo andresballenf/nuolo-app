@@ -1,11 +1,18 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { crypto } from 'https://deno.land/std@0.168.0/crypto/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-revenuecat-signature',
 };
+
+const revenueCatWebhookAuthorization = Deno.env.get('REVENUECAT_WEBHOOK_AUTHORIZATION');
+
+const jsonResponse = (status: number, payload: Record<string, unknown>) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 
 interface RevenueCatWebhookEvent {
   api_version: string;
@@ -39,17 +46,20 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  if (!revenueCatWebhookAuthorization) {
+    console.error('[SECURITY] REVENUECAT_WEBHOOK_AUTHORIZATION is not configured');
+    return jsonResponse(500, { error: 'Webhook configuration error' });
+  }
+
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader || authHeader !== revenueCatWebhookAuthorization) {
+    console.warn('[SECURITY] Unauthorized webhook request blocked');
+    return jsonResponse(401, { error: 'Unauthorized' });
+  }
+
   try {
     // Read body first
     const body = await req.text();
-
-    // Log what we received for debugging
-    console.log('[DEBUG] Headers received:', Object.fromEntries(req.headers.entries()));
-    console.log('[DEBUG] Request method:', req.method);
-
-    // TEMPORARY: Authorization check disabled for testing
-    // TODO: Re-enable after configuring Authorization Header in RevenueCat dashboard
-    console.log('[WARNING] Authorization check temporarily disabled');
 
     // Parse event
     const webhookEvent: RevenueCatWebhookEvent = JSON.parse(body);
@@ -63,6 +73,25 @@ serve(async (req) => {
 
     // Get user ID from app_user_id (this should be the Supabase user UUID)
     const userId = webhookEvent.event.app_user_id;
+    if (!isUuid(userId)) {
+      console.warn('[SECURITY] Invalid RevenueCat app_user_id; skipping event', {
+        eventType: webhookEvent.event.type,
+      });
+      return jsonResponse(202, { received: true, ignored: true, reason: 'invalid_app_user_id' });
+    }
+
+    const eventId = buildWebhookEventId(webhookEvent.event);
+    const shouldProcess = await reserveWebhookEvent(supabaseClient, {
+      eventId,
+      userId,
+      productId: webhookEvent.event.product_id,
+      store: webhookEvent.event.store,
+    });
+
+    if (!shouldProcess) {
+      console.log('[WEBHOOK] Duplicate event ignored:', eventId);
+      return jsonResponse(200, { received: true, deduplicated: true });
+    }
 
     // Handle different event types
     switch (webhookEvent.event.type) {
@@ -93,18 +122,12 @@ serve(async (req) => {
     }
 
     // Return success
-    return new Response(JSON.stringify({ received: true }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(200, { received: true });
   } catch (error) {
     console.error('[ERROR] Webhook processing failed:', error);
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return jsonResponse(500, {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 
@@ -125,29 +148,15 @@ async function handlePurchase(
   if (isUnlimitedSubscription) {
     // Handle unlimited monthly subscription (one active at a time)
     const subscriptionType = 'unlimited_monthly';
-
-    const { error } = await supabaseClient.from('user_subscriptions').upsert(
-      {
-        user_id: userId,
-        subscription_type: subscriptionType,
-        is_active: true,
-        platform: eventData.store === 'APP_STORE' ? 'apple' : 'google',
-        original_transaction_id: eventData.original_transaction_id,
-        purchase_token: eventData.transaction_id,
-        product_id: eventData.product_id,
-        purchase_date: new Date(eventData.purchased_at_ms).toISOString(),
-        expiration_date: eventData.expiration_at_ms
-          ? new Date(eventData.expiration_at_ms).toISOString()
-          : null,
-        auto_renew: true,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
+    const upsertError = await upsertSubscriptionWithFallback(
+      supabaseClient,
+      userId,
+      subscriptionType,
+      eventData
     );
-
-    if (error) {
-      console.error('[ERROR] Failed to update unlimited subscription:', error);
-      throw error;
+    if (upsertError) {
+      console.error('[ERROR] Failed to update unlimited subscription:', upsertError);
+      throw upsertError;
     }
 
     console.log(`[SUCCESS] Updated unlimited subscription for user ${userId}`);
@@ -172,29 +181,15 @@ async function handlePurchase(
   } else {
     // Handle other subscription types (premium_monthly, premium_yearly, lifetime)
     const subscriptionType = getSubscriptionType(eventData.product_id);
-
-    const { error } = await supabaseClient.from('user_subscriptions').upsert(
-      {
-        user_id: userId,
-        subscription_type: subscriptionType,
-        is_active: true,
-        platform: eventData.store === 'APP_STORE' ? 'apple' : 'google',
-        original_transaction_id: eventData.original_transaction_id,
-        purchase_token: eventData.transaction_id,
-        product_id: eventData.product_id,
-        purchase_date: new Date(eventData.purchased_at_ms).toISOString(),
-        expiration_date: eventData.expiration_at_ms
-          ? new Date(eventData.expiration_at_ms).toISOString()
-          : null,
-        auto_renew: true,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
+    const upsertError = await upsertSubscriptionWithFallback(
+      supabaseClient,
+      userId,
+      subscriptionType,
+      eventData
     );
-
-    if (error) {
-      console.error('[ERROR] Failed to update subscription:', error);
-      throw error;
+    if (upsertError) {
+      console.error('[ERROR] Failed to update subscription:', upsertError);
+      throw upsertError;
     }
 
     console.log(`[SUCCESS] Updated ${subscriptionType} subscription for user ${userId}`);
@@ -206,7 +201,7 @@ async function handleCancellation(
   event: RevenueCatWebhookEvent,
   userId: string
 ) {
-  const { error } = await supabaseClient
+  let { error } = await supabaseClient
     .from('user_subscriptions')
     .update({
       auto_renew: false,
@@ -214,6 +209,20 @@ async function handleCancellation(
     })
     .eq('user_id', userId)
     .eq('original_transaction_id', event.event.original_transaction_id);
+
+  if (error && isMissingColumnError(error)) {
+    const fallback = await supabaseClient
+      .from('user_subscriptions')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .eq('original_transaction_id', event.event.original_transaction_id);
+
+    error = fallback.error;
+  }
 
   if (error) {
     console.error('[ERROR] Failed to update subscription cancellation:', error);
@@ -228,7 +237,7 @@ async function handleExpiration(
   event: RevenueCatWebhookEvent,
   userId: string
 ) {
-  const { error } = await supabaseClient
+  let { error } = await supabaseClient
     .from('user_subscriptions')
     .update({
       is_active: false,
@@ -236,6 +245,19 @@ async function handleExpiration(
     })
     .eq('user_id', userId)
     .eq('original_transaction_id', event.event.original_transaction_id);
+
+  if (error && isMissingColumnError(error)) {
+    const fallback = await supabaseClient
+      .from('user_subscriptions')
+      .update({
+        status: 'expired',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .eq('original_transaction_id', event.event.original_transaction_id);
+
+    error = fallback.error;
+  }
 
   if (error) {
     console.error('[ERROR] Failed to update subscription expiration:', error);
@@ -265,7 +287,7 @@ async function handleProductChange(
   // Handle subscription upgrade/downgrade
   const subscriptionType = getSubscriptionType(event.event.product_id);
 
-  const { error } = await supabaseClient
+  let { error } = await supabaseClient
     .from('user_subscriptions')
     .update({
       subscription_type: subscriptionType,
@@ -274,6 +296,19 @@ async function handleProductChange(
     })
     .eq('user_id', userId)
     .eq('original_transaction_id', event.event.original_transaction_id);
+
+  if (error && isMissingColumnError(error)) {
+    const fallback = await supabaseClient
+      .from('user_subscriptions')
+      .update({
+        subscription_type: subscriptionType,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .eq('original_transaction_id', event.event.original_transaction_id);
+
+    error = fallback.error;
+  }
 
   if (error) {
     console.error('[ERROR] Failed to update product change:', error);
@@ -286,7 +321,7 @@ async function handleProductChange(
 async function updateUserAttractionLimit(supabaseClient: any, userId: string) {
   try {
     const { data: entitlements } = await supabaseClient.rpc(
-      'get_user_package_entitlements',
+      'get_user_entitlements_v2',
       { user_uuid: userId }
     );
 
@@ -305,6 +340,112 @@ async function updateUserAttractionLimit(supabaseClient: any, userId: string) {
   } catch (error) {
     console.error('[ERROR] Failed to update user attraction limit:', error);
   }
+}
+
+function mapStoreToPlatform(store: string): 'ios' | 'android' {
+  if (store === 'PLAY_STORE' || store === 'GOOGLE_PLAY') {
+    return 'android';
+  }
+  return 'ios';
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: string }).code;
+  return code === '42703';
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function buildWebhookEventId(event: RevenueCatWebhookEvent['event']): string {
+  const transactionKey =
+    event.transaction_id ||
+    event.original_transaction_id ||
+    `${event.app_user_id}:${event.product_id}:${event.purchased_at_ms ?? Date.now()}`;
+  return `${event.type}:${transactionKey}`;
+}
+
+async function reserveWebhookEvent(
+  supabaseClient: any,
+  params: {
+    eventId: string;
+    userId: string;
+    productId: string;
+    store: string;
+  }
+): Promise<boolean> {
+  const { error } = await supabaseClient.from('processed_transactions').insert({
+    transaction_id: params.eventId,
+    user_id: params.userId,
+    product_id: params.productId,
+    platform: mapStoreToPlatform(params.store),
+    processed_at: new Date().toISOString(),
+  });
+
+  if (!error) {
+    return true;
+  }
+
+  if ((error as { code?: string }).code === '23505') {
+    return false;
+  }
+
+  throw error;
+}
+
+async function upsertSubscriptionWithFallback(
+  supabaseClient: any,
+  userId: string,
+  subscriptionType: string,
+  eventData: RevenueCatWebhookEvent['event']
+): Promise<any | null> {
+  const expirationDate = eventData.expiration_at_ms
+    ? new Date(eventData.expiration_at_ms).toISOString()
+    : null;
+  const platform = mapStoreToPlatform(eventData.store);
+
+  const modernAttempt = await supabaseClient.from('user_subscriptions').upsert(
+    {
+      user_id: userId,
+      subscription_type: subscriptionType,
+      is_active: true,
+      platform,
+      original_transaction_id: eventData.original_transaction_id,
+      purchase_token: eventData.transaction_id,
+      product_id: eventData.product_id,
+      purchase_date: new Date(eventData.purchased_at_ms).toISOString(),
+      expiration_date: expirationDate,
+      auto_renew: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'original_transaction_id' }
+  );
+
+  if (!modernAttempt.error) {
+    return null;
+  }
+
+  if (!isMissingColumnError(modernAttempt.error)) {
+    return modernAttempt.error;
+  }
+
+  const legacyAttempt = await supabaseClient.from('user_subscriptions').upsert(
+    {
+      user_id: userId,
+      subscription_type: subscriptionType,
+      status: 'active',
+      platform,
+      original_transaction_id: eventData.original_transaction_id,
+      latest_receipt_info: eventData,
+      expires_at: expirationDate,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'original_transaction_id' }
+  );
+
+  return legacyAttempt.error ?? null;
 }
 
 function getSubscriptionType(productId: string): string {

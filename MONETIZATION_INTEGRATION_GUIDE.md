@@ -11,7 +11,7 @@ The monetization system consists of:
 - **Supabase Database**: Complete schema for subscriptions, purchases, usage tracking, and attraction packs
 - **MonetizationService**: Singleton service handling all IAP operations
 - **MonetizationContext**: React context providing monetization state and actions
-- **UI Components**: PaywallModal, EntitlementStatus, and integration helpers
+- **UI Components**: RevenueCatPaywallModal, EntitlementStatus, and integration helpers
 - **Platform Support**: iOS App Store and Google Play Store compatible
 
 ## Database Schema
@@ -80,12 +80,12 @@ function MyComponent() {
 
 ## UI Components
 
-### PaywallModal
+### RevenueCatPaywallModal
 
-A comprehensive paywall component with A/B testing support:
+Official native paywall component powered by RevenueCat dashboard configuration:
 
 ```tsx
-import { PaywallModal } from './components/ui/PaywallModal';
+import { RevenueCatPaywallModal } from './components/ui/RevenueCatPaywallModal';
 
 function MapScreen() {
   const { showPaywall, setShowPaywall, paywallContext } = useMonetization();
@@ -94,7 +94,7 @@ function MapScreen() {
     <View>
       {/* Your map content */}
       
-      <PaywallModal
+      <RevenueCatPaywallModal
         visible={showPaywall}
         onClose={() => setShowPaywall(false)}
         trigger={paywallContext?.trigger}
@@ -185,22 +185,22 @@ if (!hasAccess) {
 ### Purchase Flows
 
 ```tsx
-const { purchaseSubscription, purchasePack, restorePurchases } = useMonetization();
+const { purchaseSubscription, purchaseAttractionPackage, restorePurchases } = useMonetization();
 
 // Purchase subscription
-const handleSubscribe = async (type: 'monthly' | 'yearly' | 'lifetime') => {
-  const success = await purchaseSubscription(type);
+const handleSubscribe = async () => {
+  const success = await purchaseSubscription();
   if (success) {
     // Handle success - paywall closes automatically
     Alert.alert('Welcome to Premium!', 'You now have unlimited access.');
   }
 };
 
-// Purchase attraction pack
-const handleBuyPack = async (packId: string) => {
-  const success = await purchasePack(packId);
+// Purchase attraction package
+const handleBuyPackage = async (packageId: string) => {
+  const success = await purchaseAttractionPackage?.(packageId);
   if (success) {
-    Alert.alert('Pack Purchased!', 'You now have access to all attractions in this pack.');
+    Alert.alert('Package Purchased!', 'You now have additional paid attraction credits.');
   }
 };
 
@@ -361,12 +361,11 @@ For monetization system support:
 
 ## Migration from PurchaseContext
 
-If migrating from the existing PurchaseContext:
+Migration is complete in this codebase:
 
-1. **Data Migration**: Export existing entitlements to new schema
-2. **Code Updates**: Replace `usePurchase()` with `useMonetization()`
-3. **Testing**: Verify all purchase flows work with new system
-4. **Cleanup**: Remove old PurchaseContext after verification
+1. `PurchaseContext` was removed.
+2. `usePurchase()` usage was replaced with `useMonetization()`/`useContentAccess()`.
+3. RevenueCat native paywall is the only supported paywall path.
 
 ## Security Considerations
 

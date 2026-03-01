@@ -11,7 +11,7 @@ interface CustomMarkerProps {
   poi: PointOfInterest;
   isSelected: boolean;
   onPress: (poi: PointOfInterest) => void;
-  mapType: 'satellite' | 'hybrid';
+  mapType: 'standard' | 'satellite' | 'hybrid' | 'terrain';
   showLabel: boolean;
   labelVisible: boolean;
   labelSide?: 'left' | 'right';
@@ -112,4 +112,3 @@ export const CustomMarker: React.FC<CustomMarkerProps> = ({
     elevation: 5,
   },
 });
-

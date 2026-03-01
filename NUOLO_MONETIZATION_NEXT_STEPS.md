@@ -21,7 +21,7 @@ npx expo start --android # Android device
 ### Step 2: Test Monetization Components
 - [ ] Open the app and verify MonetizationProvider loads without errors
 - [ ] Check EntitlementStatus component displays "Free Tier" with "2/2 free guides remaining"
-- [ ] Test PaywallModal by triggering it manually (add temp button)
+- [ ] Test `RevenueCatPaywallModal` by triggering `setShowPaywall(true, { trigger: 'manual' })`
 - [ ] Verify free tier limit enforcement (test generating 3rd audio guide)
 - [ ] Test error handling with network disconnected
 
@@ -245,7 +245,7 @@ analytics.track('Purchase Completed', {
 - [ ] Churn rates and reasons
 
 #### 10.3 A/B Testing Opportunities
-- [ ] Different paywall designs (already supported in PaywallModal)
+- [ ] Different paywall designs (configure variants in RevenueCat Paywalls dashboard)
 - [ ] Pricing experiments
 - [ ] Free trial length variations
 - [ ] Pack content and pricing

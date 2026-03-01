@@ -83,7 +83,7 @@ supabase secrets set APPLE_SHARED_SECRET="your_apple_shared_secret_here"
 supabase secrets set GOOGLE_SERVICE_ACCOUNT='{"type":"service_account","project_id":"...",...}'
 
 # Google Maps API Key for server-side proxy
-supabase secrets set GOOGLE_MAPS_API_KEY="AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk"
+supabase secrets set GOOGLE_MAPS_API_KEY="YOUR_GOOGLE_MAPS_API_KEY"
 ```
 
 **Important:** After setting secrets, restart the Edge Functions:
@@ -133,7 +133,7 @@ curl -X POST http://localhost:54321/functions/v1/maps-proxy \
 **⚠️ THIS MUST BE DONE IMMEDIATELY**
 
 The following secrets are exposed in git history:
-- Google Maps API key: `AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk`
+- Google Maps API key: `YOUR_GOOGLE_MAPS_API_KEY`
 - Supabase credentials
 - iOS certificate passwords
 

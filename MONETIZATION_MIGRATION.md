@@ -73,9 +73,9 @@ if (hasUnlimitedAccess || hasLegacySubscription) {
 - Updated to display ∞ icon for both `unlimited_monthly` and legacy subscriptions
 - Added comments distinguishing current vs legacy subscriptions
 
-#### 4. `components/ui/PaywallModal.tsx`
-- Updated `purchaseSubscription()` call to not pass subscription type
-- Now only shows unlimited monthly option (legacy types not purchasable)
+#### 4. `components/ui/RevenueCatPaywallModal.tsx`
+- RevenueCat native paywall is now the only supported paywall UI path
+- Entitlements refresh automatically on purchase/restore and dismiss
 
 #### 5. `app/_layout.tsx`
 - **Removed** `PurchaseContext` import and provider
@@ -84,9 +84,9 @@ if (hasUnlimitedAccess || hasLegacySubscription) {
 ### **Removed Files**
 
 #### `contexts/PurchaseContext.tsx`
-- **Status**: Deprecated, no longer used
+- **Status**: Removed
 - **Replacement**: `MonetizationContext` handles all purchases
-- **Action**: File can be deleted in future cleanup
+- **Action**: Keep legacy import guard in CI to prevent reintroduction
 
 ---
 
@@ -208,7 +208,7 @@ If you need to re-enable legacy subscription types:
 1. **Revert Product IDs**: Restore `PREMIUM_MONTHLY`, `PREMIUM_YEARLY`, `LIFETIME` constants
 2. **Revert MonetizationService**: Add back legacy type handling in `getProductIdForSubscriptionType()`
 3. **Revert MonetizationContext**: Add back type parameter to `purchaseSubscription()`
-4. **Revert PaywallModal**: Add back UI options for legacy subscriptions
+4. **Revert paywall configuration**: Replace RevenueCat-only paywall flow with a custom multi-option flow
 5. **Re-enable in stores**: Set legacy products to "Available" in App Store Connect and Google Play
 
 **Estimated rollback time**: 30 minutes
@@ -253,5 +253,5 @@ For questions about this migration:
 
 ---
 
-**Last Updated**: January 2025
+**Last Updated**: March 1, 2026
 **Migration Status**: ✅ Complete

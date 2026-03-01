@@ -1,18 +1,26 @@
 /**
  * Secure Logging Utility
  *
- * Provides centralized logging with automatic sensitive data redaction
- * and environment-aware behavior (development vs production).
- *
- * Security Features:
- * - Automatic redaction of sensitive fields (tokens, passwords, keys, etc.)
- * - Development-only detailed logging
- * - Production error reporting ready (integrate with Sentry/equivalent)
- * - Pattern-based sensitive data detection
+ * Centralized logging with automatic sensitive data redaction and
+ * production error tracking adapters.
  */
 
 const isDevelopment = __DEV__;
 const isProduction = !__DEV__;
+
+type ErrorTrackingLevel = 'error' | 'security';
+
+interface ErrorTrackingEvent {
+  level: ErrorTrackingLevel;
+  message: string;
+  error?: unknown;
+  context?: Record<string, unknown>;
+  timestamp: string;
+}
+
+type ErrorTrackingAdapter = (event: ErrorTrackingEvent) => void | Promise<void>;
+
+let trackingAdapter: ErrorTrackingAdapter | null = null;
 
 // Patterns that indicate sensitive data
 const SENSITIVE_PATTERNS = [
@@ -42,61 +50,49 @@ const PII_PATTERNS = [
 ];
 
 /**
- * Recursively redact sensitive data from objects
+ * Recursively redact sensitive data from objects.
  */
-function redactSensitiveData(data: any, depth = 0): any {
-  // Prevent infinite recursion
+function redactSensitiveData(data: unknown, depth = 0): unknown {
   if (depth > 10) {
     return '[MAX_DEPTH_EXCEEDED]';
   }
 
-  // Handle null/undefined
   if (data === null || data === undefined) {
     return data;
   }
 
-  // Handle strings - check if they contain sensitive patterns
   if (typeof data === 'string') {
-    // Don't redact short strings or obvious non-sensitive data
     if (data.length < 3) return data;
-
-    // Check for sensitive patterns in key names (handled at parent level)
     return data;
   }
 
-  // Handle arrays
   if (Array.isArray(data)) {
     return data.map(item => redactSensitiveData(item, depth + 1));
   }
 
-  // Handle objects
   if (typeof data === 'object') {
-    const redacted: any = {};
+    const redacted: Record<string, unknown> = {};
+    const objectData = data as Record<string, unknown>;
 
-    for (const key of Object.keys(data)) {
-      // Check if key matches sensitive patterns
+    for (const key of Object.keys(objectData)) {
       const isSensitiveKey = [...SENSITIVE_PATTERNS, ...PII_PATTERNS].some(
         pattern => pattern.test(key)
       );
-
-      if (isSensitiveKey) {
-        redacted[key] = '[REDACTED]';
-      } else {
-        redacted[key] = redactSensitiveData(data[key], depth + 1);
-      }
+      redacted[key] = isSensitiveKey
+        ? '[REDACTED]'
+        : redactSensitiveData(objectData[key], depth + 1);
     }
 
     return redacted;
   }
 
-  // Return primitives as-is
   return data;
 }
 
 /**
- * Format error for logging with stack trace in development
+ * Format error for logging with stack trace in development.
  */
-function formatError(error: any): any {
+function formatError(error: unknown): unknown {
   if (error instanceof Error) {
     return {
       name: error.name,
@@ -108,16 +104,44 @@ function formatError(error: any): any {
   return error;
 }
 
-/**
- * Send error to production error tracking service
- * TODO: Integrate with Sentry or equivalent service
- */
-function sendToErrorTracking(message: string, error?: any): void {
-  if (isProduction) {
-    // TODO: Implement Sentry.captureException or equivalent
-    // For now, use console.error as fallback
-    console.error('[ERROR_TRACKING]', message, error);
+export function setErrorTrackingAdapter(adapter: ErrorTrackingAdapter | null): void {
+  trackingAdapter = adapter;
+}
+
+function sendToErrorTracking(
+  level: ErrorTrackingLevel,
+  message: string,
+  error?: unknown,
+  context?: Record<string, unknown>
+): void {
+  if (!isProduction) {
+    return;
   }
+
+  const payload: ErrorTrackingEvent = {
+    level,
+    message,
+    error: redactSensitiveData(error),
+    context: context ? (redactSensitiveData(context) as Record<string, unknown>) : undefined,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (trackingAdapter) {
+    try {
+      const result = trackingAdapter(payload);
+      if (result && typeof (result as Promise<void>).catch === 'function') {
+        (result as Promise<void>).catch(() => {
+          console.error('[ERROR_TRACKING] adapter failed');
+        });
+      }
+      return;
+    } catch (adapterError) {
+      console.error('[ERROR_TRACKING] adapter threw', redactSensitiveData(formatError(adapterError)));
+    }
+  }
+
+  // Fallback until provider adapter is configured (Sentry, Datadog, etc.)
+  console.error('[ERROR_TRACKING]', payload);
 }
 
 /**
@@ -132,79 +156,71 @@ function sendToErrorTracking(message: string, error?: any): void {
  */
 export const logger = {
   /**
-   * General purpose logging - Development only
+   * General purpose logging - Development only.
    */
-  log: (message: string, ...args: any[]): void => {
-    if (isDevelopment) {
-      const redactedArgs = args.map(redactSensitiveData);
-      console.log(`[LOG] ${message}`, ...redactedArgs);
-    }
+  log: (message: string, ...args: unknown[]): void => {
+    if (!isDevelopment) return;
+    const redactedArgs = args.map(redactSensitiveData);
+    console.log(`[LOG] ${message}`, ...redactedArgs);
   },
 
   /**
-   * Error logging - Works in all environments
-   * In production, sends to error tracking service
+   * Error logging - works in all environments.
    */
-  error: (message: string, error?: any): void => {
+  error: (message: string, error?: unknown, context?: Record<string, unknown>): void => {
     const formattedError = error ? formatError(error) : undefined;
     const redactedError = redactSensitiveData(formattedError);
 
     if (isDevelopment) {
-      console.error(`[ERROR] ${message}`, redactedError);
-    } else {
-      // Production: send to error tracking service
-      sendToErrorTracking(message, redactedError);
+      console.error(`[ERROR] ${message}`, redactedError, context ? redactSensitiveData(context) : undefined);
+      return;
     }
+
+    sendToErrorTracking('error', message, redactedError, context);
   },
 
   /**
-   * Warning logging - Development only
+   * Warning logging - Development only.
    */
-  warn: (message: string, ...args: any[]): void => {
-    if (isDevelopment) {
-      const redactedArgs = args.map(redactSensitiveData);
-      console.warn(`[WARN] ${message}`, ...redactedArgs);
-    }
+  warn: (message: string, ...args: unknown[]): void => {
+    if (!isDevelopment) return;
+    const redactedArgs = args.map(redactSensitiveData);
+    console.warn(`[WARN] ${message}`, ...redactedArgs);
   },
 
   /**
-   * Info logging - Development only
+   * Info logging - Development only.
    */
-  info: (message: string, ...args: any[]): void => {
-    if (isDevelopment) {
-      const redactedArgs = args.map(redactSensitiveData);
-      console.log(`[INFO] ${message}`, ...redactedArgs);
-    }
+  info: (message: string, ...args: unknown[]): void => {
+    if (!isDevelopment) return;
+    const redactedArgs = args.map(redactSensitiveData);
+    console.log(`[INFO] ${message}`, ...redactedArgs);
   },
 
   /**
-   * Security event logging - Works in all environments
-   * Important security events should always be logged
+   * Security event logging - works in all environments.
    */
-  security: (message: string, ...args: any[]): void => {
+  security: (message: string, ...args: unknown[]): void => {
     const redactedArgs = args.map(redactSensitiveData);
     console.warn(`[SECURITY] ${message}`, ...redactedArgs);
 
-    // In production, also send to monitoring service
     if (isProduction) {
-      sendToErrorTracking(`[SECURITY] ${message}`, redactedArgs);
+      sendToErrorTracking('security', message, { args: redactedArgs });
     }
   },
 
   /**
-   * Debug logging - Development only, more verbose
+   * Debug logging - Development only, more verbose.
    */
-  debug: (message: string, ...args: any[]): void => {
-    if (isDevelopment) {
-      const redactedArgs = args.map(redactSensitiveData);
-      console.log(`[DEBUG] ${message}`, ...redactedArgs);
-    }
+  debug: (message: string, ...args: unknown[]): void => {
+    if (!isDevelopment) return;
+    const redactedArgs = args.map(redactSensitiveData);
+    console.log(`[DEBUG] ${message}`, ...redactedArgs);
   },
 };
 
 /**
- * Legacy console methods - Deprecated, use logger instead
- * These can be used during migration period
+ * Legacy console methods - Deprecated, use logger instead.
  */
 export const deprecatedConsole = {
   log: console.log,

@@ -7,27 +7,20 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_MwimuWnHgZyWgYTXnKEkTQJehrX",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_rZkouESRGwSuPdWCKvwbkXmXBwR"
-      },
+      "environment": "development",
       "ios": {
         "resourceClass": "m-medium"
       }
     },
     "preview": {
       "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_MwimuWnHgZyWgYTXnKEkTQJehrX",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_rZkouESRGwSuPdWCKvwbkXmXBwR"
-      },
+      "environment": "preview",
       "ios": {
         "resourceClass": "m-medium"
       }
     },
     "production": {
+      "environment": "production",
       "ios": {
         "buildConfiguration": "Release",
         "distribution": "store",
@@ -35,33 +28,20 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_NO_CAPABILITY_SYNC": "1",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_MwimuWnHgZyWgYTXnKEkTQJehrX",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_rZkouESRGwSuPdWCKvwbkXmXBwR",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://odppmbshkubichmbwunl.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA"
+        "EXPO_NO_CAPABILITY_SYNC": "1"
       }
     },
     "production-adhoc": {
-      "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_MwimuWnHgZyWgYTXnKEkTQJehrX",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_rZkouESRGwSuPdWCKvwbkXmXBwR"
-      },
+      "environment": "production",
       "ios": {
-        "buildConfiguration": "Release", 
+        "buildConfiguration": "Release",
         "distribution": "internal",
         "autoIncrement": true,
         "resourceClass": "m-medium"
       }
     },
     "simulator": {
-      "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDuVcq_dM6rnHNokT_M6WHCi3mN91XXNMk",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_MwimuWnHgZyWgYTXnKEkTQJehrX",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_rZkouESRGwSuPdWCKvwbkXmXBwR"
-      },
+      "environment": "development",
       "ios": {
         "simulator": true,
         "resourceClass": "m-medium"

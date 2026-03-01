@@ -11,18 +11,18 @@ Supabase Edge Functions enforce JWT authentication on ALL incoming requests, blo
 
 ### Webhook Endpoint
 ```
-https://odppmbshkubichmbwunl.supabase.co/functions/v1/revenuecat-webhook
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/revenuecat-webhook
 ```
 
 ### Authentication Details
 
 **Supabase Authentication** (for all requests):
 - Header: `Authorization` or `apikey`
-- Value: `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA`
+- Value: `Bearer YOUR_SUPABASE_ANON_KEY`
 
 **Webhook Signature** (for verification):
 - Header: `X-RevenueCat-Signature`
-- Value: `507752e1a667f37812218f0f4396579f0eb07a789263a02528a9e58fd0a8cf8a`
+- Value: `YOUR_REVENUECAT_WEBHOOK_SECRET`
 
 ## RevenueCat Dashboard Configuration
 
@@ -37,7 +37,7 @@ https://odppmbshkubichmbwunl.supabase.co/functions/v1/revenuecat-webhook
 Click "Add Webhook" or "Edit" existing webhook and configure:
 
 **Basic Settings:**
-- **Webhook URL**: `https://odppmbshkubichmbwunl.supabase.co/functions/v1/revenuecat-webhook`
+- **Webhook URL**: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/revenuecat-webhook`
 - **Environment**: Both Production and Sandbox
 
 **Headers Configuration:**
@@ -46,11 +46,11 @@ Add these TWO headers (this is critical):
 
 1. **First Header** (Supabase Auth):
    - Name: `Authorization`
-   - Value: `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA`
+   - Value: `Bearer YOUR_SUPABASE_ANON_KEY`
 
 2. **Second Header** (Webhook Signature):
    - Name: `X-RevenueCat-Signature`
-   - Value: `507752e1a667f37812218f0f4396579f0eb07a789263a02528a9e58fd0a8cf8a`
+   - Value: `YOUR_REVENUECAT_WEBHOOK_SECRET`
 
 **Event Types** (select all):
 - ✅ Initial Purchase
@@ -73,10 +73,10 @@ Add these TWO headers (this is critical):
 ### Manual Test with cURL
 
 ```bash
-curl -X POST https://odppmbshkubichmbwunl.supabase.co/functions/v1/revenuecat-webhook \
+curl -X POST https://YOUR_PROJECT_REF.supabase.co/functions/v1/revenuecat-webhook \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA' \
-  -H 'X-RevenueCat-Signature: 507752e1a667f37812218f0f4396579f0eb07a789263a02528a9e58fd0a8cf8a' \
+  -H 'Authorization: Bearer YOUR_SUPABASE_ANON_KEY' \
+  -H 'X-RevenueCat-Signature: YOUR_REVENUECAT_WEBHOOK_SECRET' \
   -d '{"api_version":"1.0","event":{"type":"INITIAL_PURCHASE","app_user_id":"test-user-123","aliases":[],"original_app_user_id":"test-user-123","product_id":"nuolo_unlimited_monthly","entitlement_ids":["unlimited"],"period_type":"trial","purchased_at_ms":1697472000000,"expiration_at_ms":1700064000000,"environment":"sandbox","presented_offering_id":"default","transaction_id":"test-txn","original_transaction_id":"test-txn","is_trial_conversion":false,"store":"APP_STORE","takehome_percentage":0.7,"price":9.99,"currency":"USD","tax_percentage":0,"commission_percentage":0.3}}'
 ```
 
@@ -206,9 +206,9 @@ The webhook handles these event types:
 
 **Project**: Nuolo
 **Function**: revenuecat-webhook (Version 9)
-**Webhook URL**: `https://odppmbshkubichmbwunl.supabase.co/functions/v1/revenuecat-webhook`
-**Anon Key**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kcHBtYnNoa3ViaWNobWJ3dW5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1MTIyOTgsImV4cCI6MjA1OTA4ODI5OH0.5pNOE6cre5FI6ZrFp0LmayQUZidXZ5KH-KMqaRO3KVA`
-**Webhook Secret**: `507752e1a667f37812218f0f4396579f0eb07a789263a02528a9e58fd0a8cf8a`
+**Webhook URL**: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/revenuecat-webhook`
+**Anon Key**: `YOUR_SUPABASE_ANON_KEY`
+**Webhook Secret**: `YOUR_REVENUECAT_WEBHOOK_SECRET`
 
 ## Success Criteria
 

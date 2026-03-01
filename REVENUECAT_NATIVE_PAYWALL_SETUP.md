@@ -135,21 +135,15 @@ npx expo run:android
 
 ## Migration Path
 
-### Old Custom Paywall (components/ui/PaywallModal.tsx)
+### RevenueCat Is the Official Paywall Path
 
-The old custom paywall is still available if needed:
-```typescript
-import { PaywallModal } from '../components/ui/PaywallModal';
-```
-
-### New RevenueCat Native Paywall (components/ui/RevenueCatPaywallModal.tsx)
-
-The new native paywall is now used by default:
+Legacy custom wrapper paywalls were removed from the app to prevent split purchase flows.
+Use only the centralized RevenueCat modal:
 ```typescript
 import { RevenueCatPaywallModal } from '../components/ui/RevenueCatPaywallModal';
 ```
 
-**Recommendation**: Use the native paywall for production. It's:
+This is the production path because it is:
 - Better designed
 - Easier to maintain (no custom UI code)
 - A/B tested by RevenueCat experts

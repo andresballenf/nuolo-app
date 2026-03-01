@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useApp } from '../../contexts/AppContext';
 import { useMapSettings } from '../../contexts/MapSettingsContext';
+import { getFeatureFlag } from '../../config/featureFlags';
 
 interface SettingsContentProps {
   onClose?: () => void;
@@ -18,6 +19,7 @@ interface SettingsContentProps {
 export const SettingsContent: React.FC<SettingsContentProps> = ({ onClose }) => {
   const { userPreferences, setUserPreferences } = useApp();
   const { settings, setSettings, isFeatureSupported } = useMapSettings();
+  const showNarrativeModeToggle = getFeatureFlag('show_narrative_mode_toggle');
 
   const allMapTypes: Array<{ type: 'satellite' | 'hybrid' | 'terrain'; label: string; icon: string }> = [
     { type: 'satellite', label: 'Satellite', icon: 'satellite' },
@@ -182,7 +184,75 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({ onClose }) => 
           </TouchableOpacity>
         </View>
       </View>
-      
+
+      {/* Narrative Mode Toggle */}
+      {showNarrativeModeToggle && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Audio Tour Style</Text>
+          <Text style={styles.sectionDescription}>
+            Choose your preferred narration style
+          </Text>
+          <View style={styles.audioLengthOptions}>
+            <TouchableOpacity
+              style={[
+                styles.audioOption,
+                userPreferences.narrativeMode === 'fact-driven' && styles.audioOptionActive,
+              ]}
+              onPress={() => setUserPreferences({ ...userPreferences, narrativeMode: 'fact-driven' })}
+            >
+              <MaterialIcons
+                name="description"
+                size={20}
+                color={userPreferences.narrativeMode === 'fact-driven' ? '#84cc16' : '#6B7280'}
+              />
+              <View style={styles.audioOptionContent}>
+                <Text style={[
+                  styles.audioOptionTitle,
+                  userPreferences.narrativeMode === 'fact-driven' && styles.audioOptionTitleActive,
+                ]}>
+                  Classic Mode
+                </Text>
+                <Text style={styles.audioOptionDesc}>Fact-focused narration</Text>
+              </View>
+              {userPreferences.narrativeMode === 'fact-driven' && (
+                <MaterialIcons name="check-circle" size={20} color="#84cc16" />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.audioOption,
+                userPreferences.narrativeMode === 'story-driven' && styles.audioOptionActive,
+              ]}
+              onPress={() => setUserPreferences({ ...userPreferences, narrativeMode: 'story-driven' })}
+            >
+              <MaterialIcons
+                name="auto-stories"
+                size={20}
+                color={userPreferences.narrativeMode === 'story-driven' ? '#84cc16' : '#6B7280'}
+              />
+              <View style={styles.audioOptionContent}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={[
+                    styles.audioOptionTitle,
+                    userPreferences.narrativeMode === 'story-driven' && styles.audioOptionTitleActive,
+                  ]}>
+                    Story Mode
+                  </Text>
+                  <View style={styles.betaBadge}>
+                    <Text style={styles.betaBadgeText}>BETA</Text>
+                  </View>
+                </View>
+                <Text style={styles.audioOptionDesc}>Storytelling-enhanced</Text>
+              </View>
+              {userPreferences.narrativeMode === 'story-driven' && (
+                <MaterialIcons name="check-circle" size={20} color="#84cc16" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Additional Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Map Features</Text>
@@ -469,5 +539,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     marginBottom: 4,
+  },
+  betaBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#F59E0B',
+  },
+  betaBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
 });

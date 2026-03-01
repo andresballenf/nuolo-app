@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import GooglePlacesService, { PointOfInterest } from '../services/GooglePlacesService';
-import Constants from 'expo-constants';
+import { logger } from '../lib/logger';
+import { TelemetryService } from '../services/TelemetryService';
 
 interface UsePlacesSearchOptions {
   onPointsOfInterestUpdate?: (pois: PointOfInterest[], isManualSearch?: boolean) => void;
@@ -36,6 +37,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
   const googlePlacesService = useRef<GooglePlacesService | null>(null);
   const lastSearchTime = useRef<number>(0);
   const searchThrottle = 2000; // 2 seconds between searches
+  const activeRequestId = useRef(0);
 
   // Initialize Google Places service
   useEffect(() => {
@@ -55,7 +57,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     isManualSearch: boolean = false
   ): Promise<void> => {
     if (!googlePlacesService.current) {
-      console.warn('Google Places service not initialized');
+      logger.warn('Google Places service not initialized');
       return;
     }
 
@@ -65,12 +67,17 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
       return;
     }
     lastSearchTime.current = now;
+    const requestId = ++activeRequestId.current;
 
     setIsSearching(true);
     setShowSearchButton(false);
 
     try {
       const results = await googlePlacesService.current.searchNearbyAttractions(location, radius);
+      if (requestId !== activeRequestId.current) {
+        return;
+      }
+
       const filteredResults = googlePlacesService.current.filterTouristAttractions(results);
 
       setPointsOfInterest(filteredResults);
@@ -79,17 +86,29 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
       // Notify parent with isManualSearch flag
       onPointsOfInterestUpdate?.(filteredResults, isManualSearch);
 
-      console.log(`Found ${filteredResults.length} attractions near ${location.lat}, ${location.lng}`);
+      TelemetryService.increment('map_search_nearby_success');
+      logger.info('Nearby places search succeeded', {
+        lat: location.lat,
+        lng: location.lng,
+        resultCount: filteredResults.length,
+      });
     } catch (error) {
-      console.error('Error searching nearby places:', error);
+      if (requestId !== activeRequestId.current) {
+        return;
+      }
+
+      TelemetryService.increment('map_search_nearby_error');
+      logger.error('Error searching nearby places', error);
       Alert.alert(
         'Search Error',
         'Unable to find nearby attractions. Please check your internet connection.'
       );
     } finally {
-      setIsSearching(false);
+      if (requestId === activeRequestId.current) {
+        setIsSearching(false);
+      }
     }
-  }, [searchRadius]);
+  }, [searchRadius, onPointsOfInterestUpdate]);
 
   /**
    * Search places with custom query
@@ -100,7 +119,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     radius: number = 5000
   ): Promise<void> => {
     if (!googlePlacesService.current) {
-      console.warn('Google Places service not initialized');
+      logger.warn('Google Places service not initialized');
       Alert.alert(
         'Service Error',
         'Maps service is not ready. Please try again in a moment.'
@@ -111,7 +130,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     // Validate query
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
-      console.warn('Empty search query provided');
+      logger.warn('Empty search query provided');
       return;
     }
 
@@ -123,12 +142,21 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
       return;
     }
 
+    const requestId = ++activeRequestId.current;
     setIsSearching(true);
     setShowSearchButton(false);
 
     try {
-      console.log(`Searching for: "${trimmedQuery}" near ${location.lat}, ${location.lng}`);
+      logger.info('Searching places with query', {
+        queryLength: trimmedQuery.length,
+        lat: location.lat,
+        lng: location.lng,
+      });
       const results = await googlePlacesService.current.searchPlaces(trimmedQuery, location, radius);
+      if (requestId !== activeRequestId.current) {
+        return;
+      }
+
       const filteredResults = googlePlacesService.current.filterTouristAttractions(results);
 
       setPointsOfInterest(filteredResults);
@@ -144,15 +172,22 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
             { text: 'OK', style: 'cancel' },
             { text: 'Search Nearby', onPress: () => {
               // Trigger nearby search instead
-              console.log('Triggering nearby search as fallback');
+              logger.info('Search places returned 0 results; user prompted for nearby fallback');
             }}
           ]
         );
       } else {
-        console.log(`Found ${filteredResults.length} results for "${trimmedQuery}"`);
+        TelemetryService.increment('map_search_text_success');
+        logger.info('Text places search succeeded', {
+          resultCount: filteredResults.length,
+        });
       }
     } catch (error) {
-      console.error('Error searching places:', error);
+      if (requestId !== activeRequestId.current) {
+        return;
+      }
+      TelemetryService.increment('map_search_text_error');
+      logger.error('Error searching places', error);
 
       // Provide more helpful error messages
       let errorMessage = 'Unable to search for places. Please try again.';
@@ -176,7 +211,9 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         { text: 'Retry', onPress: () => searchPlaces(query, location, radius) }
       ]);
     } finally {
-      setIsSearching(false);
+      if (requestId === activeRequestId.current) {
+        setIsSearching(false);
+      }
     }
   }, [onPointsOfInterestUpdate]);
 
@@ -216,11 +253,12 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
    * Clear search results
    */
   const clearResults = useCallback(() => {
+    activeRequestId.current += 1;
     setPointsOfInterest([]);
     setLastSearchCenter(null);
     setShowSearchButton(false);
     onPointsOfInterestUpdate?.([]);
-  }, []);
+  }, [onPointsOfInterestUpdate]);
 
   // Auto-search when location changes significantly
   useEffect(() => {

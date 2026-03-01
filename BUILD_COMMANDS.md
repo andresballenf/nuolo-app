@@ -43,12 +43,16 @@ npx eas build:view [build-id]
 - Build profiles configured: production, production-adhoc, simulator, development, preview
 
 ## Environment Variables
+Build profiles now rely on EAS-hosted environment variables. Keep secrets out of `eas.json`.
+
 Make sure to set your production environment variables:
 ```bash
 # Create .env.production file with:
 EXPO_PUBLIC_SUPABASE_URL=your_production_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_production_key
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_production_api_key
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=your_revenuecat_ios_key
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=your_revenuecat_android_key
 
 # Then push to EAS:
 npx eas secret:push --scope project --env-file .env.production

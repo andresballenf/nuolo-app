@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase';
 
+export type NarrativeMode = 'story-driven' | 'fact-driven';
+
 export interface UserPreferences {
   theme: string;
   audioLength: string;
@@ -7,6 +9,7 @@ export interface UserPreferences {
   language: string;
   batteryOptimization: boolean;
   aiProvider?: string;
+  narrativeMode?: NarrativeMode;
 }
 
 export class PreferencesService {
@@ -41,6 +44,7 @@ export class PreferencesService {
         language: data.language,
         batteryOptimization: data.battery_optimization,
         aiProvider: data.ai_provider,
+        narrativeMode: data.narrative_mode || 'fact-driven',
       };
     } catch (error) {
       console.error('Error in getUserPreferences:', error);
@@ -66,6 +70,7 @@ export class PreferencesService {
           language: preferences.language,
           battery_optimization: preferences.batteryOptimization,
           ai_provider: preferences.aiProvider,
+          narrative_mode: preferences.narrativeMode || 'fact-driven',
         }, { onConflict: 'user_id' });
 
       if (error) {
@@ -107,6 +112,9 @@ export class PreferencesService {
       }
       if (updates.aiProvider !== undefined) {
         updateData.ai_provider = updates.aiProvider;
+      }
+      if (updates.narrativeMode !== undefined) {
+        updateData.narrative_mode = updates.narrativeMode;
       }
 
       const { error } = await supabase
@@ -157,6 +165,27 @@ export class PreferencesService {
       voiceStyle: 'casual',
       language: 'en',
       batteryOptimization: false,
+      narrativeMode: 'fact-driven',
     };
+  }
+
+  /**
+   * Get narrative mode preference
+   * Helper method for easy access to narrative mode
+   */
+  static async getNarrativeMode(userId: string): Promise<NarrativeMode> {
+    const preferences = await this.getUserPreferences(userId);
+    return preferences?.narrativeMode || 'fact-driven';
+  }
+
+  /**
+   * Set narrative mode preference
+   * Helper method for updating just the narrative mode
+   */
+  static async setNarrativeMode(
+    userId: string,
+    mode: NarrativeMode
+  ): Promise<boolean> {
+    return this.updateUserPreferences(userId, { narrativeMode: mode });
   }
 }

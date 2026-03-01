@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { format, isToday, isTomorrow } from 'date-fns';
 
 import type { MaterialIconName } from '../../types/icons';
-import { usePurchase } from '../../contexts/PurchaseContext';
+import { usePaywallFlow } from '../../hooks/usePurchaseIntegration';
 
 interface EntitlementStatusProps {
   variant?: 'compact' | 'detailed' | 'banner';
@@ -47,7 +47,7 @@ export const EntitlementStatus: React.FC<EntitlementStatusProps> = ({
   const {
     entitlements,
     showPaywall,
-  } = usePurchase();
+  } = usePaywallFlow();
 
   const statusInfo = useMemo<StatusInfo>(() => {
     const now = new Date();

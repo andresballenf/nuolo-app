@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Agent Bootstrap
+
+Read `AGENT_BRIEF.md` first for a compact architecture + file map.
+
 ## Development Commands
 
 ```bash

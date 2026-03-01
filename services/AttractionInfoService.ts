@@ -29,6 +29,7 @@ interface UserPreferences {
   voiceStyle: string;
   language?: string;
   aiProvider?: 'openai' | 'gemini';
+  narrativeMode?: 'story-driven' | 'fact-driven';
 }
 
 interface AttractionInfoRequest {

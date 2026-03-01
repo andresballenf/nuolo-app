@@ -2,67 +2,50 @@
 
 ## Overview
 
-This comprehensive purchase and subscription system provides:
+Nuolo monetization is built around `MonetizationContext` and RevenueCat native paywalls.
 
-- **Free Tier**: 2 attraction audio guides included
-- **Paywall**: Non-intrusive presentation when limit reached
-- **Package Purchases**: Individual attraction bundles
-- **Subscriptions**: Unlimited access plans
-- **Restoration**: Cross-device purchase recovery
-- **Management**: Full subscription lifecycle
-- **Analytics**: A/B testing and conversion tracking
+- **Free tier**: 2 attraction audio guides included
+- **Official paywall**: `RevenueCatPaywallModal`
+- **Packages**: consumable credits (`basic_package`, `standard_package`, `premium_package`)
+- **Subscription**: `unlimited_monthly`
+- **Restore flow**: cross-device purchase recovery
+- **Management UI**: subscription + entitlement components under `components/purchase`
 
 ## Architecture Overview
 
-### Context Hierarchy
-```
+### Provider Hierarchy
+
+```text
 QueryClientProvider
 └── PrivacyProvider
     └── AppProvider
-        └── AuthProvider
-            └── PurchaseProvider  ← New addition
+        └── MapSettingsProvider
+            └── AuthProvider
                 └── OnboardingProvider
                     └── AudioProvider
+                        └── MonetizationProvider
 ```
 
-### Core Components
+### Core Modules
 
-1. **PurchaseContext** - Global state management
-2. **PaywallModal** - Purchase flow presentation
-3. **SubscriptionManager** - Account management interface
-4. **EntitlementStatus** - User status indicators
-5. **PurchaseRestoreFlow** - Purchase restoration workflow
+1. **MonetizationContext** (`contexts/MonetizationContext.tsx`) - single source of truth for subscription/entitlements and paywall visibility
+2. **RevenueCatPaywallModal** (`components/ui/RevenueCatPaywallModal.tsx`) - official paywall UI
+3. **Purchase integration hooks** (`hooks/usePurchaseIntegration.ts`) - compatibility layer + flow helpers
+4. **Purchase UI components** (`components/purchase/*`) - status, restore, and subscription management
+5. **MonetizationService** (`services/MonetizationService.ts`) - RevenueCat + Supabase orchestration
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Environment Variables
+
+Set RevenueCat keys in your environment:
 
 ```bash
-npm install expo-iap expo-build-properties date-fns expo-linear-gradient react-native-reanimated
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_xxx
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_xxx
 ```
 
-### 2. Configure App Store Products
-
-**iOS (App Store Connect):**
-- `com.nuolo.subscription.monthly` - Monthly Premium
-- `com.nuolo.subscription.yearly` - Yearly Premium
-- `com.nuolo.package.city_highlights` - City Highlights Package
-- `com.nuolo.package.museums` - Museums Package
-- `com.nuolo.package.architecture` - Architecture Package
-
-**Android (Google Play Console):**
-- Same product IDs as iOS
-- Configure billing permissions in `app.json`
-
-### 3. Database Setup
-
-Run the migration:
-```bash
-cd supabase
-npx supabase db push
-```
-
-### 4. Basic Integration
+### 2. Basic Access-Control Integration
 
 ```tsx
 import { usePurchaseIntegration } from '../hooks/usePurchaseIntegration';
@@ -76,53 +59,49 @@ function AttractionCard({ attraction }: { attraction: PointOfInterest }) {
   const cta = getAttractionCTA(attraction.id);
 
   return (
-    <View>
-      <Text>{attraction.name}</Text>
-      <Button
-        title={cta.text}
-        onPress={() => handleAttractionInteraction(attraction, cta.action)}
-        variant={cta.variant}
-        disabled={cta.disabled}
-      />
-    </View>
+    <Button
+      title={cta.text}
+      onPress={() => handleAttractionInteraction(attraction, cta.action)}
+      variant={cta.variant}
+      disabled={cta.disabled}
+    />
   );
 }
 ```
 
-## Component Usage
-
-### PaywallModal
+### 3. Official Paywall Wiring
 
 ```tsx
-import { PaywallModal } from '../components/purchase';
+import { RevenueCatPaywallModal } from '../components/ui/RevenueCatPaywallModal';
+import { useMonetization } from '../contexts/MonetizationContext';
 
 function MapScreen() {
-  const { paywallVisible, hidePaywall } = usePaywallFlow();
+  const { showPaywall, setShowPaywall, paywallContext } = useMonetization();
 
   return (
     <>
-      {/* Your map content */}
-      <PaywallModal
-        visible={paywallVisible}
-        onClose={hidePaywall}
+      {/* map and content */}
+      <RevenueCatPaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        trigger={paywallContext?.trigger}
+        attractionId={paywallContext?.attractionId}
+        attractionName={paywallContext?.attractionName}
       />
     </>
   );
 }
 ```
 
+## Component Usage
+
 ### EntitlementStatus
 
 ```tsx
 import { EntitlementStatus } from '../components/purchase';
 
-// Banner variant - shows for urgent states
 <EntitlementStatus variant="banner" />
-
-// Compact variant - always visible status
 <EntitlementStatus variant="compact" />
-
-// Detailed variant - full information display
 <EntitlementStatus variant="detailed" showUpgradeButton={true} />
 ```
 
@@ -132,327 +111,158 @@ import { EntitlementStatus } from '../components/purchase';
 import { SubscriptionManager } from '../components/purchase';
 
 function AccountScreen() {
-  return (
-    <SubscriptionManager
-      onUpgrade={() => {
-        // Custom upgrade flow
-      }}
-      onManageBilling={() => {
-        // Custom billing management
-      }}
-    />
-  );
+  return <SubscriptionManager />;
 }
+```
+
+### PurchaseRestoreFlow
+
+```tsx
+import { PurchaseRestoreFlow } from '../components/purchase';
+
+<PurchaseRestoreFlow />
 ```
 
 ## Integration Points
 
-### 1. Audio Guide Generation
+### 1. Audio Guide Generation Guard
 
 ```tsx
+import { useContentAccess, useMonetization } from '../contexts/MonetizationContext';
+import { useAudio } from '../contexts/AudioContext';
+
 function AudioGuideButton({ attraction }: { attraction: PointOfInterest }) {
-  const { generateAudioGuideWithValidation } = usePurchaseIntegration();
+  const { generateAudioGuideWithValidation } = useContentAccess();
+  const { setShowPaywall, recordAttractionUsage } = useMonetization();
+  const { generateAudioGuide } = useAudio();
 
   const handleGenerate = async () => {
-    const success = await generateAudioGuideWithValidation(attraction, {
-      language: 'en',
-      audioLength: 'medium',
-      voiceStyle: 'casual',
-    });
-    
-    if (success) {
-      console.log('Audio guide generated successfully');
+    const validation = await generateAudioGuideWithValidation(attraction.id, attraction.name);
+
+    if (!validation.canGenerate) {
+      if (validation.shouldShowPaywall) {
+        setShowPaywall(true, validation.paywallContext);
+      }
+      return;
+    }
+
+    const success = await generateAudioGuide(attraction);
+    if (success && validation.shouldRecordUsage) {
+      await recordAttractionUsage(attraction.id);
     }
   };
 
-  return (
-    <Button title="Generate Audio Guide" onPress={handleGenerate} />
-  );
+  return <Button title="Generate Audio Guide" onPress={handleGenerate} />;
 }
 ```
 
-### 2. Bottom Sheet Integration
+### 2. Navigation Badge Example
 
 ```tsx
-import { MaterialBottomSheet } from '../components/ui/MaterialBottomSheet';
-import { EntitlementStatus } from '../components/purchase';
+import { useMonetization } from '../contexts/MonetizationContext';
 
-function MapWithBottomSheet() {
-  return (
-    <>
-      {/* Map content */}
-      
-      {/* Status banner */}
-      <EntitlementStatus variant="banner" />
-      
-      <MaterialBottomSheet
-        contentType="attractions"
-        attractions={attractions}
-        // ... other props
-      />
-    </>
-  );
-}
-```
-
-### 3. Navigation Integration
-
-```tsx
 function TabNavigator() {
-  const { entitlements } = usePurchase();
+  const { entitlements, subscription } = useMonetization();
+  const isFree = !subscription.isActive && !entitlements.hasUnlimitedAccess;
 
   return (
     <Tab.Navigator>
-      <Tab.Screen 
-        name="Map" 
-        component={MapScreen} 
-      />
+      <Tab.Screen name="Map" component={MapScreen} />
       <Tab.Screen
         name="Premium"
         component={SubscriptionScreen}
-        options={{
-          tabBarBadge: entitlements.status === 'free' ? '!' : undefined,
-        }}
+        options={{ tabBarBadge: isFree ? '!' : undefined }}
       />
     </Tab.Navigator>
   );
 }
 ```
 
-## Advanced Features
-
-### A/B Testing
-
-The system includes automatic A/B testing for pricing display:
+### 3. Subscription and Package Actions
 
 ```tsx
-// Variant A: Standard pricing
-"$59.99/year"
+import { useSubscriptionManagement } from '../hooks/usePurchaseIntegration';
 
-// Variant B: Monthly equivalent
-"$4.99/month (billed annually)"
-```
+function UpgradeCTA() {
+  const {
+    handleSubscriptionPurchase,
+    handlePackagePurchase,
+    purchaseError,
+    isLoading,
+  } = useSubscriptionManagement();
 
-Access the variant in your components:
-```tsx
-const { pricingVariant } = usePurchase();
-```
-
-### Analytics Integration
-
-Track purchase events:
-```tsx
-const { paywallVisible, paywallTrigger } = usePaywallFlow();
-
-useEffect(() => {
-  if (paywallVisible) {
-    // Track paywall display
-    analytics.track('paywall_shown', {
-      trigger: paywallTrigger,
-      user_status: entitlements.status,
-    });
+  if (purchaseError) {
+    return <Text>{purchaseError.userFriendly}</Text>;
   }
-}, [paywallVisible, paywallTrigger]);
-```
 
-### Error Handling
-
-```tsx
-const { purchaseError, clearError } = usePurchase();
-
-if (purchaseError) {
   return (
-    <PurchaseErrorState
-      variant="payment"
-      title="Purchase Failed"
-      message={purchaseError.userFriendly}
-      onAction={clearError}
-    />
+    <>
+      <Button title="Go Unlimited" disabled={isLoading} onPress={() => handleSubscriptionPurchase('unlimited_monthly')} />
+      <Button title="Buy Basic Package" disabled={isLoading} onPress={() => handlePackagePurchase('basic_package')} />
+    </>
   );
 }
 ```
-
-## Customization
-
-### Theme Integration
-
-All components use your existing color scheme:
-- Primary color: `#84cc16`
-- Component variants: `primary`, `secondary`, `outline`
-- Consistent with existing `Button` and `MaterialBottomSheet` patterns
-
-### Localization
-
-```tsx
-// Update product descriptions based on user language
-const { userPreferences } = useApp();
-const localizedPlans = subscriptionPlans.map(plan => ({
-  ...plan,
-  description: getLocalizedDescription(plan.id, userPreferences.language),
-}));
-```
-
-### Custom Purchase Flows
-
-```tsx
-function CustomPurchaseFlow() {
-  const { purchaseSubscription, purchasePackage } = usePurchase();
-  
-  const handleCustomPurchase = async (productId: string) => {
-    // Add custom validation
-    if (!validatePurchaseConditions()) {
-      return;
-    }
-    
-    // Custom analytics
-    trackCustomPurchaseStart(productId);
-    
-    // Execute purchase
-    const success = productId.includes('subscription')
-      ? await purchaseSubscription(productId)
-      : await purchasePackage(productId);
-    
-    if (success) {
-      trackCustomPurchaseSuccess(productId);
-    }
-  };
-
-  return (
-    // Your custom UI
-    <></>
-  );
-}
-```
-
-## Security Considerations
-
-### Server-Side Validation
-
-**Important**: Implement server-side receipt validation for production:
-
-```typescript
-// Server-side function
-async function validatePurchase(transactionId: string, receipt: string) {
-  // Validate with Apple/Google
-  const isValid = await validateWithStore(receipt);
-  
-  if (isValid) {
-    // Update user entitlements in database
-    await updateUserEntitlements(userId, transactionData);
-  }
-  
-  return isValid;
-}
-```
-
-### Data Protection
-
-- Purchase data is encrypted in transit
-- User entitlements use Row Level Security (RLS)
-- No sensitive payment data stored locally
-- Receipt validation data properly secured
 
 ## Testing
 
-### Test Products
+### Required Runtime
 
-Configure test products in App Store Connect/Google Play Console for development:
+RevenueCat purchases and native paywalls require a development build or production build (not Expo Go).
 
-```typescript
-const TEST_PRODUCT_IDS = {
-  MONTHLY_TEST: 'com.nuolo.test.monthly',
-  YEARLY_TEST: 'com.nuolo.test.yearly',
-  PACKAGE_TEST: 'com.nuolo.test.package',
-};
+```bash
+npx expo run:ios
+# or
+npx expo run:android
 ```
 
-### Integration Testing
+### Functional Checks
 
-```tsx
-// Test component with mock context
-function TestPurchaseFlow() {
-  return (
-    <MockPurchaseProvider initialState={{ status: 'free', freeGuidesUsed: 1 }}>
-      <PurchaseIntegratedExample />
-    </MockPurchaseProvider>
-  );
-}
-```
+- Trigger paywall via free-tier exhaustion and verify `RevenueCatPaywallModal` appears
+- Complete a sandbox purchase and confirm entitlement refresh
+- Restore purchases and confirm subscription/package restoration
+- Verify free-tier users are blocked at limit and prompted with paywall
 
 ## Performance Optimization
 
 ### Lazy Loading
 
 ```tsx
-const PaywallModal = lazy(() => import('../components/purchase/PaywallModal'));
 const SubscriptionManager = lazy(() => import('../components/purchase/SubscriptionManager'));
+const PurchaseRestoreFlow = lazy(() => import('../components/purchase/PurchaseRestoreFlow'));
 ```
 
 ### Caching
 
-```tsx
-// React Query integration for product data
-const { data: products } = useQuery(['products'], fetchProducts, {
-  staleTime: 1000 * 60 * 60, // 1 hour
-  cacheTime: 1000 * 60 * 60 * 24, // 24 hours
-});
-```
+Keep product/entitlement data cache-friendly through React Query and explicit `refreshEntitlements()` on purchase/restore events.
 
 ## Deployment Checklist
 
-### App Store Submission
+### App Store / Play Store
 
-- [ ] Configure In-App Purchase products
-- [ ] Set up App Store Connect banking/tax info
-- [ ] Submit for review with purchase functionality
-- [ ] Test with TestFlight sandbox accounts
+- [ ] `nuolo_unlimited_monthly` product configured and active
+- [ ] Package products configured and active (`nuolo_basic_package`, `nuolo_standard_package`, `nuolo_premium_package`)
+- [ ] RevenueCat offerings and paywall template published
+- [ ] Sandbox/test accounts validated
 
-### Google Play Submission
+### App Configuration
 
-- [ ] Configure Google Play Console products
-- [ ] Set up merchant account
-- [ ] Upload signed AAB with billing permissions
-- [ ] Test with license testers
-
-### Production Setup
-
-- [ ] Run database migrations
-- [ ] Configure environment variables
-- [ ] Set up analytics tracking
-- [ ] Implement server-side receipt validation
-- [ ] Monitor purchase success rates
+- [ ] RevenueCat API keys set in EAS environment
+- [ ] `npm run check:repo` passing
+- [ ] Webhook flow verified (`supabase/functions/revenuecat-webhook`)
 
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Products not loading:**
-- Check product IDs match exactly
-- Verify App Store Connect/Google Play configuration
-- Ensure app version matches store listing
+1. **Paywall not shown**: Verify `showPaywall` state and `MonetizationProvider` mount
+2. **Products not loaded**: Confirm products are attached to active RevenueCat offering
+3. **Purchase fails**: Check platform store setup and development-build runtime
+4. **Restore fails**: Confirm test account and app store account consistency
 
-**2. Purchases failing:**
-- Check device payment method setup
-- Verify sandbox vs production environment
-- Review receipt validation logic
+### Recommended Debug Path
 
-**3. Restore not working:**
-- Ensure same Apple ID/Google account
-- Check product IDs in restore logic
-- Verify subscription status in store
-
-**4. Paywall not showing:**
-- Check entitlement logic in `usePurchaseIntegration`
-- Verify context provider hierarchy
-- Review modal visibility state management
-
-## Support
-
-For implementation support:
-
-1. Check the `PurchaseIntegratedExample.tsx` for complete usage patterns
-2. Review hook implementations in `usePurchaseIntegration.ts`
-3. Test with the provided database schema and seed data
-4. Use the loading states and error components for user feedback
-
-The system is designed to be production-ready with proper error handling, accessibility compliance, and platform-specific optimizations.
+1. Inspect `MonetizationContext` `error` and logs
+2. Validate `MonetizationService.initialize()` success and RevenueCat configuration
+3. Confirm `RevenueCatPaywallModal` is the only paywall entrypoint
+4. Re-run `npm run check:official-paywall` and `npm run check:legacy-purchase-imports`
