@@ -19,6 +19,7 @@ interface UsePlacesSearchReturn {
   searchPlaces: (query: string, location: { lat: number; lng: number }, radius?: number) => Promise<void>;
   checkIfSearchNeeded: (currentLocation: { lat: number; lng: number }) => boolean;
   handleSearchThisArea: (location: { lat: number; lng: number }) => Promise<void>;
+  cancelPendingSearch: () => void;
   clearResults: () => void;
 }
 
@@ -38,6 +39,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
   const lastSearchTime = useRef<number>(0);
   const searchThrottle = 2000; // 2 seconds between searches
   const activeRequestId = useRef(0);
+  const isMountedRef = useRef(true);
 
   // Initialize Google Places service
   useEffect(() => {
@@ -46,6 +48,25 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     // Photo URLs still embed the key - consider implementing photo proxy for complete security
     const placeholderKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'PROXIED';
     googlePlacesService.current = new GooglePlacesService(placeholderKey);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      activeRequestId.current += 1;
+    };
+  }, []);
+
+  const isCurrentRequest = useCallback((requestId: number) => {
+    return isMountedRef.current && requestId === activeRequestId.current;
+  }, []);
+
+  const cancelPendingSearch = useCallback(() => {
+    activeRequestId.current += 1;
+    if (isMountedRef.current) {
+      setIsSearching(false);
+    }
+    TelemetryService.increment('map_search_cancelled');
   }, []);
 
   /**
@@ -74,7 +95,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
 
     try {
       const results = await googlePlacesService.current.searchNearbyAttractions(location, radius);
-      if (requestId !== activeRequestId.current) {
+      if (!isCurrentRequest(requestId)) {
+        TelemetryService.increment('map_search_nearby_stale_discarded');
         return;
       }
 
@@ -93,7 +115,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         resultCount: filteredResults.length,
       });
     } catch (error) {
-      if (requestId !== activeRequestId.current) {
+      if (!isCurrentRequest(requestId)) {
+        TelemetryService.increment('map_search_nearby_stale_error_discarded');
         return;
       }
 
@@ -104,11 +127,11 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         'Unable to find nearby attractions. Please check your internet connection.'
       );
     } finally {
-      if (requestId === activeRequestId.current) {
+      if (isCurrentRequest(requestId)) {
         setIsSearching(false);
       }
     }
-  }, [searchRadius, onPointsOfInterestUpdate]);
+  }, [searchRadius, onPointsOfInterestUpdate, isCurrentRequest]);
 
   /**
    * Search places with custom query
@@ -153,7 +176,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         lng: location.lng,
       });
       const results = await googlePlacesService.current.searchPlaces(trimmedQuery, location, radius);
-      if (requestId !== activeRequestId.current) {
+      if (!isCurrentRequest(requestId)) {
+        TelemetryService.increment('map_search_text_stale_discarded');
         return;
       }
 
@@ -183,7 +207,8 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         });
       }
     } catch (error) {
-      if (requestId !== activeRequestId.current) {
+      if (!isCurrentRequest(requestId)) {
+        TelemetryService.increment('map_search_text_stale_error_discarded');
         return;
       }
       TelemetryService.increment('map_search_text_error');
@@ -211,11 +236,11 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
         { text: 'Retry', onPress: () => searchPlaces(query, location, radius) }
       ]);
     } finally {
-      if (requestId === activeRequestId.current) {
+      if (isCurrentRequest(requestId)) {
         setIsSearching(false);
       }
     }
-  }, [onPointsOfInterestUpdate]);
+  }, [onPointsOfInterestUpdate, isCurrentRequest]);
 
   /**
    * Check if search is needed based on location change
@@ -257,6 +282,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     setPointsOfInterest([]);
     setLastSearchCenter(null);
     setShowSearchButton(false);
+    setIsSearching(false);
     onPointsOfInterestUpdate?.([]);
   }, [onPointsOfInterestUpdate]);
 
@@ -279,6 +305,7 @@ export const usePlacesSearch = (options: UsePlacesSearchOptions = {}): UsePlaces
     searchPlaces,
     checkIfSearchNeeded,
     handleSearchThisArea,
+    cancelPendingSearch,
     clearResults,
   };
 };

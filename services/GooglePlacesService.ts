@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 
 interface PlaceResult {
   place_id: string;
@@ -49,10 +50,10 @@ interface CacheEntry<T> {
 
 class GooglePlacesService {
   private apiKey: string; // Kept for backward compatibility with photo URLs
-  private useProxy: boolean = true; // Toggle for proxy usage
   private searchCache: Map<string, CacheEntry<PointOfInterest[]>> = new Map();
   private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
   private readonly MAX_CACHE_SIZE = 50; // Limit cache entries
+  private readonly PROXY_TIMEOUT_MS = 12000;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -61,7 +62,7 @@ class GooglePlacesService {
   /**
    * Generate cache key from search parameters
    */
-  private getCacheKey(type: string, params: Record<string, any>): string {
+  private getCacheKey(type: string, params: Record<string, string | number>): string {
     const sortedParams = Object.keys(params)
       .sort()
       .map(key => `${key}:${params[key]}`)
@@ -72,7 +73,7 @@ class GooglePlacesService {
   /**
    * Check if cache entry is valid
    */
-  private isCacheValid(entry: CacheEntry<any>): boolean {
+  private isCacheValid(entry: CacheEntry<unknown>): boolean {
     return Date.now() - entry.timestamp < this.CACHE_DURATION;
   }
 
@@ -82,11 +83,11 @@ class GooglePlacesService {
   private getFromCache(key: string): PointOfInterest[] | null {
     const entry = this.searchCache.get(key);
     if (entry && this.isCacheValid(entry)) {
-      console.log(`[CACHE HIT] ${key}`);
+      logger.debug('GooglePlaces cache hit', { key });
       return entry.data;
     }
     if (entry) {
-      console.log(`[CACHE EXPIRED] ${key}`);
+      logger.debug('GooglePlaces cache expired', { key });
       this.searchCache.delete(key);
     }
     return null;
@@ -101,7 +102,7 @@ class GooglePlacesService {
       const firstKey = this.searchCache.keys().next().value;
       if (firstKey) {
         this.searchCache.delete(firstKey);
-        console.log(`[CACHE EVICTED] ${firstKey}`);
+        logger.debug('GooglePlaces cache evicted', { key: firstKey });
       }
     }
 
@@ -109,7 +110,11 @@ class GooglePlacesService {
       data,
       timestamp: Date.now()
     });
-    console.log(`[CACHE SAVED] ${key} (${this.searchCache.size}/${this.MAX_CACHE_SIZE})`);
+    logger.debug('GooglePlaces cache saved', {
+      key,
+      size: this.searchCache.size,
+      maxSize: this.MAX_CACHE_SIZE,
+    });
   }
 
   /**
@@ -117,30 +122,57 @@ class GooglePlacesService {
    */
   public clearCache(): void {
     this.searchCache.clear();
-    console.log('[CACHE CLEARED]');
+    logger.debug('GooglePlaces cache cleared');
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`${operation}_timeout`));
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   /**
    * Make a proxied request to Google Maps API via Supabase Edge Function
    * SECURITY: API key never exposed to client
    */
-  private async proxyRequest(endpoint: string, params: string): Promise<any> {
+  private async proxyRequest<T>(endpoint: string, params: string): Promise<T> {
     try {
-      const { data, error } = await supabase.functions.invoke('maps-proxy', {
+      const invokePromise = supabase.functions.invoke<T>('maps-proxy', {
         body: {
           endpoint,
           params,
         },
       });
 
+      const { data, error } = await this.withTimeout(
+        invokePromise,
+        this.PROXY_TIMEOUT_MS,
+        'maps_proxy_invoke'
+      );
+
       if (error) {
-        console.error('[SECURITY] Maps proxy error:', error);
+        logger.error('Maps proxy returned error', error, { endpoint });
         throw error;
+      }
+
+      if (!data) {
+        throw new Error('maps_proxy_empty_response');
       }
 
       return data;
     } catch (error) {
-      console.error('[SECURITY] Failed to proxy request:', error);
+      logger.error('Failed to proxy Google Places request', error, { endpoint });
       throw error;
     }
   }
@@ -173,13 +205,13 @@ class GooglePlacesService {
 
       const params = `location=${location.lat},${location.lng}&radius=${radius}&type=tourist_attraction`;
 
-      const data: PlacesSearchResponse = await this.proxyRequest(
+      const data = await this.proxyRequest<PlacesSearchResponse>(
         'place/nearbysearch/json',
         params
       );
 
       if (data.status !== 'OK') {
-        console.warn('Google Places API error:', data.status);
+        logger.warn('Google Places nearby search non-OK status', { status: data.status });
         return [];
       }
 
@@ -190,7 +222,7 @@ class GooglePlacesService {
 
       return results;
     } catch (error) {
-      console.error('Error searching nearby attractions:', error);
+      logger.error('Error searching nearby attractions', error);
       return [];
     }
   }
@@ -228,13 +260,13 @@ class GooglePlacesService {
 
       const params = `query=${encodeURIComponent(query)}&location=${location.lat},${location.lng}&radius=${radius}`;
 
-      const data: PlacesSearchResponse = await this.proxyRequest(
+      const data = await this.proxyRequest<PlacesSearchResponse>(
         'place/textsearch/json',
         params
       );
 
       if (data.status !== 'OK') {
-        console.warn('Google Places API error:', data.status);
+        logger.warn('Google Places text search non-OK status', { status: data.status });
         return [];
       }
 
@@ -245,7 +277,7 @@ class GooglePlacesService {
 
       return results;
     } catch (error) {
-      console.error('Error searching places:', error);
+      logger.error('Error searching places', error);
       return [];
     }
   }
@@ -254,20 +286,20 @@ class GooglePlacesService {
    * Get place details by place_id
    * SECURITY: Uses server-side proxy to protect API key
    */
-  async getPlaceDetails(placeId: string): Promise<any> {
+  async getPlaceDetails(placeId: string): Promise<unknown | null> {
     try {
       const params = `place_id=${placeId}&fields=name,formatted_address,geometry,rating,user_ratings_total,photos,reviews`;
 
-      const data = await this.proxyRequest('place/details/json', params);
+      const data = await this.proxyRequest<{ status: string; result?: unknown }>('place/details/json', params);
 
       if (data.status !== 'OK') {
-        console.warn('Google Places API error:', data.status);
+        logger.warn('Google Places details non-OK status', { status: data.status });
         return null;
       }
 
-      return data.result;
+      return data.result ?? null;
     } catch (error) {
-      console.error('Error getting place details:', error);
+      logger.error('Error getting place details', error, { placeId });
       return null;
     }
   }

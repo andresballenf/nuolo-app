@@ -71,12 +71,19 @@ const queryClient = new QueryClient({
   }),
 });
 
+const DEEP_LINK_HISTORY_LIMIT = 100;
+const MIN_SESSION_TOKEN_LENGTH = 20;
+
+const isLikelySessionToken = (value: string | undefined): value is string =>
+  typeof value === 'string' && value.trim().length >= MIN_SESSION_TOKEN_LENGTH;
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
   const handledDeepLinks = useRef<Set<string>>(new Set());
+  const deepLinkQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     runStartupHealthChecks();
@@ -96,15 +103,15 @@ export default function RootLayout() {
     };
   }, []);
 
-  const handleDeepLink = useCallback(async (event: { url: string }) => {
-    const url = event.url;
+  const processDeepLink = useCallback(async (url: string) => {
     if (!url) return;
 
     if (handledDeepLinks.current.has(url)) {
+      TelemetryService.increment('auth_deep_link_duplicate_ignored');
       return;
     }
     handledDeepLinks.current.add(url);
-    if (handledDeepLinks.current.size > 100) {
+    if (handledDeepLinks.current.size > DEEP_LINK_HISTORY_LIMIT) {
       handledDeepLinks.current.clear();
       handledDeepLinks.current.add(url);
     }
@@ -119,8 +126,19 @@ export default function RootLayout() {
 
       const accessToken = parsed.hashParams.access_token ?? parsed.queryParams.access_token;
       const refreshToken = parsed.hashParams.refresh_token ?? parsed.queryParams.refresh_token;
+      const hasValidSessionTokens =
+        isLikelySessionToken(accessToken) && isLikelySessionToken(refreshToken);
 
-      if (accessToken && refreshToken) {
+      if (parsed.hasSessionTokens && !hasValidSessionTokens) {
+        TelemetryService.increment('auth_deep_link_invalid_session_tokens');
+        logger.warn('Deep link contained invalid session token payload', {
+          path: parsed.path,
+          hasAccessToken: Boolean(accessToken),
+          hasRefreshToken: Boolean(refreshToken),
+        });
+      }
+
+      if (hasValidSessionTokens) {
         const { error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
@@ -146,7 +164,7 @@ export default function RootLayout() {
           return;
         case 'auth/callback':
           TelemetryService.increment('auth_oauth_callback_received');
-          if (accessToken && refreshToken) {
+          if (hasValidSessionTokens) {
             router.replace('/map');
           }
           return;
@@ -158,6 +176,24 @@ export default function RootLayout() {
       logger.error('Error handling deep link', error, { url });
     }
   }, []);
+
+  const handleDeepLink = useCallback((event: { url: string }) => {
+    const url = event.url;
+    if (!url) {
+      return Promise.resolve();
+    }
+
+    const next = deepLinkQueueRef.current
+      .catch(() => {
+        // Keep queue alive if a prior item failed.
+      })
+      .then(async () => {
+        await processDeepLink(url);
+      });
+
+    deepLinkQueueRef.current = next;
+    return next;
+  }, [processDeepLink]);
 
   // Handle deep links from email confirmation and password reset
   useEffect(() => {

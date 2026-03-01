@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session, AuthError, PostgrestSingleResponse } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +9,8 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as Crypto from 'expo-crypto';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { logger } from '../lib/logger';
+import { TelemetryService } from '../services/TelemetryService';
 
 // OAuth features are enabled in development build
 const isExpoGo = false;
@@ -121,13 +123,19 @@ const ASYNC_STORAGE_KEYS = {
 const TOKEN_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000;
 const PROFILE_FETCH_TIMEOUT = 5000;
 
+const isRefreshTokenError = (message: string | undefined): boolean => {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes('refresh token');
+};
+
 // Secure storage utilities
 const secureStorage = {
   async setItem(key: string, value: string): Promise<void> {
     try {
       await SecureStore.setItemAsync(key, value);
     } catch (error) {
-      console.error('Error storing secure item:', error);
+      logger.error('Error storing secure item', error, { key });
       throw error;
     }
   },
@@ -136,7 +144,7 @@ const secureStorage = {
     try {
       return await SecureStore.getItemAsync(key);
     } catch (error) {
-      console.error('Error retrieving secure item:', error);
+      logger.error('Error retrieving secure item', error, { key });
       return null;
     }
   },
@@ -145,7 +153,7 @@ const secureStorage = {
     try {
       await SecureStore.deleteItemAsync(key);
     } catch (error) {
-      console.error('Error deleting secure item:', error);
+      logger.error('Error deleting secure item', error, { key });
     }
   },
 
@@ -153,26 +161,35 @@ const secureStorage = {
     try {
       // Try AsyncStorage first (more reliable on simulator)
       let timestamp = await AsyncStorage.getItem(ASYNC_STORAGE_KEYS.BIOMETRIC_TIMESTAMP_BACKUP);
-      console.log('🔐 Timestamp from AsyncStorage:', timestamp);
+      logger.debug('Checked biometric timestamp backup in AsyncStorage', {
+        found: Boolean(timestamp),
+      });
 
       // Fallback to SecureStore if AsyncStorage is empty
       if (!timestamp) {
         timestamp = await this.getItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP);
-        console.log('🔐 Timestamp from SecureStore:', timestamp);
+        logger.debug('Checked biometric timestamp in SecureStore', {
+          found: Boolean(timestamp),
+        });
       }
 
       if (!timestamp) {
-        console.log('🔐 No timestamp found in either storage');
+        logger.warn('No biometric token timestamp found in secure storage');
         return false;
       }
 
-      const tokenAge = Date.now() - parseInt(timestamp, 10);
+      const parsedTimestamp = Number.parseInt(timestamp, 10);
+      if (!Number.isFinite(parsedTimestamp)) {
+        logger.warn('Invalid biometric token timestamp format');
+        return false;
+      }
+
+      const tokenAge = Date.now() - parsedTimestamp;
       const isValid = tokenAge < TOKEN_EXPIRATION_TIME;
-      const ageInDays = Math.floor(tokenAge / (24 * 60 * 60 * 1000));
-      console.log(`🔐 Token age: ${ageInDays} days (Valid: ${isValid})`);
+      logger.info('Evaluated biometric token validity', { isValid });
       return isValid;
     } catch (error) {
-      console.error('❌ Error checking token validity:', error);
+      logger.error('Error checking biometric token validity', error);
       return false;
     }
   }
@@ -180,7 +197,7 @@ const secureStorage = {
 
 const clearBiometricCredentials = async () => {
   try {
-    console.log('🔐 Clearing all biometric credentials...');
+    logger.info('Clearing biometric credentials');
     // Clear SecureStore
     await Promise.all([
       secureStorage.deleteItem(SECURE_STORE_KEYS.BIOMETRIC_ACCESS_TOKEN),
@@ -194,9 +211,9 @@ const clearBiometricCredentials = async () => {
       ASYNC_STORAGE_KEYS.HAS_BIOMETRIC_CREDENTIALS,
       ASYNC_STORAGE_KEYS.BIOMETRIC_TIMESTAMP_BACKUP,
     ]);
-    console.log('✅ All biometric credentials cleared');
+    logger.info('Biometric credentials cleared');
   } catch (error) {
-    console.error('❌ Error clearing biometric credentials:', error);
+    logger.error('Error clearing biometric credentials', error);
   }
 };
 
@@ -241,6 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   
   const [lastActivity, setLastActivity] = useState<Date>(new Date());
+  const biometricSignInInProgress = useRef(false);
 
   // Check for biometric availability
   useEffect(() => {
@@ -259,7 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         biometricAvailable: hasHardware && isEnrolled,
       }));
     } catch (error) {
-      console.error('Biometric check failed:', error);
+      logger.error('Biometric check failed', error);
     }
   };
   
@@ -274,12 +292,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   
   const initializeAuth = async () => {
-    console.log('🔐 Initializing auth...');
+    logger.info('Initializing auth state');
     
     try {
       // Check for existing session
       const { data: { session }, error } = await supabase.auth.getSession();
-      console.log('🔐 Session check:', { session: !!session, error });
+      logger.info('Auth session check completed', {
+        hasSession: Boolean(session),
+        hasError: Boolean(error),
+      });
       
       if (error) throw error;
       
@@ -309,7 +330,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
           })
           .catch(profileError => {
-            console.error('Error loading user profile after session set:', profileError);
+            logger.error('Error loading user profile after session set', profileError);
           });
       } else {
         // No session - not authenticated
@@ -345,7 +366,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (error) {
-      console.error('Auth initialization error:', error);
+      logger.error('Auth initialization error', error);
       // Always set loading to false even on error
       setAuthState(prev => ({
         ...prev,
@@ -361,11 +382,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('🔐 Auth event:', event, '| Has session:', !!session);
+        logger.info('Auth state changed', { event, hasSession: Boolean(session) });
 
         // Handle token refresh errors specifically
         if (event === 'TOKEN_REFRESHED' && !session) {
-          console.log('⚠️ Token refresh failed - clearing session');
+          logger.warn('Token refresh failed; clearing session');
           // Clear invalid session data
           await AsyncStorage.removeItem('supabase.auth.token');
           setAuthState(prev => ({
@@ -380,7 +401,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Don't clear credentials on SIGNED_OUT if it's from setSession failure
         if (event === 'SIGNED_OUT') {
-          console.log('⚠️ SIGNED_OUT event detected');
+          logger.info('SIGNED_OUT event received');
         }
         
         if (session) {
@@ -409,7 +430,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               });
             })
             .catch(profileError => {
-              console.error('Error refreshing user profile after auth event:', profileError);
+              logger.error('Error refreshing user profile after auth event', profileError);
             });
         } else {
           setAuthState(prev => ({
@@ -451,7 +472,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   });
                 })
                 .catch(profileError => {
-                  console.error('Error updating user profile after USER_UPDATED event:', profileError);
+                  logger.error('Error updating user profile after USER_UPDATED event', profileError);
                 });
             }
             break;
@@ -503,7 +524,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
 
       if (error && error.code !== 'PGRST116') {
-        console.error('Error loading profile:', error);
+        logger.error('Error loading profile', error);
       }
 
       if (data) {
@@ -514,7 +535,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
     } catch (error) {
-      console.error('Error loading user profile:', error);
+      logger.error('Error loading user profile', error);
     }
 
     if (!userData.email) {
@@ -526,7 +547,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
 
         if (authError) {
-          console.error('Error loading user from auth:', authError);
+          logger.error('Error loading user from auth', authError);
         }
 
         if (authData?.user) {
@@ -534,7 +555,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           userData.emailVerified = !!authData.user.email_confirmed_at;
         }
       } catch (fallbackError) {
-        console.error('Error loading auth user fallback:', fallbackError);
+        logger.error('Error loading auth user fallback', fallbackError);
       }
     }
 
@@ -614,8 +635,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   
   const signIn = async (email: string, password: string) => {
-    console.log('🔐 signIn called with email:', email);
-    console.log('🔐 Biometric available:', authState.biometricAvailable);
+    logger.info('Sign-in requested', { biometricAvailable: authState.biometricAvailable });
     try {
       // Check if account is locked
       if (authState.lockedUntil && authState.lockedUntil > new Date()) {
@@ -660,20 +680,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await handleLoginAttempt(!error);
       setLastActivity(new Date());
+      if (error) {
+        TelemetryService.increment('auth_sign_in_error');
+      } else {
+        TelemetryService.increment('auth_sign_in_success');
+      }
 
       let biometricSaved = false;
       if (!error && data?.session) {
-        console.log('🔐 Login successful, attempting to save biometric credentials...');
+        logger.info('Sign-in succeeded; saving biometric credentials');
         // Wait for biometric credentials to be saved before returning
         biometricSaved = await saveBiometricCredentials(data.session);
-        console.log('🔐 Biometric save result:', biometricSaved);
+        logger.info('Biometric credential save completed', { biometricSaved });
       } else if (error) {
-        console.log('🔐 Login failed with error:', error.message);
+        logger.warn('Sign-in failed', { reason: error.message });
       }
 
       return { error, biometricSaved };
     } catch (error) {
       await handleLoginAttempt(false);
+      TelemetryService.increment('auth_sign_in_exception');
       return {
         error: error as AuthError,
         biometricSaved: false,
@@ -723,7 +749,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             created_at: new Date().toISOString(),
           });
         } catch (profileError) {
-          console.error('Error creating profile:', profileError);
+          logger.error('Error creating profile', profileError);
         }
       }
       
@@ -785,7 +811,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   },
                 });
               } catch (metadataError) {
-                console.warn('Failed to update user metadata after Apple sign-in:', metadataError);
+                logger.warn('Failed to update user metadata after Apple sign-in', metadataError);
               }
             }
 
@@ -842,7 +868,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Supabase will automatically manage the session
       return { error: null };
     } catch (error: unknown) {
-      console.error('OAuth error:', error);
+      logger.error('OAuth error', error);
       return {
         error: error as AuthError,
       };
@@ -873,33 +899,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   
   const signInWithBiometric = async () => {
-    console.log('🔐 signInWithBiometric called');
+    logger.info('Biometric sign-in requested');
     try {
+      if (biometricSignInInProgress.current) {
+        TelemetryService.increment('auth_biometric_sign_in_blocked_in_progress');
+        return {
+          error: new Error('Biometric sign-in already in progress'),
+        };
+      }
+
       if (!authState.biometricAvailable) {
-        console.log('🔐 Biometric not available');
+        TelemetryService.increment('auth_biometric_sign_in_unavailable');
+        logger.warn('Biometric sign-in rejected: biometrics unavailable');
         return {
           error: new Error('Biometric authentication not available'),
         };
       }
 
+      biometricSignInInProgress.current = true;
+
       // Check AsyncStorage flag first (quick check)
       const hasCredentials = await AsyncStorage.getItem(ASYNC_STORAGE_KEYS.HAS_BIOMETRIC_CREDENTIALS);
-      console.log('🔐 HasCredentials flag:', hasCredentials);
+      logger.info('Biometric credential availability checked', {
+        hasCredentials: hasCredentials === 'true',
+      });
 
       if (!hasCredentials || hasCredentials !== 'true') {
-        console.log('🔐 No biometric credentials found');
+        TelemetryService.increment('auth_biometric_sign_in_no_credentials');
+        logger.warn('Biometric sign-in rejected: no stored credentials');
         return {
           error: new Error('No stored credentials found. Please sign in with email and password first.'),
         };
       }
 
       // Check if stored credentials are still valid
-      console.log('🔐 Checking token validity...');
       const isTokenValid = await secureStorage.isTokenValid();
-      console.log('🔐 Token valid:', isTokenValid);
+      logger.info('Biometric token validity checked', { isTokenValid });
 
       if (!isTokenValid) {
-        console.log('🔐 Token invalid or expired, clearing credentials');
+        TelemetryService.increment('auth_biometric_sign_in_expired_credentials');
+        logger.warn('Biometric tokens expired; clearing credentials');
         await clearBiometricCredentials();
         return {
           error: new Error('Stored credentials have expired. Please sign in again.'),
@@ -914,30 +953,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       
       if (result.success) {
-        console.log('🔐 Biometric authentication successful, retrieving session tokens...');
+        logger.info('Biometric authentication passed');
         const storedAccessToken = await secureStorage.getItem(SECURE_STORE_KEYS.BIOMETRIC_ACCESS_TOKEN);
         const storedRefreshToken = await secureStorage.getItem(SECURE_STORE_KEYS.BIOMETRIC_REFRESH_TOKEN);
 
-        console.log('🔐 Retrieved credentials:', {
+        logger.info('Loaded stored biometric session tokens', {
           hasAccessToken: !!storedAccessToken,
           hasRefreshToken: !!storedRefreshToken,
         });
 
         if (storedAccessToken && storedRefreshToken) {
-          console.log('🔐 Restoring session with stored tokens...');
           const { data, error } = await supabase.auth.setSession({
             access_token: storedAccessToken,
             refresh_token: storedRefreshToken,
           });
 
-          console.log('🔐 Sign in result:', {
+          logger.info('Biometric setSession result', {
             hasSession: !!data?.session,
             hasUser: !!data?.session?.user,
-            error: error?.message || 'none',
+            hasError: Boolean(error),
           });
 
           if (!error && data?.session) {
-            console.log('✅ Biometric sign in successful');
+            TelemetryService.increment('auth_biometric_sign_in_success');
+            logger.info('Biometric sign-in succeeded');
             setLastActivity(new Date());
             // Update timestamp to keep credentials fresh
             const refreshedAccessToken = data.session.access_token;
@@ -947,30 +986,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await AsyncStorage.setItem(ASYNC_STORAGE_KEYS.BIOMETRIC_TIMESTAMP_BACKUP, Date.now().toString());
             await secureStorage.setItem(SECURE_STORE_KEYS.TOKEN_TIMESTAMP, Date.now().toString());
           } else {
-            console.error('❌ Sign in failed:', error?.message);
+            TelemetryService.increment('auth_biometric_sign_in_set_session_error');
+            logger.error('Biometric sign-in failed during setSession', error);
             // Clear credentials if session tokens are no longer valid
             await clearBiometricCredentials();
           }
 
           return { error };
         } else {
-          console.error('❌ Missing stored session credentials');
+          TelemetryService.increment('auth_biometric_sign_in_missing_tokens');
+          logger.error('Missing stored session credentials for biometric sign-in');
           await clearBiometricCredentials();
           return {
             error: new Error('No stored biometric session found. Please sign in again with email and password.'),
           };
         }
       } else {
-        console.log('🔐 Biometric authentication cancelled or failed:', result.error);
+        TelemetryService.increment('auth_biometric_prompt_cancelled_or_failed');
+        logger.info('Biometric authentication cancelled or failed', { reason: result.error });
         return {
           error: new Error(result.error || 'Biometric authentication failed'),
         };
       }
     } catch (error) {
+      TelemetryService.increment('auth_biometric_sign_in_exception');
       await clearBiometricCredentials();
+      logger.error('Biometric sign-in encountered an unrecoverable error', error);
       return {
         error: error as Error,
       };
+    } finally {
+      biometricSignInInProgress.current = false;
     }
   };
 
@@ -1000,7 +1046,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lockedUntil: null,
       });
     } catch (error) {
-      console.error('Sign out error:', error);
+      logger.error('Sign out error', error);
     }
   };
   
@@ -1008,16 +1054,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const saveBiometricCredentials = async (session: Session): Promise<boolean> => {
     try {
       if (!authState.biometricAvailable) {
-        console.log('Biometric not available, skipping credential save');
+        logger.info('Biometric unavailable; skipping credential save');
         return false;
       }
 
       if (!session.access_token || !session.refresh_token) {
-        console.error('Missing session tokens, cannot save biometric credentials');
+        logger.error('Missing session tokens; cannot save biometric credentials');
         return false;
       }
 
-      console.log('💾 Saving biometric session tokens with dual storage...');
+      logger.info('Saving biometric session tokens');
       const timestamp = Date.now().toString();
 
       // Save sensitive session tokens to SecureStore
@@ -1041,16 +1087,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Failed to verify saved credentials in AsyncStorage');
       }
 
-      console.log('✅ Biometric credentials saved successfully to both storages');
-      console.log('📅 Timestamp verified:', verifyTimestamp);
+      logger.info('Biometric credentials saved successfully');
       return true;
     } catch (error) {
-      console.error('❌ Error saving biometric credentials:', error);
+      logger.error('Error saving biometric credentials', error);
       // Clean up partial saves on error
       try {
         await clearBiometricCredentials();
       } catch (cleanupError) {
-        console.error('Error cleaning up failed save:', cleanupError);
+        logger.error('Error cleaning up failed biometric save', cleanupError);
       }
       return false;
     }
@@ -1111,13 +1156,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.refreshSession();
       
       if (error) {
-        console.error('Session refresh error:', error);
+        TelemetryService.increment('auth_refresh_session_error');
+        logger.error('Session refresh error', error);
         
         // If refresh token is invalid, clear session
-        if (error.message?.includes('Refresh Token') || 
-            error.message?.includes('Invalid Refresh Token') ||
-            error.message?.includes('Refresh Token Not Found')) {
-          console.log('Invalid refresh token - clearing session');
+        if (isRefreshTokenError(error.message)) {
+          TelemetryService.increment('auth_refresh_session_invalid_refresh_token');
+          logger.warn('Invalid refresh token; clearing session');
           
           // Clear all auth data
           await AsyncStorage.multiRemove([
@@ -1143,6 +1188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       if (data?.session) {
+        TelemetryService.increment('auth_refresh_session_success');
         setLastActivity(new Date());
         setAuthState(prev => ({
           ...prev,
@@ -1150,7 +1196,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }));
       }
     } catch (error) {
-      console.error('Session refresh error:', error);
+      TelemetryService.increment('auth_refresh_session_exception');
+      logger.error('Session refresh error', error);
       // Don't throw - just log the error
     }
   };

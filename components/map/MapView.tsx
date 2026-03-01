@@ -1,17 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Alert, Dimensions, Platform } from 'react-native';
 import MapView, { 
-  Marker, 
   PROVIDER_GOOGLE,
-  PROVIDER_DEFAULT, 
-  Region, 
-  MapViewProps as RNMapViewProps 
+  Region,
 } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useApp } from '../../contexts/AppContext';
 import { usePlacesSearch } from '../../hooks/usePlacesSearch';
 import { PointOfInterest } from '../../services/GooglePlacesService';
-import { SearchThisAreaButton } from './SearchThisAreaButton';
 import { CustomMarker } from './CustomMarker';
 import { 
   calculateZoomLevel, 
@@ -21,6 +17,7 @@ import {
   LabelPlacement 
 } from '../../utils/markerOverlap';
 import { useMapSettings } from '../../contexts/MapSettingsContext';
+import { logger } from '../../lib/logger';
 
 export type SearchAreaHandle = {
   searchThisArea: () => Promise<void>;
@@ -98,6 +95,7 @@ export default function MapViewComponent({
     searchPlaces,
     checkIfSearchNeeded,
     handleSearchThisArea,
+    cancelPendingSearch,
   } = usePlacesSearch({
     onPointsOfInterestUpdate,
     autoSearch: true,
@@ -111,13 +109,31 @@ export default function MapViewComponent({
 
   // Store search function for parent to call
   React.useImperativeHandle(onSearchAreaRequest, (): SearchAreaHandle => ({
-    searchThisArea: () => handleSearchThisArea(currentCenter),
-    searchByQuery: (query: string) => searchPlaces(query, currentCenter, 5000),
-  }), [handleSearchThisArea, searchPlaces, currentCenter]);
+    searchThisArea: async () => {
+      cancelPendingSearch();
+      await handleSearchThisArea(currentCenter);
+    },
+    searchByQuery: async (query: string) => {
+      cancelPendingSearch();
+      await searchPlaces(query, currentCenter, 5000);
+    },
+  }), [handleSearchThisArea, searchPlaces, currentCenter, cancelPendingSearch]);
 
   useEffect(() => {
     requestLocationPermission();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      cancelPendingSearch();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (regionChangeDebounceRef.current) {
+        clearTimeout(regionChangeDebounceRef.current);
+      }
+    };
+  }, [cancelPendingSearch]);
 
   // React to GPS trigger changes
   useEffect(() => {
@@ -151,11 +167,12 @@ export default function MapViewComponent({
       // Search for attractions only once
       if (!hasSearchedGPS.current) {
         hasSearchedGPS.current = true;
-        console.log('MapView: Searching for attractions at user location');
+        logger.debug('MapView searching attractions at GPS location');
+        cancelPendingSearch();
         searchNearbyPlaces({ lat: gpsStatus.latitude, lng: gpsStatus.longitude }, 5000, false);
       }
     }
-  }, [gpsStatus.active, gpsStatus.latitude, gpsStatus.longitude, searchNearbyPlaces, initialTilt]);
+  }, [gpsStatus.active, gpsStatus.latitude, gpsStatus.longitude, searchNearbyPlaces, initialTilt, cancelPendingSearch]);
 
   // Handle test location
   useEffect(() => {
@@ -183,7 +200,7 @@ export default function MapViewComponent({
   useEffect(() => {
     if (showSearchButton && !hasShownInitialSearch.current) {
       hasShownInitialSearch.current = true;
-      console.log('Initial search button state - ready to search');
+      logger.debug('Map search button enabled');
     }
   }, [showSearchButton]);
 
@@ -237,10 +254,11 @@ export default function MapViewComponent({
   // React to test location changes
   useEffect(() => {
     if (testLocation) {
-      console.log('Test location updated:', testLocation);
+      logger.debug('Map test location updated', testLocation);
+      cancelPendingSearch();
       searchNearbyPlaces({ lat: testLocation.latitude, lng: testLocation.longitude }, 1500, false);
     }
-  }, [testLocation, searchNearbyPlaces]);
+  }, [testLocation, searchNearbyPlaces, cancelPendingSearch]);
 
   const requestLocationPermission = async () => {
     try {
@@ -256,7 +274,7 @@ export default function MapViewComponent({
 
       getCurrentLocation();
     } catch (error) {
-      console.error('Error requesting location permission:', error);
+      logger.error('Error requesting location permission', error);
     }
   };
 
@@ -297,13 +315,14 @@ export default function MapViewComponent({
       });
 
       // Search for attractions at current location with larger radius (5km) - not manual search
+      cancelPendingSearch();
       searchNearbyPlaces(
         { lat: location.coords.latitude, lng: location.coords.longitude },
         5000,
         false
       );
     } catch (error) {
-      console.error('Error getting current location:', error);
+      logger.error('Error getting current location', error);
       setGpsStatus({
         active: false,
         latitude: null,
@@ -312,22 +331,10 @@ export default function MapViewComponent({
     }
   };
 
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371e3;
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
   const handleMapReady = () => {
-    console.log('Map is ready');
+    logger.debug('Map is ready');
     if (testLocation) {
+      cancelPendingSearch();
       searchNearbyPlaces(
         { lat: testLocation.latitude, lng: testLocation.longitude },
         1500,
@@ -379,7 +386,7 @@ export default function MapViewComponent({
         // Test if the map is ready by checking if we can get the region
         const region = await mapRef.current.getMapBoundaries?.();
         if (!region) {
-          console.warn('Map not ready yet, skipping marker position update');
+          logger.debug('Map not ready, skipping marker position update');
           return;
         }
       } catch (e) {
@@ -395,13 +402,13 @@ export default function MapViewComponent({
         try {
           // Ensure mapRef.current exists and has the pointForCoordinate method
           if (!mapRef.current || !mapRef.current.pointForCoordinate) {
-            console.warn('Map ref not ready for coordinate conversion');
+            logger.debug('Map ref not ready for coordinate conversion');
             continue;
           }
           
           // Ensure coordinate is valid
           if (!poi.coordinate || typeof poi.coordinate.latitude !== 'number' || typeof poi.coordinate.longitude !== 'number') {
-            console.warn(`Invalid coordinate for POI ${poi.id}`);
+            logger.warn('Invalid coordinate for POI marker', { poiId: poi.id });
             continue;
           }
           
@@ -434,7 +441,7 @@ export default function MapViewComponent({
         } catch (error) {
           // Only log non-null conversion errors
           if (!(error instanceof TypeError && error.message.includes('Cannot convert null'))) {
-            console.error('Error getting screen position for marker:', error);
+            logger.error('Error getting screen position for marker', error, { poiId: poi.id });
           }
         }
       }
@@ -479,8 +486,8 @@ export default function MapViewComponent({
 
   // Log 3D configuration for debugging - only on mount
   React.useEffect(() => {
-    const mapProvider = Platform.OS === 'ios' ? 'PROVIDER_DEFAULT (Apple Maps)' : 'PROVIDER_GOOGLE (Google Maps)';
-    console.log('🏗️ 3D Map Configuration:', {
+    const mapProvider = Platform.OS === 'ios' ? 'Apple Maps' : 'Google Maps';
+    logger.debug('3D map configuration', {
       mapType,
       tilt: initialTilt,
       zoom: initialZoom,
@@ -493,16 +500,9 @@ export default function MapViewComponent({
         altitude: 800
       }
     });
-    console.log('💡 Note: 3D buildings require:');
-    console.log('  - Major city location (Paris, NYC, Tokyo, etc.)');
-    console.log('  - Zoom level 17-19');
-    console.log('  - Tilt/pitch of 45-60 degrees');
-    console.log('  - Hybrid or satellite map type');
+    logger.debug('3D buildings require city coverage with zoom 17-19 and map tilt');
   }, []); // Empty dependency array - only log once on mount
 
-  // Use initialRegion instead of camera to prevent drift
-  const [hasInitialized, setHasInitialized] = useState(false);
-  
   return (
     <View style={styles.container}>
       <MapView
@@ -511,7 +511,7 @@ export default function MapViewComponent({
         provider={PROVIDER_GOOGLE}
         initialRegion={initialRegion}  // Use initialRegion for stable positioning
         onMapReady={() => {
-          console.log('✅ Map ready with 3D building support');
+          logger.debug('Map ready with 3D support');
           // Set initial 3D camera with tilt when map is ready
           if (mapRef.current) {
             const centerLat = gpsStatus.latitude || initialRegion.latitude;

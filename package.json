@@ -13,7 +13,8 @@
     "check:legacy-purchase-imports": "node scripts/check-legacy-purchase-imports.js",
     "check:official-paywall": "node scripts/check-official-paywall.js",
     "check:release-gates": "node scripts/check-release-gates.js",
-    "check:repo": "npm run typecheck && npm run check:supabase-functions && npm run check:secrets && npm run check:legacy-purchase-imports && npm run check:official-paywall && npm run check:release-gates"
+    "check:risk-thresholds": "node scripts/check-risk-thresholds.js",
+    "check:repo": "npm run typecheck && npm run check:supabase-functions && npm run check:secrets && npm run check:legacy-purchase-imports && npm run check:official-paywall && npm run check:release-gates && npm run check:risk-thresholds"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

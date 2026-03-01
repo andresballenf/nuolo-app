@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import type MapView from 'react-native-maps';
 import MapViewComponent, { type SearchAreaHandle } from '../components/map/MapView';
 import { TestLocationControls } from '../components/map/TestLocationControls';
-import { MaterialBottomSheet, SheetContentType, SheetState } from '../components/ui/MaterialBottomSheet';
+import { MaterialBottomSheet } from '../components/ui/MaterialBottomSheet';
 import { ProfileContent } from '../components/ui/ProfileContent';
 import { SettingsContent } from '../components/ui/SettingsContent';
 import { FullScreenAudioMode } from '../components/audio/FullScreenAudioMode';
@@ -26,7 +26,9 @@ import { useMapSettings } from '../contexts/MapSettingsContext';
 import { ErrorBoundary as UIErrorBoundary } from '../components/ui/ErrorBoundary';
 import { logger } from '../lib/logger';
 import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
+import { useMapSheetState } from '../hooks/useMapSheetState';
 import { getFeatureFlag } from '../config/featureFlags';
+import { buildTranscriptSegments } from '../utils/transcriptSegments';
 
 export default function MapScreen() {
   // All context hooks first
@@ -46,18 +48,22 @@ export default function MapScreen() {
   const [testLongitude, setTestLongitude] = useState('');
 
   // Attractions and bottom sheet state
-  const [attractions, setAttractions] = useState<PointOfInterest[]>([]);
+  const {
+    attractions,
+    isBottomSheetVisible,
+    sheetContentType,
+    sheetState,
+    setIsBottomSheetVisible,
+    setSheetContentType,
+    setSheetState,
+    handlePointsOfInterestUpdate,
+  } = useMapSheetState();
   const [selectedAttraction, setSelectedAttractionLocal] = useState<PointOfInterest | null>(null);
   const [selectedAttractionIndex, setSelectedAttractionIndex] = useState(0);
-  const [isBottomSheetVisible, setIsBottomSheetVisible] = useState(false);
   const [attractionInfo, setAttractionInfo] = useState<string | null>(null);
   const [attractionAudio, setAttractionAudio] = useState<string | null>(null);
   const [isGeneratingInfo, setIsGeneratingInfo] = useState(false);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[] | undefined>(undefined);
-
-  // Material Bottom Sheet state
-  const [sheetContentType, setSheetContentType] = useState<SheetContentType>('attractions');
-  const [sheetState, setSheetState] = useState<SheetState>('hidden');
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   // Map controls state - centralized via MapSettingsContext
@@ -75,71 +81,7 @@ export default function MapScreen() {
   const mapSearchRef = useRef<SearchAreaHandle | null>(null);
   const mapRef = useRef<MapView | null>(null);
 
-  // Track if initial load has occurred
-  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
-
-  // Build proportional sentence/word timings for karaoke highlighting
-  function buildTranscriptSegments(text: string, durationMs: number): TranscriptSegment[] {
-    const sentences = text
-      .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    if (!sentences.length || durationMs <= 0) return [];
-
-    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0) || 1;
-    let cursor = 0;
-
-    return sentences.map(s => {
-      const portion = s.length / totalChars;
-      const segDuration = portion * durationMs;
-      const startMs = Math.round(cursor);
-      const endMs = Math.round(cursor + segDuration);
-
-      const wordsRaw = s.split(/\s+/).filter(Boolean);
-      const wordsTotalChars = wordsRaw.reduce((sum, w) => sum + w.length, 0) || 1;
-      let wordCursor = startMs;
-      const words = wordsRaw.map((w, i) => {
-        const wordPortion = w.length / wordsTotalChars;
-        const wDur = wordPortion * (endMs - startMs);
-        const wStart = Math.round(wordCursor);
-        const wEnd = i === wordsRaw.length - 1 ? endMs : Math.round(wordCursor + wDur);
-        wordCursor += wDur;
-        return { text: w, startMs: wStart, endMs: wEnd };
-      });
-
-      cursor += segDuration;
-      return { text: s, startMs, endMs, words };
-    });
-  }
-
   // All callbacks and effects before conditional returns
-  const handlePointsOfInterestUpdate = useCallback((pois: PointOfInterest[], isManualSearch: boolean = false) => {
-    // Always update the attractions data silently
-    setAttractions(pois);
-    console.log(`Found ${pois.length} attractions nearby`);
-
-    // Only update bottom sheet visibility on explicit user actions
-    if (isManualSearch) {
-      // Manual search via "Search this area" button
-      if (pois.length > 0) {
-        setSheetContentType('attractions');
-        setIsBottomSheetVisible(true);
-        setSheetState('collapsed');
-      } else {
-        // No results from manual search
-        setIsBottomSheetVisible(false);
-        setSheetState('hidden');
-      }
-    } else if (!hasInitiallyLoaded && pois.length > 0) {
-      // First load of the app - show bottom sheet with attractions
-      setSheetContentType('attractions');
-      setIsBottomSheetVisible(true);
-      setSheetState('collapsed');
-      setHasInitiallyLoaded(true);
-    }
-    // Otherwise, keep current visibility state (don't auto-show/hide)
-  }, [hasInitiallyLoaded]);
 
   // Update user location only when GPS or test location actually changes
   // This prevents unnecessary re-renders from frequent attraction updates
@@ -368,7 +310,7 @@ export default function MapScreen() {
         throw new Error('Invalid location coordinates');
       }
 
-      console.log(`Generating info for: ${attraction.name}`);
+      logger.info('Generating attraction info', { attractionName: attraction.name });
 
       const attractionInfo = await AttractionInfoService.generateTextInfo(
         attraction.name,
@@ -386,10 +328,10 @@ export default function MapScreen() {
       );
       
       setAttractionInfo(attractionInfo);
-      console.log('Successfully generated attraction info');
+      logger.info('Successfully generated attraction info', { attractionName: attraction.name });
       
     } catch (error) {
-      console.error('Error generating attraction info:', error);
+      logger.error('Error generating attraction info', error, { attractionName: attraction.name });
       
       const errorMessage = AttractionInfoService.getErrorMessage(error);
       
@@ -478,8 +420,8 @@ export default function MapScreen() {
         return;
       }
 
-      console.log(`Starting chunked audio generation for: ${attraction.name}`);
-      console.log('User preferences:', userPreferences);
+      logger.info('Starting chunked audio generation', { attractionName: attraction.name });
+      logger.debug('Audio generation preferences', userPreferences);
       
       // First generate the text content
       const text = await AttractionInfoService.generateTextInfo(
@@ -497,7 +439,7 @@ export default function MapScreen() {
         { poiLocation: { lat: attraction.coordinate.latitude, lng: attraction.coordinate.longitude } }
       );
 
-      console.log(`Text generated: ${text.length} characters`);
+      logger.info('Narration text generated', { characterCount: text.length });
       
       // Update UI with text immediately
       setAttractionInfo(text);
@@ -529,25 +471,28 @@ export default function MapScreen() {
             }
           },
           onMetadata: (metadata) => {
-            console.log('Audio metadata:', metadata);
+            logger.debug('Audio metadata received', metadata);
             // Metadata is logged but state update happens in AudioContext
           },
           onChunk: async (chunk) => {
-            console.log(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks}`);
+            logger.debug('Received audio chunk', {
+              chunkIndex: chunk.chunkIndex + 1,
+              totalChunks: chunk.totalChunks,
+            });
             
             // The AudioContext's streamGenerateAndPlay will handle chunk playback
             // Just log for debugging
             if (chunk.chunkIndex === 0) {
-              console.log('First chunk received, playback should start soon');
+              logger.info('First audio chunk received; playback should start soon');
               audioContext.clearGenerationState();
             }
           },
           onComplete: () => {
-            console.log('All chunks received successfully');
+            logger.info('All audio chunks received successfully');
             audioContext.clearGenerationState();
           },
           onError: (error) => {
-            console.error('Streaming error:', error);
+            logger.error('Streaming error during audio generation', error);
             audioContext.setGenerationError(error);
             Alert.alert('Audio Error', error);
           }
@@ -556,16 +501,16 @@ export default function MapScreen() {
       );
       
           audioGenerated = true;
-          console.log('Chunked audio streaming initiated');
+          logger.info('Chunked audio streaming initiated');
         } catch (streamError) {
-          console.warn('Chunked streaming failed, trying fallback method:', streamError);
+          logger.warn('Chunked streaming failed; trying fallback method', streamError);
         }
       }
       
       // Use app-orchestrated chunked audio generation (NEW - unlimited text length!)
       if (!audioGenerated && useAppChunkedAudio) {
         try {
-          console.log('Using new app-orchestrated chunked audio generation');
+          logger.info('Using app-orchestrated chunked audio generation');
           
           // Use the new chunked generation method from AudioContext
           const attractionForAudio: AttractionForAudio = {
@@ -590,21 +535,25 @@ export default function MapScreen() {
           );
           
           audioGenerated = true;
-          console.log('App-orchestrated chunked audio generation initiated');
+          logger.info('App-orchestrated chunked audio generation initiated');
           
           // Record usage for free tier users after successful generation
           if (shouldRecordUsage) {
             try {
               await recordAttractionUsage(attraction.id);
-              console.log('Recorded attraction usage after successful chunked audio generation');
+              logger.info('Recorded attraction usage after successful chunked audio generation', {
+                attractionId: attraction.id,
+              });
             } catch (usageError) {
-              console.error('Failed to record attraction usage:', usageError);
+              logger.error('Failed to record attraction usage after chunked audio generation', usageError, {
+                attractionId: attraction.id,
+              });
               // Don't fail the audio generation for usage recording errors
             }
           }
           
         } catch (chunkError) {
-          console.error('App-orchestrated chunked audio failed:', chunkError);
+          logger.error('App-orchestrated chunked audio failed', chunkError);
 
           const errorMessage = chunkError instanceof Error ? chunkError.message : String(chunkError);
           
@@ -623,7 +572,7 @@ export default function MapScreen() {
                 { text: 'OK' },
                 { text: 'Open OpenAI', onPress: () => {
                   // Could open URL if needed
-                  console.log('User should visit: https://platform.openai.com/account/billing');
+                  logger.info('Prompted user to visit OpenAI billing page');
                 }}
               ]
             );
@@ -647,7 +596,7 @@ export default function MapScreen() {
       // Fallback to old single-chunk method (limited to 4096 chars)
       if (!audioGenerated) {
         try {
-          console.log('Using fallback single-chunk audio generation');
+          logger.info('Using fallback single-chunk audio generation');
 
           if (text.length > 3900) {
             throw new Error('Chunked audio is required for this narration length. Please retry once the chunk generator is available.');
@@ -687,26 +636,30 @@ export default function MapScreen() {
           await audioContext.play();
           
           audioGenerated = true;
-          console.log('Audio generation completed using standard method');
+          logger.info('Audio generation completed using standard method');
           
           // Record usage for free tier users after successful generation
           if (shouldRecordUsage) {
             try {
               await recordAttractionUsage(attraction.id);
-              console.log('Recorded attraction usage after successful fallback audio generation');
+              logger.info('Recorded attraction usage after fallback audio generation', {
+                attractionId: attraction.id,
+              });
             } catch (usageError) {
-              console.error('Failed to record attraction usage:', usageError);
+              logger.error('Failed to record attraction usage after fallback audio generation', usageError, {
+                attractionId: attraction.id,
+              });
               // Don't fail the audio generation for usage recording errors
             }
           }
         } catch (audioError) {
-          console.error('Audio generation failed:', audioError);
+          logger.error('Audio generation failed', audioError);
           throw audioError;
         }
       }
 
     } catch (error) {
-      console.error('Error in chunked audio generation:', error);
+      logger.error('Error in chunked audio generation', error);
       
       const errorMessage = AttractionInfoService.getErrorMessage(error);
       
@@ -753,11 +706,11 @@ export default function MapScreen() {
   const handleEnableGPS = async () => {
     try {
       setIsEnablingGPS(true);
-      console.log('GPS enable button clicked - starting permission request');
+      logger.info('GPS enable requested by user');
 
       // Request location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
-      console.log('Permission status:', status);
+      logger.info('Location permission request result', { status });
 
       if (status !== 'granted') {
         Alert.alert(
@@ -768,7 +721,7 @@ export default function MapScreen() {
         return;
       }
 
-      console.log('Permission granted, getting current location...');
+      logger.info('Location permission granted; acquiring current location');
 
       // Get current location with timeout and fallback
       let location;
@@ -779,7 +732,7 @@ export default function MapScreen() {
           });
 
       } catch (highAccuracyError) {
-        console.log('High accuracy failed, trying balanced accuracy...', highAccuracyError);
+        logger.warn('High accuracy location failed; trying balanced accuracy', highAccuracyError);
         // Fallback to balanced accuracy if high accuracy fails
         try {
           location = await Location.getCurrentPositionAsync({
@@ -787,7 +740,7 @@ export default function MapScreen() {
             mayShowUserSettingsDialog: true,
           });
         } catch (balancedError) {
-          console.log('Balanced accuracy also failed, trying lowest accuracy...', balancedError);
+          logger.warn('Balanced accuracy location failed; trying lowest accuracy', balancedError);
           // Last resort: try lowest accuracy
           location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Lowest,
@@ -796,7 +749,10 @@ export default function MapScreen() {
         }
       }
 
-      console.log('Got location:', location.coords);
+      logger.info('Current location acquired for GPS enable flow', {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
 
       // Update GPS status with actual location data
       setGpsStatus({
@@ -808,9 +764,9 @@ export default function MapScreen() {
         lastUpdated: new Date(),
       });
 
-      console.log('GPS enabled successfully with location data');
+      logger.info('GPS enabled successfully with location data');
     } catch (error) {
-      console.error('Error enabling GPS:', error);
+      logger.error('Error enabling GPS', error);
 
       // Reset GPS status if there was an error
       setGpsStatus({ active: false, locked: false });
