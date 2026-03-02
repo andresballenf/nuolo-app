@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useAudio } from '../contexts/AudioContext';
+import { useAudioTrack } from '../contexts/AudioContext';
 import type { GenerationProgress } from '../services/AudioGenerationService';
 
 export type GenerationStage = 'idle' | 'script' | 'first_chunk' | 'buffering' | 'ready' | 'error';
@@ -15,10 +15,10 @@ export interface TelemetryState {
 
 /**
  * Derives progressive generation telemetry from AudioContext state.
- * Keeps transcript interactions responsive by avoiding any blocking effects.
+ * Uses useAudioTrack() (not useAudio()) to avoid re-rendering on ~4Hz position ticks.
  */
 export function useAudioGenerationTelemetry(): TelemetryState {
-  const audio = useAudio();
+  const audio = useAudioTrack();
 
   const telemetry = useMemo<TelemetryState>(() => {
     const {

@@ -7,6 +7,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "postinstall": "node scripts/patch-expo-modules-core.js",
     "typecheck": "tsc --noEmit",
     "check:supabase-functions": "node scripts/check-supabase-functions.js",
     "check:secrets": "node scripts/check-secrets.js",
@@ -27,8 +28,9 @@
     "@react-native-masked-view/masked-view": "^0.3.2",
     "@supabase/supabase-js": "^2.54.0",
     "@tanstack/react-query": "^5.84.1",
+    "buffer": "^6.0.3",
     "date-fns": "^4.1.0",
-    "expo": "~53.0.23",
+    "expo": "^55.0.4",
     "expo-apple-authentication": "~7.2.4",
     "expo-asset": "~11.1.7",
     "expo-audio": "~0.4.9",
@@ -69,6 +71,9 @@
     "@types/react": "~19.0.10",
     "babel-preset-expo": "~13.0.0",
     "typescript": "~5.8.3"
+  },
+  "engines": {
+    "node": ">=25.7.0 <26"
   },
   "private": true
 }

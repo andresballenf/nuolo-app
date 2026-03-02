@@ -25,6 +25,7 @@ import { logger } from '../lib/logger';
 import { useAudioGenerationTelemetry } from '../hooks/useAudioGenerationTelemetry';
 import { useMapAudioGuide } from '../hooks/useMapAudioGuide';
 import { useMapSheetState } from '../hooks/useMapSheetState';
+import { useProximityPrefetch } from '../hooks/useProximityPrefetch';
 import { buildTranscriptSegments } from '../utils/transcriptSegments';
 
 export default function MapScreen() {
@@ -60,6 +61,13 @@ export default function MapScreen() {
   const [attractionAudio, setAttractionAudio] = useState<string | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[] | undefined>(undefined);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Proximity-based audio pre-fetching (Area 6 perf optimization)
+  // Generates & caches TTS when user walks within 200m of an attraction.
+  useProximityPrefetch(attractions, userLocation?.lat ?? null, userLocation?.lng ?? null, {
+    voiceStyle: userPreferences.voiceStyle,
+    language: userPreferences.language,
+  });
 
   // Map controls state - centralized via MapSettingsContext
   const { settings: mapSettings, setSettings: setMapSettings } = useMapSettings();

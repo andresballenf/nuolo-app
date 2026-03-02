@@ -19,7 +19,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { PointOfInterest } from '../../services/GooglePlacesService';
 import { Button } from './Button';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudioTrack, useAudioActions } from '../../contexts/AudioContext';
 import { AttractionListItem } from './AttractionListItem';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -154,10 +154,10 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
     return latestValue;
   }, []);
   
-  // Get audio context
-  const audioContext = useAudio();
-  const { isPlaying, currentTrack, showFloatingPlayer, isGeneratingAudio, generatingForId } = audioContext;
-  
+  // Get audio context — use narrower hooks to avoid re-rendering on position ticks
+  const { isPlaying, currentTrack, showFloatingPlayer, isGeneratingAudio, generatingForId } = useAudioTrack();
+  const audioActions = useAudioActions();
+
   // Smart attraction play handler - checks if audio is loaded before generating
   const handleAttractionPlayPress = useCallback((attraction: PointOfInterest) => {
     // Check if this attraction already has audio loaded
@@ -165,17 +165,17 @@ const MaterialBottomSheetComponent: React.FC<MaterialBottomSheetProps> = ({
       // Audio is loaded for this attraction, just toggle play/pause
       if (isPlaying) {
         console.log('Pausing current track:', attraction.name);
-        audioContext.pause();
+        audioActions.pause();
       } else {
         console.log('Playing current track:', attraction.name);
-        audioContext.play();
+        audioActions.play();
       }
     } else {
       // No audio loaded for this attraction, generate it first
       console.log('Generating audio for new attraction:', attraction.name);
       onGenerateAudioGuide?.(attraction);
     }
-  }, [currentTrack, isPlaying, audioContext, onGenerateAudioGuide]);
+  }, [currentTrack, isPlaying, audioActions, onGenerateAudioGuide]);
   
   // Calculate bottom offset based on mini player visibility
   const bottomOffset = useMemo(() => {

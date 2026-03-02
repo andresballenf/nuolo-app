@@ -585,6 +585,8 @@ export class AudioGenerationService {
             (data as any).etag
           );
           audioChunk.fileUri = saved.fileUri;
+          // Free base64 from memory — file is persisted, playback uses fileUri
+          audioChunk.audio = '';
         } catch (e) {
           console.warn('Failed to save audio chunk to cache:', e);
         }

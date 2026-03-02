@@ -70,6 +70,48 @@ const PAUSE_QUESTION = 450; // Pause after question
 
 type TouchableOpacityInstance = React.ComponentRef<typeof TouchableOpacity>;
 
+// Memoized phrase item — only re-renders when its own active/past/future state changes
+const PhraseItem = React.memo<{
+  phrase: { text: string };
+  index: number;
+  isActive: boolean;
+  isPast: boolean;
+  isFuture: boolean;
+  isNearActive: boolean;
+  phraseProgress: number;
+  onPress: (index: number) => void;
+  phraseRef: (ref: TouchableOpacityInstance | null) => void;
+}>(({ phrase, index, isActive, isPast, isFuture, isNearActive, phraseProgress, onPress, phraseRef }) => (
+  <TouchableOpacity
+    ref={phraseRef}
+    onPress={() => onPress(index)}
+    activeOpacity={0.7}
+    style={styles.phraseWrapper}
+  >
+    <View style={isActive && styles.phraseActiveContainer}>
+      {isActive && (
+        <View
+          style={[
+            styles.phraseProgressBar,
+            { width: `${phraseProgress * 100}%` }
+          ]}
+        />
+      )}
+      <Text
+        style={[
+          styles.phrase,
+          isActive && styles.phraseActive,
+          isPast && styles.phrasePast,
+          isFuture && styles.phraseFuture,
+          isNearActive && styles.phraseNear,
+        ]}
+      >
+        {phrase.text}{' '}
+      </Text>
+    </View>
+  </TouchableOpacity>
+));
+
 export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   isVisible,
   isPlaying,
@@ -107,34 +149,39 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrolledPhraseRef = useRef(-1);
 
+  // Stable duration in whole seconds — prevents re-running the heavy phrase
+  // computation on every 100ms position tick.  Only recalculates when the
+  // reported total duration changes by at least 1 second.
+  const stableDurationSec = useMemo(() => Math.round(duration / 1000), [duration]);
+
   // Split text into phrases with realistic TTS timing
   const phrases = useMemo(() => {
     if (!currentTrack?.description) return [];
-    
+
     // Split text into words
     const allWords = currentTrack.description
       .split(/\s+/)
       .filter(Boolean)
       .map(word => word.trim())
       .filter(word => word.length > 0);
-    
+
     if (allWords.length === 0) return [];
-    
+
     // Group words into phrases
-    const phraseList: { 
-      text: string; 
-      startMs: number; 
-      endMs: number; 
+    const phraseList: {
+      text: string;
+      startMs: number;
+      endMs: number;
       wordCount: number;
       hasPunctuation: string | null;
     }[] = [];
     let i = 0;
-    
+
     while (i < allWords.length) {
       // Determine phrase length (3-5 words, but can be shorter at end of sentences)
       let phraseLength = WORDS_PER_PHRASE;
       let punctuation: string | null = null;
-      
+
       // Look for natural break points (punctuation)
       for (let j = 1; j <= Math.min(WORDS_PER_PHRASE + 1, allWords.length - i); j++) {
         const word = allWords[i + j - 1];
@@ -145,14 +192,14 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
           break;
         }
       }
-      
+
       // Don't exceed remaining words
       phraseLength = Math.min(phraseLength, allWords.length - i);
-      
+
       // Extract phrase
       const phraseWords = allWords.slice(i, i + phraseLength);
       const phraseText = phraseWords.join(' ');
-      
+
       phraseList.push({
         text: phraseText,
         startMs: 0, // Will be calculated below
@@ -160,35 +207,32 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
         wordCount: phraseWords.length,
         hasPunctuation: punctuation,
       });
-      
+
       i += phraseLength;
     }
-    
+
+    // Use stableDurationSec (seconds) converted back to ms for timing calculations
+    const durationMs = stableDurationSec * 1000;
+
     // Calculate adaptive timing based on actual audio duration
-    if (duration > 0) {
+    if (durationMs > 0) {
       // Calculate actual speech rate from audio duration
       const totalWords = allWords.length;
       const effectiveStartTime = INITIAL_SILENCE_MS;
-      const effectiveDuration = Math.max(100, duration - INITIAL_SILENCE_MS - END_SILENCE_MS);
-      
-      // Calculate actual words per minute from the audio
-      const actualWPM = (totalWords / (effectiveDuration / 60000));
-      console.log(`Adaptive timing: ${totalWords} words in ${effectiveDuration}ms = ${actualWPM.toFixed(1)} WPM`);
-      console.log(`Audio duration: ${duration}ms, Effective speech time: ${effectiveDuration}ms`);
-      
-      // Simple proportional distribution - no complex pause calculations
-      // Just distribute time evenly based on word count per phrase
+      const effectiveDuration = Math.max(100, durationMs - INITIAL_SILENCE_MS - END_SILENCE_MS);
+
+      // Simple proportional distribution based on word count per phrase
       const msPerWord = effectiveDuration / totalWords;
-      
+
       // Assign timing to each phrase based on word count
       let currentTime = effectiveStartTime;
-      
-      phraseList.forEach((phrase, index) => {
+
+      phraseList.forEach((phrase) => {
         phrase.startMs = currentTime;
-        
+
         // Simple proportional duration based on word count
         const phraseDuration = phrase.wordCount * msPerWord;
-        
+
         // Add small pause for punctuation (but keep it minimal)
         let pauseDuration = 0;
         if (phrase.hasPunctuation === '.' || phrase.hasPunctuation === '!' || phrase.hasPunctuation === '?') {
@@ -196,15 +240,15 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
         } else if (phrase.hasPunctuation === ',' || phrase.hasPunctuation === ';' || phrase.hasPunctuation === ':') {
           pauseDuration = 100; // Tiny pause for other punctuation
         }
-        
+
         phrase.endMs = currentTime + phraseDuration + pauseDuration;
         currentTime = phrase.endMs;
       });
-      
+
       // Adjust last phrase to align with actual audio duration
       if (phraseList.length > 0) {
         const lastPhrase = phraseList[phraseList.length - 1];
-        const maxEndTime = duration - END_SILENCE_MS;
+        const maxEndTime = durationMs - END_SILENCE_MS;
         if (lastPhrase.endMs > maxEndTime) {
           // Scale all timings proportionally to fit
           const scaleFactor = (maxEndTime - effectiveStartTime) / (lastPhrase.endMs - effectiveStartTime);
@@ -217,14 +261,14 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
     } else {
       // Fallback: estimate based on default speech rate when no duration available
       const msPerWord = 60000 / DEFAULT_WORDS_PER_MINUTE;
-      
+
       let currentTime = INITIAL_SILENCE_MS;
       phraseList.forEach(phrase => {
         phrase.startMs = currentTime;
-        
+
         // Simple duration from word count
         const phraseDuration = phrase.wordCount * msPerWord;
-        
+
         // Add minimal pauses for punctuation
         let pauseDuration = 0;
         if (phrase.hasPunctuation === '.' || phrase.hasPunctuation === '!' || phrase.hasPunctuation === '?') {
@@ -232,14 +276,14 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
         } else if (phrase.hasPunctuation === ',' || phrase.hasPunctuation === ';' || phrase.hasPunctuation === ':') {
           pauseDuration = 100;
         }
-        
+
         phrase.endMs = currentTime + phraseDuration + pauseDuration;
         currentTime = phrase.endMs;
       });
     }
-    
+
     return phraseList;
-  }, [currentTrack?.description, duration]);
+  }, [currentTrack?.description, stableDurationSec]);
 
   // Find the active phrase based on current position (with initial delay consideration)
   const activePhraseIndex = useMemo(() => {
@@ -466,42 +510,21 @@ export const FullScreenAudioMode: React.FC<FullScreenAudioModeProps> = ({
                     const isActive = index === activePhraseIndex;
                     const isPast = index < activePhraseIndex;
                     const isFuture = index > activePhraseIndex;
-                    
-                    // Calculate proximity for smooth transitions
                     const isNearActive = Math.abs(index - activePhraseIndex) === 1;
-                    
+
                     return (
-                      <TouchableOpacity
+                      <PhraseItem
                         key={index}
-                        ref={(ref) => {
-                          phraseRefs.current[index] = ref;
-                        }}
-                        onPress={() => handlePhrasePress(index)}
-                        activeOpacity={0.7}
-                        style={styles.phraseWrapper}
-                      >
-                        <View style={isActive && styles.phraseActiveContainer}>
-                          {isActive && (
-                            <View 
-                              style={[
-                                styles.phraseProgressBar,
-                                { width: `${phraseProgress * 100}%` }
-                              ]} 
-                            />
-                          )}
-                          <Text
-                            style={[
-                              styles.phrase,
-                              isActive && styles.phraseActive,
-                              isPast && styles.phrasePast,
-                              isFuture && styles.phraseFuture,
-                              isNearActive && styles.phraseNear,
-                            ]}
-                          >
-                            {phrase.text}{' '}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
+                        phrase={phrase}
+                        index={index}
+                        isActive={isActive}
+                        isPast={isPast}
+                        isFuture={isFuture}
+                        isNearActive={isNearActive}
+                        phraseProgress={isActive ? phraseProgress : 0}
+                        onPress={handlePhrasePress}
+                        phraseRef={(ref) => { phraseRefs.current[index] = ref; }}
+                      />
                     );
                   })}
                 </View>

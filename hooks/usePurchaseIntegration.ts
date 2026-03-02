@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import { useMonetization, useContentAccess } from '../contexts/MonetizationContext';
-import { useAudio } from '../contexts/AudioContext';
+import { useAudioTrack, useAudioActions } from '../contexts/AudioContext';
 import type { PointOfInterest } from '../services/GooglePlacesService';
 import { logger } from '../lib/logger';
 
@@ -71,7 +71,8 @@ const deriveLegacyEntitlements = (
 export const usePurchaseIntegration = () => {
   const monetization = useMonetization();
   const contentAccess = useContentAccess();
-  const { generateAudioGuide, isGeneratingAudio } = useAudio();
+  const { isGeneratingAudio } = useAudioTrack();
+  const { generateAudioGuide } = useAudioActions();
 
   useEffect(() => {
     if (hasLoggedLegacyHookWarning) return;

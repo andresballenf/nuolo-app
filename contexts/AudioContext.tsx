@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { Alert, AppState, AppStateStatus } from 'react-native';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AudioSoundInstance } from '../lib/ExpoAudioCompat';
 import { AttractionInfoService, TranscriptSegment } from '../services/AttractionInfoService';
@@ -173,7 +173,17 @@ export interface AudioActions {
 
 type AudioContextType = AudioState & AudioActions;
 
+/**
+ * Track state: everything from AudioState EXCEPT high-frequency transport fields
+ * (position, duration, currentChunkIndex, bufferHealth).
+ * Components that don't need real-time position should use useAudioTrack()
+ * to avoid re-rendering at ~4Hz during playback.
+ */
+export type AudioTrackState = Omit<AudioState, 'position' | 'duration' | 'currentChunkIndex' | 'bufferHealth'>;
+
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
+const AudioTrackCtx = createContext<AudioTrackState | undefined>(undefined);
+const AudioActionsCtx = createContext<AudioActions | undefined>(undefined);
 
 const initialState: AudioState = {
   isPlaying: false,
@@ -1234,45 +1244,79 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const contextValue: AudioContextType = {
-    // State
-    ...state,
-    
-    // Actions
-    play,
-    pause,
-    togglePlayPause,
-    seek,
-    setVolume,
-    toggleMute,
-    setPlaybackRate,
-    addTrack,
-    setCurrentTrack,
-    removeTrack,
-    clearTracks,
-    playNext,
-    playPrevious,
-    hasNext,
-    hasPrevious,
-    minimize,
-    enterFullScreen,
-    exitFullScreen,
-    closePlayer,
-    generateAudio,
-    startGeneratingAudio,
-    clearGenerationState,
-    setGenerationError,
-    generateAndPlay,
-    generateAudioGuide,
-    streamGenerateAndPlay,
-    generateChunkedAudio,
+  // ─── Derived contexts for selective subscriptions ─────────────────────
+  // trackState excludes high-frequency transport fields (position, duration, etc.)
+  // so components using useAudioTrack() won't re-render at ~4Hz during playback.
+  const trackState = useMemo<AudioTrackState>(() => ({
+    isPlaying: state.isPlaying,
+    volume: state.volume,
+    isMuted: state.isMuted,
+    isLoading: state.isLoading,
+    playbackRate: state.playbackRate,
+    currentTrack: state.currentTrack,
+    currentTrackId: state.currentTrackId,
+    isMinimized: state.isMinimized,
+    isFullScreen: state.isFullScreen,
+    showFloatingPlayer: state.showFloatingPlayer,
+    isGeneratingAudio: state.isGeneratingAudio,
+    generatingForId: state.generatingForId,
+    generationMessage: state.generationMessage,
+    generationError: state.generationError,
+    scriptStartedAt: state.scriptStartedAt,
+    generationStartedAt: state.generationStartedAt,
+    firstAudioAt: state.firstAudioAt,
+    tracks: state.tracks,
+    currentIndex: state.currentIndex,
+    transcriptSegments: state.transcriptSegments,
+    isUsingChunks: state.isUsingChunks,
+    totalChunks: state.totalChunks,
+    isBuffering: state.isBuffering,
+    firstPlayableAt: state.firstPlayableAt,
+    ttfpMs: state.ttfpMs,
+    ttcMs: state.ttcMs,
+    generationProgress: state.generationProgress,
+  }), [
+    state.isPlaying, state.volume, state.isMuted, state.isLoading,
+    state.playbackRate, state.currentTrack, state.currentTrackId,
+    state.isMinimized, state.isFullScreen, state.showFloatingPlayer,
+    state.isGeneratingAudio, state.generatingForId, state.generationMessage,
+    state.generationError, state.scriptStartedAt, state.generationStartedAt,
+    state.firstAudioAt, state.tracks, state.currentIndex, state.transcriptSegments,
+    state.isUsingChunks, state.totalChunks, state.isBuffering,
+    state.firstPlayableAt, state.ttfpMs, state.ttcMs, state.generationProgress,
+  ]);
+
+  const actionsValue = useMemo<AudioActions>(() => ({
+    play, pause, togglePlayPause, seek, setVolume, toggleMute, setPlaybackRate,
+    addTrack, setCurrentTrack, removeTrack, clearTracks,
+    playNext, playPrevious, hasNext, hasPrevious,
+    minimize, enterFullScreen, exitFullScreen, closePlayer,
+    generateAudio, startGeneratingAudio, clearGenerationState, setGenerationError,
+    generateAndPlay, generateAudioGuide, streamGenerateAndPlay, generateChunkedAudio,
     cancelStreaming,
-  };
+  }), [
+    play, pause, togglePlayPause, seek, setVolume, toggleMute, setPlaybackRate,
+    addTrack, setCurrentTrack, removeTrack, clearTracks,
+    playNext, playPrevious, hasNext, hasPrevious,
+    minimize, enterFullScreen, exitFullScreen, closePlayer,
+    generateAudio, startGeneratingAudio, clearGenerationState, setGenerationError,
+    generateAndPlay, generateAudioGuide, streamGenerateAndPlay, generateChunkedAudio,
+    cancelStreaming,
+  ]);
+
+  const contextValue: AudioContextType = useMemo(() => ({
+    ...state,
+    ...actionsValue,
+  }), [state, actionsValue]);
 
   return (
-    <AudioContext.Provider value={contextValue}>
-      {children}
-    </AudioContext.Provider>
+    <AudioActionsCtx.Provider value={actionsValue}>
+      <AudioTrackCtx.Provider value={trackState}>
+        <AudioContext.Provider value={contextValue}>
+          {children}
+        </AudioContext.Provider>
+      </AudioTrackCtx.Provider>
+    </AudioActionsCtx.Provider>
   );
 }
 
@@ -1280,6 +1324,33 @@ export const useAudio = (): AudioContextType => {
   const context = useContext(AudioContext);
   if (context === undefined) {
     throw new Error('useAudio must be used within an AudioProvider');
+  }
+  return context;
+};
+
+/**
+ * Track/meta state only — excludes high-frequency transport fields
+ * (position, duration, currentChunkIndex, bufferHealth).
+ * Use this in components that don't need real-time playback position
+ * to avoid re-rendering at ~4Hz during playback.
+ */
+export const useAudioTrack = (): AudioTrackState => {
+  const context = useContext(AudioTrackCtx);
+  if (context === undefined) {
+    throw new Error('useAudioTrack must be used within an AudioProvider');
+  }
+  return context;
+};
+
+/**
+ * Actions only — stable references, rarely triggers re-renders.
+ * Use this when you only need to call audio functions (play, pause, etc.)
+ * without subscribing to any state updates.
+ */
+export const useAudioActions = (): AudioActions => {
+  const context = useContext(AudioActionsCtx);
+  if (context === undefined) {
+    throw new Error('useAudioActions must be used within an AudioProvider');
   }
   return context;
 };

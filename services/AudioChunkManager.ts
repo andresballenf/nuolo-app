@@ -56,29 +56,69 @@ export class AudioChunkManager {
   private isBuffering: boolean = false; // waiting for the next chunk to arrive
   private waitingForChunkIndex: number | null = null;
   private shouldResumeAfterBuffer: boolean = false;
-  private playbackLock: Promise<void> = Promise.resolve();
+
+  // Mutex-based playback lock with timeout (replaces Promise-chain lock)
+  private lockHeld: boolean = false;
+  private lockQueue: Array<() => void> = [];
+  private static readonly LOCK_TIMEOUT_MS = 5000;
+
+  // Throttled position emission (~4Hz instead of 10Hz polling)
+  private lastPositionEmitMs: number = 0;
+  private static readonly POSITION_THROTTLE_MS = 250;
 
   constructor() {
     this.configureAudioSession();
   }
 
   private async acquirePlaybackLock(label: string): Promise<() => void> {
-    console.log(`[AudioChunkManager] Waiting for playback lock (${label})`);
-    let releaseLock!: () => void;
-    const nextLock = new Promise<void>(resolve => {
-      releaseLock = resolve;
+    if (!this.lockHeld) {
+      this.lockHeld = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        this.releaseLock();
+      };
+    }
+
+    // Wait in queue with timeout
+    return new Promise<() => void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // Remove from queue on timeout
+        const idx = this.lockQueue.indexOf(grant);
+        if (idx >= 0) this.lockQueue.splice(idx, 1);
+        console.warn(`[AudioChunkManager] Lock timeout after ${AudioChunkManager.LOCK_TIMEOUT_MS}ms (${label})`);
+        // Force-release and grant to prevent deadlock
+        this.lockHeld = true;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          this.releaseLock();
+        });
+      }, AudioChunkManager.LOCK_TIMEOUT_MS);
+
+      const grant = () => {
+        clearTimeout(timer);
+        this.lockHeld = true;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          this.releaseLock();
+        });
+      };
+      this.lockQueue.push(grant);
     });
-    const previousLock = this.playbackLock;
-    this.playbackLock = previousLock.then(() => nextLock);
-    await previousLock;
-    console.log(`[AudioChunkManager] Acquired playback lock (${label})`);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      console.log(`[AudioChunkManager] Released playback lock (${label})`);
-      releaseLock();
-    };
+  }
+
+  private releaseLock(): void {
+    if (this.lockQueue.length > 0) {
+      const next = this.lockQueue.shift()!;
+      next();
+    } else {
+      this.lockHeld = false;
+    }
   }
 
   private async withPlaybackLock<T>(label: string, fn: () => Promise<T>): Promise<T> {
@@ -307,16 +347,23 @@ export class AudioChunkManager {
       if (chunk.fileUri) {
         fileUri = chunk.fileUri;
         console.log(`Using cached file for chunk ${chunkIndex}: ${fileUri}`);
-      } else {
+      } else if (chunk.audio) {
         // Save base64 to a temporary cache file
         const filename = `audio_chunk_${Date.now()}_${chunkIndex}.mp3`;
         fileUri = `${FileSystem.cacheDirectory}${filename}`;
-        
+
         // Clean base64 and write to file
         const cleanBase64 = chunk.audio.replace(/^data:audio\/[^;]+;base64,/, '');
         await FileSystem.writeAsStringAsync(fileUri, cleanBase64, {
           encoding: FileSystem.EncodingType.Base64,
         });
+
+        // Free base64 from memory now that it's persisted to disk
+        chunk.fileUri = fileUri;
+        chunk.audio = '';
+      } else {
+        console.warn(`Chunk ${chunkIndex} has no fileUri and no audio data`);
+        return null;
       }
 
       // Create sound object - CRITICAL: ensure it never auto-plays
@@ -545,27 +592,8 @@ export class AudioChunkManager {
 
       this.preloadAheadFrom(chunkIndex);
 
+      // Clear any previous listener before playback
       loadedChunk.sound.setOnPlaybackStatusUpdate(undefined);
-      loadedChunk.sound.setOnPlaybackStatusUpdate(async (status: PlaybackStatus) => {
-        if (!status.isLoaded || !status.didJustFinish) {
-          return;
-        }
-        // CRITICAL: Only process if this sound is still the current sound
-        if (this.currentSound !== loadedChunk.sound) {
-          console.log(`[didJustFinish] Skipping chunk ${chunkIndex} - sound no longer current`);
-          return;
-        }
-        if (this.currentChunkIndex !== chunkIndex) {
-          console.log(`[didJustFinish] Skipping chunk ${chunkIndex} - current index is ${this.currentChunkIndex}`);
-          return;
-        }
-        console.log(`[didJustFinish] Chunk ${chunkIndex} completed, calling handleChunkComplete`);
-        try {
-          await this.handleChunkComplete(chunkIndex);
-        } catch (error) {
-          console.error('Error completing chunk playback:', error);
-        }
-      });
 
       console.log(`[PlayChunkInternal] About to start playback of chunk ${chunkIndex + 1}/${this.expectedTotalChunks || this.chunks.size}`);
 
@@ -720,17 +748,36 @@ export class AudioChunkManager {
     let targetChunkIndex = 0;
     let positionInChunk = positionMs;
 
-    for (const [index, startTime] of this.chunkStartTimes.entries()) {
-      const chunk = this.chunks.get(index);
-      if (!chunk) continue;
-
-      const chunkDuration = (chunk.actualDuration || chunk.estimatedDuration) * 1000;
-      const chunkEndTime = startTime + chunkDuration;
-
-      if (positionMs >= startTime && positionMs < chunkEndTime) {
-        targetChunkIndex = index;
+    // Binary search on sorted chunkStartTimes for O(log n) seek
+    const totalChunks = this.expectedTotalChunks || this.chunks.size;
+    if (totalChunks > 0) {
+      let lo = 0;
+      let hi = totalChunks - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        const startTime = this.chunkStartTimes.get(mid) ?? 0;
+        if (positionMs < startTime) {
+          hi = mid - 1;
+        } else {
+          // positionMs >= startTime — this could be the target, check if within chunk
+          const chunk = this.chunks.get(mid);
+          const chunkDuration = chunk
+            ? (chunk.actualDuration || chunk.estimatedDuration) * 1000
+            : (this.estimatedChunkDurations.get(mid) ?? 0) * 1000;
+          const chunkEndTime = startTime + chunkDuration;
+          if (positionMs < chunkEndTime) {
+            targetChunkIndex = mid;
+            positionInChunk = positionMs - startTime;
+            break;
+          }
+          lo = mid + 1;
+        }
+      }
+      // If loop exhausted without break, clamp to last chunk
+      if (lo > hi) {
+        targetChunkIndex = Math.max(0, totalChunks - 1);
+        const startTime = this.chunkStartTimes.get(targetChunkIndex) ?? 0;
         positionInChunk = positionMs - startTime;
-        break;
       }
     }
 
@@ -755,54 +802,68 @@ export class AudioChunkManager {
   }
 
   /**
-   * Start position tracking
+   * Start event-driven position tracking via setOnPlaybackStatusUpdate.
+   * Replaces the previous 100ms setInterval polling approach.
+   * Throttles emissions to ~4Hz (250ms) to reduce native bridge overhead.
    */
   private startPositionTracking() {
     this.stopPositionTracking();
 
-    let checkCounter = 0;
-    this.positionUpdateInterval = setInterval(async () => {
-      if (this.currentSound && this.isPlaying) {
-        try {
-          const status = await this.currentSound.getStatusAsync();
-          if (status.isLoaded) {
-            this.emitStateChange();
-          }
+    if (!this.currentSound) return;
 
-          // Every 10 position updates (~1 second), check for rogue playing sounds
-          checkCounter++;
-          if (checkCounter >= 10) {
-            checkCounter = 0;
-            for (const [idx, loaded] of this.loadedSounds.entries()) {
-              if (idx !== this.currentChunkIndex) {
-                try {
-                  const loadedStatus = await loaded.sound.getStatusAsync();
-                  if (loadedStatus.isLoaded && loadedStatus.isPlaying) {
-                    console.warn(`[PositionTracking] Found rogue playing sound for chunk ${idx}, stopping it`);
-                    await loaded.sound.stopAsync();
-                    await loaded.sound.setPositionAsync(0);
-                  }
-                } catch (error) {
-                  // Ignore errors checking other sounds
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error tracking position:', error);
+    // The didJustFinish handler is already set in playChunkInternal.
+    // Here we only need position/progress updates — attach a general status listener.
+    // NOTE: setOnPlaybackStatusUpdate replaces any existing listener, so we
+    // re-attach the didJustFinish logic within this unified handler.
+    const chunkIndexAtStart = this.currentChunkIndex;
+    const soundAtStart = this.currentSound;
+
+    this.currentSound.setOnPlaybackStatusUpdate((status: PlaybackStatus) => {
+      if (!status.isLoaded) return;
+
+      // ── Rogue sound detection (replaces the separate 1s interval) ──
+      // If this sound is no longer the current sound, stop it
+      if (this.currentSound !== soundAtStart) {
+        if (status.isPlaying) {
+          soundAtStart.stopAsync().catch(() => {});
         }
+        soundAtStart.setOnPlaybackStatusUpdate(undefined);
+        return;
       }
-    }, 100);
+
+      // ── didJustFinish handling ──
+      if (status.didJustFinish) {
+        if (this.currentChunkIndex === chunkIndexAtStart) {
+          this.handleChunkComplete(chunkIndexAtStart).catch(error => {
+            console.error('Error completing chunk playback:', error);
+          });
+        }
+        return;
+      }
+
+      // ── Throttled position emission (~4Hz) ──
+      const now = Date.now();
+      if (now - this.lastPositionEmitMs >= AudioChunkManager.POSITION_THROTTLE_MS) {
+        this.lastPositionEmitMs = now;
+        this.emitStateChange();
+      }
+    });
   }
 
   /**
-   * Stop position tracking
+   * Stop position tracking by removing the status listener.
    */
   private stopPositionTracking() {
+    // Clear any legacy interval if still running
     if (this.positionUpdateInterval) {
       clearInterval(this.positionUpdateInterval);
       this.positionUpdateInterval = undefined;
     }
+
+    // The event-driven listener will be replaced on next startPositionTracking
+    // or removed when the sound is unloaded. No explicit removal needed here
+    // because playChunkInternal always calls setOnPlaybackStatusUpdate(undefined)
+    // before setting a new listener.
   }
 
   /**
@@ -885,6 +946,17 @@ export class AudioChunkManager {
 
       await this.emitStateChange();
     });
+  }
+
+  /**
+   * Free base64 audio data for a chunk that has been persisted to disk.
+   * This reclaims ~640KB per chunk while retaining the fileUri for playback.
+   */
+  public clearBase64(chunkIndex: number): void {
+    const chunk = this.chunks.get(chunkIndex);
+    if (chunk && chunk.audio && chunk.fileUri) {
+      chunk.audio = '';
+    }
   }
 
   /**

@@ -43,6 +43,16 @@ export const storage = {
       console.error('Error setting object in storage:', error);
     }
   },
+
+  async getAllKeys(): Promise<string[]> {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      return keys as string[];
+    } catch (error) {
+      console.error('Error getting all keys from storage:', error);
+      return [];
+    }
+  },
 };
 
 export const formatDistance = (meters: number): string => {
